@@ -1,20 +1,24 @@
-# FactoryMind-CDT: Cognitive Digital Twin for Industrial Decision Intelligence
+# FactoryMind-CDT: Cognitive Digital Twin Architectural Specification
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Architecture](https://img.shields.io/badge/Architecture-Cognitive%20Digital%20Twin-blueviolet)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
-[![Domain](https://img.shields.io/badge/Domain-Industrial%20AI%20%26%20Predictive%20Maintenance-00599C)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
-[![Status](https://img.shields.io/badge/Status-Active%20Development-success)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Architecture](https://img.shields.io/badge/Architecture-Cognitive%20Digital%20Twin-blueviolet?style=flat-square)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
+[![Domain](https://img.shields.io/badge/Domain-Industrial%20AI%20%26%20Predictive%20Intelligence-00599C?style=flat-square)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
+[![Status](https://img.shields.io/badge/Status-Architectural%20R%26D%20%7C%20Conceptual%20Design-F59E0B?style=flat-square)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
+[![Artifact](https://img.shields.io/badge/Artifact-Specification%20PDF%20Available-38BDF8?style=flat-square)](FactoryMind_CDT_Project_Documentation.pdf)
 
-An enterprise-grade **Cognitive Digital Twin (CDT)** framework designed for continuous industrial asset monitoring, predictive health assessment, and autonomous root-cause reasoning in high-throughput manufacturing operations.
+An industrial artificial intelligence architecture and engineering design initiative. **FactoryMind-CDT** formalizes a closed-loop **Cognitive Digital Twin (CDT)** framework designed to bridge high-frequency IIoT sensor telemetry with predictive asset health assessment and prescriptive operational reasoning in high-throughput manufacturing plants.
 
 ---
 
-## 🏭 Executive Overview
+> **Engineering Status Notice**:  
+> FactoryMind-CDT is currently maintained as an **architectural specification, mathematical formulation, and conceptual system design**. All functional components, mathematical formulations, and system topologies described below represent the target engineering architecture documented in [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation.pdf). This repository does not currently contain deployed microservices, production edge runtimes, or live database instances.
 
-Modern industrial equipment operates under complex, non-linear thermal, mechanical, and dynamic operating loads. Traditional condition monitoring relies on static threshold alerts that either fail to catch subtle degradation patterns or trigger alert fatigue.
+---
 
-**FactoryMind-CDT** bridges high-frequency IIoT telemetry and cognitive intelligence through a 5-stage closed-loop operational paradigm:
+## 🏭 Operational Paradigm
+
+Modern industrial machinery operates under complex, non-linear thermal, mechanical, and dynamic loads. Traditional condition monitoring relies on static thresholding that causes severe alert fatigue and misses subtle multi-sensor degradation signatures.
+
+FactoryMind-CDT conceptualizes a 5-stage closed-loop operational paradigm:
 
 ```
   ┌───────────┐      ┌──────────────┐      ┌────────────┐      ┌───────────┐      ┌───────────┐
@@ -24,40 +28,42 @@ Modern industrial equipment operates under complex, non-linear thermal, mechanic
     Telemetry           & Signatures         & RUL Curve         Intervention       Feedback
 ```
 
-1. **SENSE**: Edge aggregation of multi-modal sensory streams (vibration spectrums, thermal profiles, acoustic emissions, and pressure transients).
-2. **UNDERSTAND**: Real-time multi-dimensional state estimation, spectral decomposition, and unsupervised early anomaly detection.
-3. **SIMULATE**: Dynamic physics-informed degradation modeling to project Remaining Useful Life (RUL) trajectories under variable operating scenarios.
-4. **DECIDE**: Deterministic priority playbooks, prescriptive maintenance dispatching, and root-cause analysis (RCA) with explainable attribution.
-5. **LEARN**: Continuous model re-calibration incorporating post-maintenance service outcomes and component teardown telemetry.
+1. **SENSE (Edge Ingestion & Signal Conditioning)**: Specification for multi-modal telemetry acquisition (vibration accelerometry, thermal transients, acoustic emissions, pressure profiles) with edge-side digital signal processing (DSP) filtering.
+2. **UNDERSTAND (Feature Extraction & Anomaly Isolation)**: Proposed spectral FFT decomposition and unsupervised anomaly scoring (Isolation Forests / Autoencoder reconstruction error) to detect micro-faults prior to critical threshold breaches.
+3. **SIMULATE (Degradation & RUL Trajectories)**: Proposed physics-informed wear modeling coupled with Weibull hazard rate estimation to simulate Remaining Useful Life (RUL) under variable production loads.
+4. **DECIDE (Prescriptive Action & Attribution)**: Proposed dispatch matrix calibrated against ISO 10816 vibration severity standards, routing automated maintenance recommendations with root-cause attribution.
+5. **LEARN (Closed-Loop Model Adaptation)**: Proposed feedback protocol incorporating post-maintenance service outcomes and component teardown telemetry to dynamically re-calibrate baseline health thresholds.
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ Target System Architecture
+
+The target architecture defines a decoupled four-layer industrial intelligence topology:
 
 ```mermaid
 flowchart TD
-    subgraph Edge ["Layer 1: Industrial Edge & Ingestion"]
-        S1[Vibration Sensors / Accelerometers] --> Gateway[Edge IIoT Gateway / OPC-UA / MQTT]
-        S2[Thermal & Thermographic Arrays] --> Gateway
+    subgraph Layer1 ["Layer 1: Industrial Edge & Ingestion (Proposed)"]
+        S1[Vibration Accelerometers] --> Gateway[Edge IIoT Gateway / OPC-UA / MQTT]
+        S2[Thermal Sensor Arrays] --> Gateway
         S3[Acoustic & Pressure Transients] --> Gateway
-        S4[PLC / SCADA Operational Telemetry] --> Gateway
+        S4[PLC / SCADA Telemetry] --> Gateway
     end
 
-    subgraph Streaming ["Layer 2: Real-Time Stream Engine"]
-        Gateway --> Broker[Kafka / Redpanda Event Ingestion]
+    subgraph Layer2 ["Layer 2: Real-Time Stream Engine (Proposed)"]
+        Gateway --> Broker[Kafka / Redpanda Ingestion Broker]
         Broker --> DSP[Stream Processing & FFT Feature Extraction]
         DSP --> Storage[(TimescaleDB / InfluxDB Metric Store)]
     end
 
-    subgraph Intelligence ["Layer 3: Cognitive Twin Core"]
+    subgraph Layer3 ["Layer 3: Cognitive Twin Core (Proposed)"]
         DSP --> Anomaly[Unsupervised Anomaly Detection]
         Storage --> RUL[Degradation & RUL Estimator]
         Anomaly --> Health[Asset Health Index Engine]
         RUL --> Health
-        Health --> RCA[Root Cause Attribution Engine]
+        Health --> RCA[Root-Cause Attribution Engine]
     end
 
-    subgraph Operations ["Layer 4: Decision & Dispatch"]
+    subgraph Layer4 ["Layer 4: Decision & Dispatch (Proposed)"]
         RCA --> Alerting[Severity-Calibrated Alert Matrix]
         Alerting --> Dispatch[CMMS / Work-Order Generation]
         Alerting --> Dashboard[Operator Digital Twin UI]
@@ -66,39 +72,21 @@ flowchart TD
 
 ---
 
-## ⚙️ Core Technical Capabilities
+## 📋 Architectural Specifications & Implementation Status
 
-### 1. Multi-Modal Sensor Fusion & Signal Processing
-- High-frequency vibration signal analysis: Fast Fourier Transform (FFT), spectral kurtosis, envelope analysis, and crest factor extraction.
-- Thermal profile drift detection and correlation with ambient environmental conditions.
-- Noise-robust edge filtering with moving median and exponential smoothing filters.
+To ensure full transparency between conceptual system design and code implementation, component readiness is explicitly categorized below:
 
-### 2. State Estimation & Anomaly Detection
-- Multivariate anomaly scoring across correlated operating variables (speed, load, temperature, vibration RMS).
-- Unsupervised Isolation Forest and Autoencoder reconstruction error pipelines to isolate degradation before critical thermal thresholds.
-- Dynamic operating envelope baseline adjustment to prevent false positives during scheduled ramping and load variations.
-
-### 3. Degradation Modeling & Remaining Useful Life (RUL)
-- Weibull hazard modeling combined with gradient-boosted regression on degradation curves.
-- Multi-scenario asset wear simulation based on projected production schedules and ambient stress factors.
-- Confidence intervals for estimated time-to-failure ($T_{fail}$) aiding precision parts procurement.
-
-### 4. Prescriptive Action & Root-Cause Attribution
-- Feature attribution mapping anomalous sensor contributions to physical subsystems (e.g., inner race bearing wear, impeller cavitation, shaft misalignment).
-- Deterministic P1–P4 action dispatch matrices aligned with ISO 10816 vibration severity standards.
-
----
-
-## 🛠️ Technology Stack
-
-| Domain | Technology / Library |
-| :--- | :--- |
-| **Core Logic & ML** | Python 3.10+, PyTorch, scikit-learn, SciPy, NumPy |
-| **Feature Extraction** | FFT, Wavelet transforms, Pandas, Librosa |
-| **Industrial Ingestion** | OPC-UA (asyncua), MQTT (paho-mqtt), Kafka |
-| **Time-Series Storage** | TimescaleDB, InfluxDB, PostgreSQL |
-| **Serving & Orchestration** | FastAPI, Docker, Pydantic v2 |
-| **Visualization & Monitoring** | Streamlit, Plotly, Grafana |
+| System Component | Architectural Specification | Implementation Status | Artifact / Verification |
+| :--- | :--- | :---: | :--- |
+| **System Blueprint** | Full 5-stage closed-loop cognitive twin architecture | **Documented** | [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation.pdf) |
+| **Mathematical Models** | Spectral FFT, Weibull hazard curves, anomaly formulations | **Documented** | Detailed formulas in project PDF |
+| **Signal DSP (FFT)** | High-frequency accelerometry filtering & envelope analysis | *Architecture Design* | Planned for Phase 1 Python implementation |
+| **Anomaly Scoring** | Isolation Forests & Autoencoder reconstruction error | *Architecture Design* | Planned for Phase 2 ML prototyping |
+| **RUL Estimation** | Physics-informed degradation curves & time-to-failure ($T_{fail}$) | *Architecture Design* | Planned for Phase 2 ML prototyping |
+| **IIoT Connectors** | OPC-UA (asyncua) & MQTT telemetry ingestion protocols | *Proposed Architecture* | Planned for Phase 3 edge integration |
+| **Time-Series Storage** | TimescaleDB / InfluxDB high-throughput metric schemas | *Proposed Architecture* | Planned for Phase 3 database tier |
+| **Prescriptive Dispatch**| ISO 10816 calibrated maintenance routing & CMMS hooks | *Proposed Architecture* | Planned for Phase 4 operational tier |
+| **Closed-Loop Learning** | Dynamic baseline updating via maintenance outcome telemetry | *Proposed Architecture* | Planned for Phase 4 operational tier |
 
 ---
 
@@ -106,46 +94,39 @@ flowchart TD
 
 ```
 FactoryMind-CDT/
-├── FactoryMind_CDT_Project_Documentation.pdf   # Architectural specification & slides
-├── config/                                     # Sensor threshold and pipeline configs
-│   └── sensor_profiles.yaml
-├── src/                                        # Core twin framework
-│   ├── ingestion/                              # OPC-UA & MQTT stream connectors
-│   ├── processing/                             # Signal DSP, FFT, and spectral features
-│   ├── models/                                 # Anomaly detection & RUL estimators
-│   └── decision/                               # Prescriptive RCA and action playbooks
-├── notebooks/                                  # Exploratory signal analytics & validation
-├── tests/                                      # Unit and integration test suites
-├── Dockerfile                                  # Container runtime specification
-└── README.md                                   # Project documentation
+├── FactoryMind_CDT_Project_Documentation.pdf   # Master architectural specification & slides (228 KB)
+└── README.md                                   # Framework overview & component readiness breakdown
 ```
+
+> The repository currently serves as the official distribution point for the FactoryMind-CDT architectural specification document. As code implementations transition from design to active prototyping, source directories will be established and validated under version control.
 
 ---
 
-## 🚀 Getting Started
+## 📖 Reviewing the Architectural Specification
 
-### Prerequisites
-- Python 3.10 or higher
-- Git
+The complete architectural treatise, system block diagrams, mathematical modeling equations, and operational workflows are compiled in the project specification document:
 
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT.git
-cd FactoryMind-CDT
-
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
+1. **Direct Download**: Download [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation.pdf) from the repository root.
+2. **Key Sections**:
+   - Section 1: Executive Overview & Industrial Problem Formulation
+   - Section 2: Sensor Telemetry & High-Frequency DSP Specification
+   - Section 3: Machine Learning Framework (Anomaly Isolation & RUL Prediction)
+   - Section 4: Prescriptive Operational Playbooks & ISO 10816 Threshold Standards
+   - Section 5: Future Engineering Roadmap & Implementation Milestones
 
 ---
 
-## 📄 License & Attribution
+## 🗺️ Engineering Roadmap
 
-Developed by **[Mohamed Osama](https://github.com/Mohamed-Osama-ai7)**.  
-Released under the [MIT License](LICENSE).
+- [x] **Milestone 0**: Formalize conceptual architecture, operational dataflows, and mathematical formulations ([Documentation PDF](FactoryMind_CDT_Project_Documentation.pdf)).
+- [ ] **Milestone 1**: Implement synthetic sensor telemetry generator and prototype NumPy/SciPy FFT feature extraction pipeline.
+- [ ] **Milestone 2**: Benchmark baseline anomaly detection algorithms (Isolation Forest vs. Autoencoder) on open industrial bearing datasets (e.g., NASA C-MAPSS / IMS).
+- [ ] **Milestone 3**: Design containerized ingestion microservices using OPC-UA / MQTT stubs and TimescaleDB storage schemas.
+- [ ] **Milestone 4**: Build Streamlit / Plotly asset health visualization and prescriptive maintenance dispatch interface.
+
+---
+
+## 👤 Author & Research Attribution
+
+Architectural specification and design by **[Mohamed Osama](https://github.com/Mohamed-Osama-ai7)**.  
+*Applied AI & Machine Learning Engineering · Cairo, Egypt*
