@@ -3,14 +3,14 @@
 [![Architecture](https://img.shields.io/badge/Architecture-Cognitive%20Digital%20Twin-blueviolet?style=flat-square)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
 [![Domain](https://img.shields.io/badge/Domain-Industrial%20AI%20%26%20Predictive%20Intelligence-00599C?style=flat-square)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
 [![Status](https://img.shields.io/badge/Status-Architectural%20R%26D%20%7C%20Conceptual%20Design-F59E0B?style=flat-square)](https://github.com/Mohamed-Osama-ai7/FactoryMind-CDT)
-[![Artifact](https://img.shields.io/badge/Artifact-Specification%20PDF%20Available-38BDF8?style=flat-square)](FactoryMind_CDT_Project_Documentation.pdf)
+[![Artifact](https://img.shields.io/badge/Artifact-Specification%20PDF%20Available-38BDF8?style=flat-square)](FactoryMind_CDT_Project_Documentation_with_UI_UX.pdf)
 
 An industrial artificial intelligence architecture and engineering design initiative. **FactoryMind-CDT** formalizes a closed-loop **Cognitive Digital Twin (CDT)** framework designed to bridge high-frequency IIoT sensor telemetry with predictive asset health assessment and prescriptive operational reasoning in high-throughput manufacturing plants.
 
 ---
 
 > **Engineering Status Notice**:  
-> FactoryMind-CDT is currently maintained as an **architectural specification, mathematical formulation, and conceptual system design**. All functional components, mathematical formulations, and system topologies described below represent the target engineering architecture documented in [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation.pdf). This repository does not currently contain deployed microservices, production edge runtimes, or live database instances.
+> FactoryMind-CDT is currently maintained as an **architectural specification, mathematical formulation, and conceptual system design**. All functional components, mathematical formulations, and system topologies described below represent the target engineering architecture documented in [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation_with_UI_UX.pdf). This repository does not currently contain deployed microservices, production edge runtimes, or live database instances.
 
 ---
 
@@ -78,7 +78,7 @@ To ensure full transparency between conceptual system design and code implementa
 
 | System Component | Architectural Specification | Implementation Status | Artifact / Verification |
 | :--- | :--- | :---: | :--- |
-| **System Blueprint** | Full 5-stage closed-loop cognitive twin architecture | **Documented** | [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation.pdf) |
+| **System Blueprint** | Full 5-stage closed-loop cognitive twin architecture | **Documented** | [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation_with_UI_UX.pdf) |
 | **Mathematical Models** | Spectral FFT, Weibull hazard curves, anomaly formulations | **Documented** | Detailed formulas in project PDF |
 | **Signal DSP (FFT)** | High-frequency accelerometry filtering & envelope analysis | *Architecture Design* | Planned for Phase 1 Python implementation |
 | **Anomaly Scoring** | Isolation Forests & Autoencoder reconstruction error | *Architecture Design* | Planned for Phase 2 ML prototyping |
@@ -106,7 +106,7 @@ FactoryMind-CDT/
 
 The complete architectural treatise, system block diagrams, mathematical modeling equations, and operational workflows are compiled in the project specification document:
 
-1. **Direct Download**: Download [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation.pdf) from the repository root.
+1. **Direct Download**: Download [`FactoryMind_CDT_Project_Documentation.pdf`](FactoryMind_CDT_Project_Documentation_with_UI_UX.pdf) from the repository root.
 2. **Key Sections**:
    - Section 1: Executive Overview & Industrial Problem Formulation
    - Section 2: Sensor Telemetry & High-Frequency DSP Specification
@@ -118,7 +118,7 @@ The complete architectural treatise, system block diagrams, mathematical modelin
 
 ## 🗺️ Engineering Roadmap
 
-- [x] **Milestone 0**: Formalize conceptual architecture, operational dataflows, and mathematical formulations ([Documentation PDF](FactoryMind_CDT_Project_Documentation.pdf)).
+- [x] **Milestone 0**: Formalize conceptual architecture, operational dataflows, and mathematical formulations ([Documentation PDF](FactoryMind_CDT_Project_Documentation_with_UI_UX.pdf)).
 - [ ] **Milestone 1**: Implement synthetic sensor telemetry generator and prototype NumPy/SciPy FFT feature extraction pipeline.
 - [ ] **Milestone 2**: Benchmark baseline anomaly detection algorithms (Isolation Forest vs. Autoencoder) on open industrial bearing datasets (e.g., NASA C-MAPSS / IMS).
 - [ ] **Milestone 3**: Design containerized ingestion microservices using OPC-UA / MQTT stubs and TimescaleDB storage schemas.
