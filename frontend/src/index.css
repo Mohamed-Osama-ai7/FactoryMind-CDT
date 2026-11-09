@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* Design tokens: dark industrial control-room palette. Status colours are always paired with
+   text labels (never colour alone), per the System Analysis UX rules. */
+@theme {
+  --color-surface: #0b1220;
+  --color-panel: #111a2c;
+  --color-border: #1f2a40;
+  --color-ink: #e6ebf5;
+  --color-muted: #8a96ad;
+  --color-accent: #3b82f6;
+  --color-ok: #22c55e;
+  --color-warn: #f59e0b;
+  --color-critical: #ef4444;
+  --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
