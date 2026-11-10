@@ -265,11 +265,16 @@ def test_selection_key_tie_breaking_hierarchy() -> None:
     slower = _candidate([True, True], 0.0, [90.0, 90.0], "slower")
     faster = _candidate([True, True], 0.0, [-20.0, 40.0], "faster")  # median(|-20|, |40|) = 30
     assert experiment.select_policy([slower, faster]).threshold_label == "faster"
+    # Signed median -120 < +60, yet |delay| median 120 > 60 (fails if abs() is omitted).
+    too_early = _candidate([True, True], 0.0, [-120.0, -120.0], "too_early")
+    nearer = _candidate([True, True], 0.0, [60.0, 60.0], "nearer")
+    assert experiment.select_policy([too_early, nearer]).threshold_label == "nearer"
 
     # 4. Exact 3-way tie preserves candidate order.
     first = _candidate([True, True], 0.0, [30.0, 30.0], "first")
     second = _candidate([True, True], 0.0, [30.0, 30.0], "second")
     assert experiment.select_policy([first, second]).threshold_label == "first"
+    assert experiment.select_policy([second, first]).threshold_label == "second"
 
 
 def test_exceedance_and_reference_checks_are_present(output: experiment.RunOutput) -> None:
