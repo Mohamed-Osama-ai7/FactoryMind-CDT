@@ -7,8 +7,8 @@ _Last updated: 2026-11-10 (post-M1 review)._
 
 ## Current milestone
 
-**M1 complete in code, awaiting PR review.** Next: M2, beginning with WP0 hardening. M2 must not
-start until the M1 PR is opened, reviewed and merged. Review and plan:
+**M1 complete in code; PR 2 awaiting review and merge.** Next: M2, beginning with WP0 hardening. M2 must not
+start until PR 2 is reviewed and merged. Owner approved the WP0-first plan (decision D1) on 2026-11-10. Review and plan:
 [architecture-review-post-m1.md](architecture-review-post-m1.md).
 
 ## Verified completed work
@@ -16,7 +16,7 @@ start until the M1 PR is opened, reviewed and merged. Review and plan:
 | Item | State | Evidence |
 |---|---|---|
 | M0 foundation (backend, React, CI) | Merged to `main` (PR 1, `666a956`) | CI green |
-| M1 detection pipeline, API, React monitor, docs | Pushed on `feat/m1-ml-pipeline` (`2ccd434`, `6ef0810`, `2e95e90`); **no PR exists yet** | CI green on all three commits; backend 60 tests, frontend 12 tests |
+| M1 detection pipeline, API, React monitor, docs | Pushed on `feat/m1-ml-pipeline` (`2ccd434`, `6ef0810`, `2e95e90`); **PR 2 open, not merged** | CI green on all three commits; backend 60 tests, frontend 12 tests |
 | Post-M1 review, ADR log, this record | On `docs/post-m1-review` (based on the M1 branch) | This commit |
 
 ## Branches
@@ -46,15 +46,16 @@ artifacts require trusted storage; nothing deployed or validated in a plant.
 
 ## Remaining dependencies
 
-- M1 PR opened, reviewed and merged (the GitHub CLI is not signed in on the development machine;
-  hand this to the GitHub fallback agent or open it in the browser).
-- Owner decisions D1–D6 in the review (persistence, tenancy, corpus, maintenance dates, LLM).
+- PR 2 (M1) reviewed and merged. The GitHub CLI is not signed in on the development machine; use
+  the GitHub fallback agent for GitHub operations.
+- Owner decisions D2–D6 in the review (persistence, tenancy, maintenance dates, corpus, LLM); D1 is
+  approved. WP0 does not need D2–D6.
 - Docker/WSL is not set up; C: has about 2 GB free (data, caches and the repository are on D:).
 - Retrieval corpus with usable licences (needed for M3).
 
 ## Immediate next task
 
-After M1 is merged and decisions D1–D2 are answered: M2-WP0 per review §10 (duty-cycle baseline,
+After PR 2 is merged: M2-WP0 per review §10 (duty-cycle baseline,
 leave-one-event-out protocol, exceedance calibration, alarm tracker, deduplicated evidence,
 operating-state features).
 
