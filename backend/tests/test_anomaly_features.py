@@ -102,3 +102,18 @@ def test_stopped_threshold_is_configurable() -> None:
     frame = simulate_apu("2020-01-01", 60, off_from="2020-01-01", off_to="2020-01-01 00:05")
     assert not window_features(frame, WindowSpec(stopped_off_fraction=0.9))["stopped"].iloc[0]
     assert window_features(frame, WindowSpec(stopped_off_fraction=0.4))["stopped"].iloc[0]
+
+
+def test_block_features_enforces_window_span_tolerance() -> None:
+    # 10 min 30 s span is within 60 s tolerance
+    jittered = simulate_apu("2020-01-01 00:00", 60)
+    idx = pd.DatetimeIndex(jittered.index).to_numpy().copy()
+    idx[-1] = pd.Timestamp("2020-01-01 00:10:30")
+    jittered.index = pd.DatetimeIndex(idx, name="timestamp")
+    ok = block_features(jittered, SPEC)
+    assert bool(ok["valid"])
+
+    # 20-minute span exceeds 10 min + 60 s tolerance
+    oversized = simulate_apu("2020-01-01 00:00", 120)
+    with pytest.raises(ValueError, match="exceeds single-window limit"):
+        block_features(oversized, SPEC)

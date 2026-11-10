@@ -9,6 +9,8 @@
 export * from './alarmEpisode';
 export * from './anomalyReplayParams';
 export * from './evidence';
+export * from './exceedanceCheck';
+export * from './exceedanceCheckByMonth';
 export * from './faultSummary';
 export * from './faultSummaryPerType';
 export * from './healthResponse';
@@ -17,6 +19,7 @@ export * from './loeoFold';
 export * from './loeoSummary';
 export * from './modelInfo';
 export * from './operatorReport';
+export * from './referenceHoldoutCheck';
 export * from './replayResponse';
 export * from './sample';
 export * from './sampleCaudalImpulses';

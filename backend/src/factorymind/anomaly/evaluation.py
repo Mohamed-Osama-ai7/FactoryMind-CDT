@@ -36,6 +36,8 @@ class EventResult:
 class EvaluationResult:
     valid_windows: int
     valid_days: float
+    operating_windows: int
+    operating_days: float
     positive_windows: int
     average_precision: float | None
     precision: float | None
@@ -48,6 +50,7 @@ class EvaluationResult:
     alarm_episodes: int
     false_alarm_episodes: int
     false_alarms_per_day: float
+    operating_false_alarms_per_day: float
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -120,9 +123,15 @@ def evaluate(
 
     false_eps = sum(1 for ep in eps if is_false(ep))
     valid_days = len(starts) * window.total_seconds() / 86400.0
+    operating_windows = (
+        int((~np.asarray(suppress, dtype=bool)).sum()) if suppress is not None else len(starts)
+    )
+    operating_days = operating_windows * window.total_seconds() / 86400.0
     return EvaluationResult(
         valid_windows=len(starts),
         valid_days=round(valid_days, 2),
+        operating_windows=operating_windows,
+        operating_days=round(operating_days, 2),
         positive_windows=int(labels.sum()),
         average_precision=ap,
         precision=precision,
@@ -135,6 +144,9 @@ def evaluate(
         alarm_episodes=len(eps),
         false_alarm_episodes=false_eps,
         false_alarms_per_day=round(false_eps / valid_days, 3) if valid_days else 0.0,
+        operating_false_alarms_per_day=round(false_eps / operating_days, 3)
+        if operating_days
+        else 0.0,
     )
 
 

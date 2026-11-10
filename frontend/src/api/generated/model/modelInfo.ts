@@ -5,9 +5,11 @@
  * Evidence-grounded, uncertainty-aware decision support. Advisory only.
  * OpenAPI spec version: 0.1.0
  */
+import type { ExceedanceCheck } from './exceedanceCheck';
 import type { FaultSummary } from './faultSummary';
 import type { LoeoSummary } from './loeoSummary';
 import type { OperatorReport } from './operatorReport';
+import type { ReferenceHoldoutCheck } from './referenceHoldoutCheck';
 
 export interface ModelInfo {
   data_kind: string;
@@ -16,6 +18,8 @@ export interface ModelInfo {
   dataset_source: string;
   detector: string;
   exceedance_at_threshold: number;
+  /** Observed exceedance rate on far-from-report operating evaluation windows. */
+  exceedance_check?: ExceedanceCheck | null;
   fault_injection: FaultSummary | null;
   intended_use: string;
   limitations: string[];
@@ -24,6 +28,8 @@ export interface ModelInfo {
   /** Operator failure reports used as weak evaluation labels. */
   operator_reports: OperatorReport[];
   persistence: number;
+  /** Split-half calibration reference stability check. Exceedance is a share of reference-normal windows, never a failure probability. */
+  reference_holdout_check?: ReferenceHoldoutCheck | null;
   replay_available_from: string | null;
   replay_available_to: string | null;
   selected_as_default: boolean;

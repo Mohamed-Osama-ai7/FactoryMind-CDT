@@ -15,9 +15,11 @@ Protocol (chronological; replaces the single-validation-event protocol of M1):
    alarms, or detects injected sensor faults (simulated) above a minimum rate at a low false-alarm
    rate without losing leak detection.
 
-Disclosed limits: the normal time used to estimate false alarms is shared by selection and
-evaluation, which favours every detector equally; the final deployed policy is selected on all four
-events and is therefore in-sample.
+Disclosed limits: LOEO policy selection is non-chronological (for earlier events such as F1,
+selection uses later reports F2-F4); the normal time used to estimate false alarms is shared by
+selection and evaluation and includes stopped windows in ``valid_days`` (``operating_days`` is
+reported alongside); the final deployed policy is selected on all four events (in-sample); and
+reference-normal windows drift within the two-week calibration window.
 """
 
 from __future__ import annotations
@@ -215,6 +217,7 @@ def _loeo_summary(candidates: list[Candidate], report_ids: list[str]) -> dict[st
                 "detected": held.detected,
                 "delay_minutes": held.delay_minutes,
                 "false_alarms_per_day": chosen.result.false_alarms_per_day,
+                "operating_false_alarms_per_day": chosen.result.operating_false_alarms_per_day,
             }
         )
     delays = [f["delay_minutes"] for f in folds if f["detected"] and f["delay_minutes"] is not None]
@@ -224,6 +227,9 @@ def _loeo_summary(candidates: list[Candidate], report_ids: list[str]) -> dict[st
         "events_total": len(folds),
         "mean_false_alarms_per_day": round(
             float(np.mean([f["false_alarms_per_day"] for f in folds])), 3
+        ),
+        "mean_operating_false_alarms_per_day": round(
+            float(np.mean([f["operating_false_alarms_per_day"] for f in folds])), 3
         ),
         "median_abs_delay_minutes": _median_abs_delay(delays),
     }
@@ -252,17 +258,32 @@ def _fault_detection(
 
     per_type: dict[str, list[bool]] = {f: [] for f in FAULT_TYPES}
     control: list[bool] = []
+    faulted_hits: list[bool] = []
     for case in cases:
-        per_type[case.fault].append(raised(case.faulted))
-        control.append(raised(case.control))
-    total = sum(sum(v) for v in per_type.values())
-    n = sum(len(v) for v in per_type.values())
+        hit = raised(case.faulted)
+        ctrl = raised(case.control)
+        per_type[case.fault].append(hit)
+        faulted_hits.append(hit)
+        control.append(ctrl)
+    total = sum(faulted_hits)
+    control_total = sum(control)
+    n = len(cases)
+    clean_cases = n - control_total
+    clean_detected = sum((not c) and f for c, f in zip(control, faulted_hits, strict=True))
     return {
         "detected": total,
         "cases": n,
-        "rate": round(total / n, 3) if n else None,
+        "gross_rate": round(total / n, 3) if n else None,
+        "control_detected": control_total,
+        "control_alarm_rate": round(control_total / n, 3) if n else None,
+        "control_alarms": f"{control_total}/{n}",
+        "clean_control_cases": clean_cases,
+        "clean_control_detected": clean_detected,
+        "clean_control_sensitivity": round(clean_detected / clean_cases, 3)
+        if clean_cases
+        else None,
+        "incremental_lift": round((total - control_total) / n, 3) if n else None,
         "per_type": {f: f"{sum(v)}/{len(v)}" for f, v in per_type.items()},
-        "control_alarms": f"{sum(control)}/{len(control)}",
         "simulated": True,
         "min_window_spec": spec.length,
     }
@@ -294,8 +315,12 @@ def choose_default(
             s["events_detected"] >= bar["events_detected"]
             and s["mean_false_alarms_per_day"] <= bar["mean_false_alarms_per_day"]
         )
+        clean_sensitivity = fault.get("clean_control_sensitivity")
+        incremental_lift = fault.get("incremental_lift")
         sees_faults = (
-            (fault.get("rate") or 0.0) >= cfg.ml_fault_detection_min
+            clean_sensitivity is not None
+            and clean_sensitivity >= cfg.ml_fault_detection_min
+            and (incremental_lift or 0.0) > 0.0
             and s["mean_false_alarms_per_day"] <= cfg.ml_fault_fa_max
             and s["events_detected"] >= bar["events_detected"]
         )
@@ -303,7 +328,11 @@ def choose_default(
             eligible.append((name, f"matches {best_rule} on leaks at no worse false alarms"))
         elif sees_faults:
             eligible.append(
-                (name, f"detects injected faults ({fault['rate']:.0%}) and matches leak detection")
+                (
+                    name,
+                    f"detects injected faults ({clean_sensitivity:.0%} clean-control sensitivity) "
+                    "and matches leak detection",
+                )
             )
     if not eligible:
         return best_rule, f"no learned detector qualified; {best_rule} is the best rule baseline"
@@ -577,6 +606,8 @@ def _model_card(
             "protocol": results["protocol"],
             "loeo": det["loeo"],
             "fault_injection": det["fault_injection"],
+            "reference_holdout_check": det["reference_holdout_check"],
+            "exceedance_check": det["exceedance_check"],
             "selected_as_default": results["selected_detector"] == name,
             "selection_rationale": results["selection_rationale"],
         },
@@ -586,8 +617,13 @@ def _model_card(
         "limitations": [
             "Trained and evaluated on one compressor (MetroPT-3); transfer to other assets is "
             "untested.",
-            "Four coarse air-leak reports are the only labels; unreported anomalies count as false "
-            "alarms and the deployed policy is selected on all four reports (in-sample).",
+            "Four coarse air-leak reports are the only labels; LOEO policy selection is "
+            "non-chronological (later reports inform earlier fold choices), shares evaluation "
+            "normal time across folds, and deploys the in-sample policy selected on all four "
+            "reports.",
+            "The calibration reference distribution is non-stationary (see reference holdout "
+            "exceedance check); exceedance is relative to that reference, never a failure "
+            "probability.",
             "Report timestamps' timezone is not stated by the source.",
             "Fault-injection results are simulated, not field evidence.",
         ],

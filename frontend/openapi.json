@@ -102,28 +102,53 @@
         "title": "Evidence",
         "type": "object"
       },
+      "ExceedanceCheck": {
+        "properties": {
+          "alpha": {
+            "title": "Alpha",
+            "type": "number"
+          },
+          "by_month": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "By Month",
+            "type": "object"
+          },
+          "share_at_or_below_alpha": {
+            "description": "Observed share of far-from-report operating windows at or below alpha.",
+            "title": "Share At Or Below Alpha",
+            "type": "number"
+          },
+          "windows": {
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alpha",
+          "share_at_or_below_alpha",
+          "by_month",
+          "windows"
+        ],
+        "title": "ExceedanceCheck",
+        "type": "object"
+      },
       "FaultSummary": {
         "properties": {
           "cases": {
             "title": "Cases",
             "type": "integer"
           },
-          "control_alarms": {
-            "title": "Control Alarms",
-            "type": "string"
-          },
-          "detected": {
-            "title": "Detected",
+          "clean_control_cases": {
+            "title": "Clean Control Cases",
             "type": "integer"
           },
-          "per_type": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Per Type",
-            "type": "object"
+          "clean_control_detected": {
+            "title": "Clean Control Detected",
+            "type": "integer"
           },
-          "rate": {
+          "clean_control_sensitivity": {
             "anyOf": [
               {
                 "type": "number"
@@ -132,7 +157,63 @@
                 "type": "null"
               }
             ],
-            "title": "Rate"
+            "description": "Share of clean (non-alarming) control intervals where the injected fault raised an alarm.",
+            "title": "Clean Control Sensitivity"
+          },
+          "control_alarm_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of unmodified control intervals that already raised an alarm.",
+            "title": "Control Alarm Rate"
+          },
+          "control_alarms": {
+            "title": "Control Alarms",
+            "type": "string"
+          },
+          "control_detected": {
+            "title": "Control Detected",
+            "type": "integer"
+          },
+          "detected": {
+            "title": "Detected",
+            "type": "integer"
+          },
+          "gross_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of faulted intervals that raised an alarm (includes control alarms).",
+            "title": "Gross Rate"
+          },
+          "incremental_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "gross_rate minus control_alarm_rate.",
+            "title": "Incremental Lift"
+          },
+          "per_type": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Per Type",
+            "type": "object"
           },
           "simulated": {
             "title": "Simulated",
@@ -140,10 +221,16 @@
           }
         },
         "required": [
-          "rate",
           "detected",
           "cases",
+          "gross_rate",
+          "control_detected",
+          "control_alarm_rate",
           "control_alarms",
+          "clean_control_cases",
+          "clean_control_detected",
+          "clean_control_sensitivity",
+          "incremental_lift",
           "per_type",
           "simulated"
         ],
@@ -241,7 +328,13 @@
             "type": "array"
           },
           "mean_false_alarms_per_day": {
+            "description": "Mean false alarms per all valid evaluation days (includes stopped days).",
             "title": "Mean False Alarms Per Day",
+            "type": "number"
+          },
+          "mean_operating_false_alarms_per_day": {
+            "description": "Mean false alarms per operating evaluation day (excludes stopped days).",
+            "title": "Mean Operating False Alarms Per Day",
             "type": "number"
           },
           "median_abs_delay_minutes": {
@@ -260,6 +353,7 @@
           "events_detected",
           "events_total",
           "mean_false_alarms_per_day",
+          "mean_operating_false_alarms_per_day",
           "median_abs_delay_minutes",
           "folds"
         ],
@@ -291,6 +385,17 @@
           "exceedance_at_threshold": {
             "title": "Exceedance At Threshold",
             "type": "number"
+          },
+          "exceedance_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExceedanceCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed exceedance rate on far-from-report operating evaluation windows."
           },
           "fault_injection": {
             "anyOf": [
@@ -331,6 +436,17 @@
           "persistence": {
             "title": "Persistence",
             "type": "integer"
+          },
+          "reference_holdout_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferenceHoldoutCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Split-half calibration reference stability check. Exceedance is a share of reference-normal windows, never a failure probability."
           },
           "replay_available_from": {
             "anyOf": [
@@ -433,6 +549,38 @@
           "failure"
         ],
         "title": "OperatorReport",
+        "type": "object"
+      },
+      "ReferenceHoldoutCheck": {
+        "properties": {
+          "alpha": {
+            "description": "Nominal exceedance alpha tested on split-half holdout.",
+            "title": "Alpha",
+            "type": "number"
+          },
+          "share_at_or_below_alpha": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed share of held-out reference windows at or below alpha. Values well above alpha show reference drift; exceedance is not a failure probability.",
+            "title": "Share At Or Below Alpha"
+          },
+          "windows": {
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alpha",
+          "share_at_or_below_alpha",
+          "windows"
+        ],
+        "title": "ReferenceHoldoutCheck",
         "type": "object"
       },
       "ReplayResponse": {
@@ -621,7 +769,7 @@
         "additionalProperties": false,
         "properties": {
           "samples": {
-            "description": "Chronological samples forming one window (nominally 10 min at ~0.1 Hz).",
+            "description": "Chronological samples forming one 10-minute window (at most 11 min total span with 60 s tolerance).",
             "items": {
               "$ref": "#/components/schemas/Sample"
             },

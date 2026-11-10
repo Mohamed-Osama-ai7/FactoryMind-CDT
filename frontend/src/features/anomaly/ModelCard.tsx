@@ -1,15 +1,25 @@
-import type { FaultSummary, LoeoSummary, ModelInfo } from '../../api/generated/model'
+import type {
+  ExceedanceCheck,
+  FaultSummary,
+  LoeoSummary,
+  ModelInfo,
+  ReferenceHoldoutCheck,
+} from '../../api/generated/model'
 
 function minutes(value: number | null | undefined): string {
   return value === null || value === undefined ? 'n/a' : `${Math.round(value)} min`
+}
+
+function pct(value: number | null | undefined): string {
+  return value === null || value === undefined ? 'n/a' : `${(value * 100).toFixed(1)} %`
 }
 
 function Loeo({ loeo }: { loeo: LoeoSummary }) {
   return (
     <table className="mt-4 w-full text-sm">
       <caption className="mb-1 text-left text-muted">
-        Leave-one-event-out evaluation against operator failure reports (policy chosen on the other
-        reports)
+        Leave-one-event-out evaluation against operator failure reports (policy chosen
+        non-chronologically on the other reports)
       </caption>
       <thead>
         <tr className="text-left text-muted">
@@ -42,7 +52,8 @@ function Loeo({ loeo }: { loeo: LoeoSummary }) {
             {loeo.events_detected}/{loeo.events_total}
           </td>
           <td className="py-1.5">
-            {loeo.mean_false_alarms_per_day.toFixed(3)} false alarms/day · median |delay|{' '}
+            {loeo.mean_false_alarms_per_day.toFixed(3)} false alarms/day (
+            {loeo.mean_operating_false_alarms_per_day.toFixed(3)} operating days) · median |delay|{' '}
             {minutes(loeo.median_abs_delay_minutes)}
           </td>
         </tr>
@@ -52,13 +63,50 @@ function Loeo({ loeo }: { loeo: LoeoSummary }) {
 }
 
 function Faults({ faults }: { faults: FaultSummary }) {
+  const lift =
+    faults.incremental_lift === null || faults.incremental_lift === undefined
+      ? 'n/a'
+      : `${faults.incremental_lift >= 0 ? '+' : ''}${(faults.incremental_lift * 100).toFixed(1)} pp`
   return (
     <p className="mt-3 text-sm text-muted">
-      Simulated sensor faults injected into real normal telemetry: detected {faults.detected}/
-      {faults.cases}
-      {faults.rate !== null ? ` (${Math.round(faults.rate * 100)} %)` : ''}; unmodified control
-      intervals alarmed {faults.control_alarms}.
+      Simulated sensor faults injected into real normal telemetry: gross detection {faults.detected}
+      /{faults.cases} ({pct(faults.gross_rate)}), unmodified control alarms {faults.control_alarms}{' '}
+      ({pct(faults.control_alarm_rate)}), clean-control sensitivity {faults.clean_control_detected}/
+      {faults.clean_control_cases} ({pct(faults.clean_control_sensitivity)}), incremental lift{' '}
+      {lift}.
     </p>
+  )
+}
+
+function CalibrationCheck({
+  holdout,
+  exceedanceEval,
+}: {
+  holdout: ReferenceHoldoutCheck | null | undefined
+  exceedanceEval: ExceedanceCheck | null | undefined
+}) {
+  if (!holdout && !exceedanceEval) return null
+  return (
+    <div className="mt-3 rounded border border-border p-3 text-sm">
+      <p className="font-medium">Calibration reference check</p>
+      {holdout && (
+        <p className="mt-1 text-muted">
+          Split-half holdout at nominal {pct(holdout.alpha)}:{' '}
+          <span className="font-medium text-ink">{pct(holdout.share_at_or_below_alpha)}</span> of{' '}
+          {holdout.windows} held-out calibration windows fell at or below nominal α.
+        </p>
+      )}
+      {exceedanceEval && (
+        <p className="mt-1 text-muted">
+          Far-from-report operating windows at nominal {pct(exceedanceEval.alpha)}:{' '}
+          {pct(exceedanceEval.share_at_or_below_alpha)} across {exceedanceEval.windows} windows.
+        </p>
+      )}
+      <p className="mt-1 text-xs text-muted">
+        Calibration limitation: normal operation drifts over time; exceedance is the share of
+        calibration-reference windows scoring at least as high, never a failure probability.
+      </p>
+    </div>
   )
 }
 
@@ -99,6 +147,10 @@ export function ModelCard({ model }: { model: ModelInfo }) {
       </dl>
       <Loeo loeo={model.loeo} />
       {model.fault_injection && <Faults faults={model.fault_injection} />}
+      <CalibrationCheck
+        holdout={model.reference_holdout_check}
+        exceedanceEval={model.exceedance_check}
+      />
       <details className="mt-3 text-sm">
         <summary className="cursor-pointer text-muted">Intended use and limitations</summary>
         <p className="mt-2">{model.intended_use}</p>

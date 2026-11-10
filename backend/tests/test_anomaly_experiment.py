@@ -128,7 +128,26 @@ def test_fault_injection_is_reported_as_simulated_with_controls(
     assert faults["simulated"] is True and faults["cases"] == 10
     assert set(faults["per_type"]) == {"stuck", "offset", "flatline", "drift", "noise"}
     assert faults["control_alarms"].endswith("/10")
+    assert faults["gross_rate"] == pytest.approx(faults["detected"] / 10, abs=1e-3)
+    assert faults["control_alarm_rate"] == pytest.approx(faults["control_detected"] / 10, abs=1e-3)
+    assert faults["clean_control_cases"] == 10 - faults["control_detected"]
+    assert faults["incremental_lift"] == pytest.approx(
+        (faults["detected"] - faults["control_detected"]) / 10, abs=1e-3
+    )
+    if faults["clean_control_cases"] > 0:
+        assert faults["clean_control_sensitivity"] == pytest.approx(
+            faults["clean_control_detected"] / faults["clean_control_cases"], abs=1e-3
+        )
     assert output.results["detectors"]["lps_rule"]["fault_injection"] is None
+
+
+def test_loeo_reports_operating_false_alarms_alongside_all_valid_days(
+    output: experiment.RunOutput,
+) -> None:
+    for d in output.results["detectors"].values():
+        loeo = d["loeo"]
+        assert loeo["mean_operating_false_alarms_per_day"] >= loeo["mean_false_alarms_per_day"]
+        assert all("operating_false_alarms_per_day" in f for f in loeo["folds"])
 
 
 def test_exceedance_and_reference_checks_are_present(output: experiment.RunOutput) -> None:
@@ -150,6 +169,8 @@ def test_artifacts_are_saved_with_card_and_current_pointer(
     assert card["schema_version"] == 2 and card["dataset"]["license"] == "CC BY 4.0"
     assert len(card["artifact_sha256"]) == 64
     assert card["evaluation"]["loeo"]["events_total"] == 2
+    assert "share_at_or_below_alpha" in card["evaluation"]["reference_holdout_check"]
+    assert "by_month" in card["evaluation"]["exceedance_check"]
     run_dir = tmp_path / "experiments" / "unit" / str(output.results["version"])
     saved = json.loads((run_dir / "results.json").read_text())
     assert saved["sensitivity"] == {"x": 1}
@@ -252,6 +273,8 @@ def _candidate(
     result = EvaluationResult(
         valid_windows=1,
         valid_days=1.0,
+        operating_windows=1,
+        operating_days=1.0,
         positive_windows=1,
         average_precision=None,
         precision=None,
@@ -264,6 +287,7 @@ def _candidate(
         alarm_episodes=0,
         false_alarm_episodes=0,
         false_alarms_per_day=fa,
+        operating_false_alarms_per_day=fa,
     )
     return Candidate("d", 0, {}, label, 1.0, 1, result)
 
@@ -299,6 +323,17 @@ def _summary(detected: int, fa: float, delay: float | None = 50.0) -> dict[str, 
 SEL = SelectionConfig(preference=["lps_rule", "duty_rule", "pca_spe", "isolation_forest"])
 
 
+def _fault_dict(
+    gross: float, ctrl: float, clean_sens: float | None, lift: float | None
+) -> dict[str, Any]:
+    return {
+        "gross_rate": gross,
+        "control_alarm_rate": ctrl,
+        "clean_control_sensitivity": clean_sens,
+        "incremental_lift": lift,
+    }
+
+
 def test_default_is_best_rule_when_no_learned_detector_qualifies() -> None:
     summary = {
         "lps_rule": _summary(1, 0.0),
@@ -306,7 +341,10 @@ def test_default_is_best_rule_when_no_learned_detector_qualifies() -> None:
         "pca_spe": _summary(4, 0.06),
         "isolation_forest": _summary(3, 0.04),
     }
-    faults = {"pca_spe": {"rate": 0.73}, "isolation_forest": {"rate": 0.2}}
+    faults = {
+        "pca_spe": _fault_dict(0.73, 0.25, 0.64, 0.48),
+        "isolation_forest": _fault_dict(0.23, 0.18, 0.06, 0.05),
+    }
     name, why = choose_default(summary, faults, SEL)
     assert name == "duty_rule" and "no learned detector qualified" in why
 
@@ -329,7 +367,10 @@ def test_learned_detector_qualifies_through_fault_detection_without_losing_leaks
         "pca_spe": _summary(4, 0.08),
         "isolation_forest": _summary(3, 0.01),
     }
-    faults = {"pca_spe": {"rate": 0.95}, "isolation_forest": {"rate": 0.99}}
+    faults = {
+        "pca_spe": _fault_dict(0.95, 0.05, 0.947, 0.90),
+        "isolation_forest": _fault_dict(0.99, 0.0, 0.99, 0.99),
+    }
     name, why = choose_default(summary, faults, SEL)
     # isolation_forest sees faults but detects fewer leaks than the rule: not eligible
     assert name == "pca_spe" and "detects injected faults" in why
@@ -342,7 +383,24 @@ def test_fault_detection_with_too_many_false_alarms_does_not_qualify() -> None:
         "pca_spe": _summary(4, 0.4),
         "isolation_forest": _summary(0, 0.0),
     }
-    name, _ = choose_default(summary, {"pca_spe": {"rate": 1.0}}, SEL)
+    name, _ = choose_default(summary, {"pca_spe": _fault_dict(1.0, 0.0, 1.0, 1.0)}, SEL)
+    assert name == "duty_rule"
+
+
+def test_high_control_alarm_detector_cannot_qualify_via_gross_fault_rate() -> None:
+    summary = {
+        "lps_rule": _summary(1, 0.0),
+        "duty_rule": _summary(4, 0.03),
+        "pca_spe": _summary(4, 0.06),
+        "isolation_forest": _summary(4, 0.06),
+    }
+    faults = {
+        # Alarms on 100% of both faulted and control intervals => zero clean controls, zero lift
+        "pca_spe": _fault_dict(1.0, 1.0, None, 0.0),
+        # Alarms on 95% of control and 95% of faulted => gross_rate 0.95, clean_sens 0.0, lift 0.0
+        "isolation_forest": _fault_dict(0.95, 0.95, 0.0, 0.0),
+    }
+    name, _ = choose_default(summary, faults, SEL)
     assert name == "duty_rule"
 
 

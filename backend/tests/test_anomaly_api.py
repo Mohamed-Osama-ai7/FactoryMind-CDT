@@ -49,7 +49,18 @@ def test_model_info_reports_protocol_results_and_provenance(client: TestClient) 
     assert body["dataset_license"] == "CC BY 4.0"
     assert body["persistence"] >= 1 and 0 < body["exceedance_at_threshold"] <= 1
     assert body["loeo"]["events_total"] == 2
+    assert (
+        body["loeo"]["mean_operating_false_alarms_per_day"]
+        >= body["loeo"]["mean_false_alarms_per_day"]
+    )
     assert [f["held_out"] for f in body["loeo"]["folds"]] == ["V1", "T1"]
+    assert body["fault_injection"]["simulated"] is True
+    assert "gross_rate" in body["fault_injection"]
+    assert "control_alarm_rate" in body["fault_injection"]
+    assert "clean_control_sensitivity" in body["fault_injection"]
+    assert "incremental_lift" in body["fault_injection"]
+    assert body["reference_holdout_check"]["alpha"] > 0
+    assert body["exceedance_check"]["windows"] > 0
     assert body["replay_available_from"].startswith("2020-01-01")
     assert [r["report_id"] for r in body["operator_reports"]] == ["V1", "T1"]
     assert isinstance(body["selection_rationale"], str) and body["selected_as_default"] is True
@@ -90,6 +101,48 @@ def test_score_too_few_samples_is_insufficient_data(client: TestClient) -> None:
     frame = simulate_apu("2020-01-05 12:00", 10)
     result = client.post("/api/v1/anomaly/score", json=payload(frame)).json()["result"]
     assert result["status"] == "insufficient_data" and result["score"] is None
+
+
+def test_score_accepts_slight_timestamp_irregularities_within_tolerance(client: TestClient) -> None:
+    frame = simulate_apu("2020-01-05 12:00", 60, seed=11)
+    # Introduce slight uneven sampling jitter pushing total span to 10 min 30 s (<= 11 min)
+    rng = np.random.default_rng(4)
+    deltas = rng.integers(8, 14, size=len(frame) - 1).astype(float)
+    deltas = deltas * (630.0 / float(deltas.sum()))
+    offsets = np.concatenate([[0.0], np.cumsum(deltas)])
+    frame.index = pd.Timestamp("2020-01-05 12:00:00") + pd.to_timedelta(offsets, unit="s")
+    frame.index.name = "timestamp"
+    response = client.post("/api/v1/anomaly/score", json=payload(frame))
+    assert response.status_code == 200
+    assert response.json()["result"]["status"] in {"normal", "anomalous"}
+
+
+def test_score_rejects_20_minute_oversized_window(client: TestClient) -> None:
+    frame = simulate_apu("2020-01-05 12:00", 120, seed=11)  # 19m 50s span
+    response = client.post("/api/v1/anomaly/score", json=payload(frame))
+    assert response.status_code == 422
+
+
+def test_score_rejects_max_sample_count_with_oversized_duration(client: TestClient) -> None:
+    frame = simulate_apu("2020-01-05 12:00", 2000, seed=11)  # ~5.5 h span at 10 s
+    response = client.post("/api/v1/anomaly/score", json=payload(frame))
+    assert response.status_code == 422
+
+
+def test_score_handles_irregular_timestamps(client: TestClient) -> None:
+    # Irregular timestamps within 10 min containing an internal gap > 60 s => insufficient_data
+    frame = simulate_apu("2020-01-05 12:00", 60, seed=11)
+    gapped = frame.drop(frame.index[25:34])  # 90 s gap inside the 10-min block
+    ok_resp = client.post("/api/v1/anomaly/score", json=payload(gapped))
+    assert ok_resp.status_code == 200
+    assert ok_resp.json()["result"]["status"] == "insufficient_data"
+
+    # Irregular sparse timestamps exceeding 11 min tolerance (48 samples at 15 s = 11m 45s) => 422
+    sparse = simulate_apu("2020-01-05 12:00", 48, seed=11)
+    sparse.index = pd.date_range("2020-01-05 12:00:00", periods=48, freq="15s")
+    sparse.index.name = "timestamp"
+    bad_resp = client.post("/api/v1/anomaly/score", json=payload(sparse))
+    assert bad_resp.status_code == 422
 
 
 @pytest.mark.parametrize(

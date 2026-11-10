@@ -9,7 +9,7 @@ import type { Sample } from './sample';
 
 export interface ScoreRequest {
   /**
-     * Chronological samples forming one window (nominally 10 min at ~0.1 Hz).
+     * Chronological samples forming one 10-minute window (at most 11 min total span with 60 s tolerance).
      * @minItems 1
      * @maxItems 2000
      */

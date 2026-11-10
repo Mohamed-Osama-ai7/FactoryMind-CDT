@@ -9,9 +9,19 @@ import type { FaultSummaryPerType } from './faultSummaryPerType';
 
 export interface FaultSummary {
   cases: number;
+  clean_control_cases: number;
+  clean_control_detected: number;
+  /** Share of clean (non-alarming) control intervals where the injected fault raised an alarm. */
+  clean_control_sensitivity: number | null;
+  /** Share of unmodified control intervals that already raised an alarm. */
+  control_alarm_rate: number | null;
   control_alarms: string;
+  control_detected: number;
   detected: number;
+  /** Share of faulted intervals that raised an alarm (includes control alarms). */
+  gross_rate: number | null;
+  /** gross_rate minus control_alarm_rate. */
+  incremental_lift: number | null;
   per_type: FaultSummaryPerType;
-  rate: number | null;
   simulated: boolean;
 }

@@ -22,20 +22,31 @@ def _summary(results: dict[str, Any]) -> str:
     lines = [
         f"version {results['version']}  default: {results['selected_detector']} "
         f"({results['selection_rationale']})",
-        f"{'detector':<17}{'LOEO leaks':>11}{'FA/day':>8}{'|delay|':>9}"
-        f"{'faults':>9}{'ctrl':>7}{'p<=a':>8}",
+        f"{'detector':<17}{'LOEO leaks':>11}{'FA/day':>8}{'opFA/d':>8}{'|delay|':>9}"
+        f"{'faults':>9}{'ctrl':>7}{'clean':>8}{'lift':>7}{'p<=a':>8}",
     ]
     detectors: dict[str, Any] = results["detectors"]
     for name, d in detectors.items():
         loeo = d["loeo"]
         faults = d["fault_injection"]
         delay = loeo["median_abs_delay_minutes"]
+        clean = (
+            f"{faults['clean_control_detected']}/{faults['clean_control_cases']}" if faults else "-"
+        )
+        lift = (
+            f"{faults['incremental_lift']:+.3f}"
+            if faults and faults.get("incremental_lift") is not None
+            else "-"
+        )
         lines.append(
             f"{name:<17}{loeo['events_detected']:>8}/{loeo['events_total']:<2}"
             f"{loeo['mean_false_alarms_per_day']:>8.3f}"
+            f"{loeo['mean_operating_false_alarms_per_day']:>8.3f}"
             f"{(f'{delay:.0f}' if delay is not None else '-'):>9}"
             f"{(f'{faults["detected"]}/{faults["cases"]}' if faults else '-'):>9}"
             f"{(faults['control_alarms'] if faults else '-'):>7}"
+            f"{clean:>8}"
+            f"{lift:>7}"
             f"{d['exceedance_check']['share_at_or_below_alpha']:>8.3f}"
         )
     return "\n".join(lines)

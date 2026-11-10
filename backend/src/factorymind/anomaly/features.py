@@ -58,10 +58,17 @@ class WindowSpec:
     max_gap_s: float = 60.0  # an internal gap longer than this invalidates the window
     resume_gap_s: float = 600.0  # a gap longer than this starts a new operating segment
     stopped_off_fraction: float = 0.9  # off this share of a window => explained "stopped"
+    # A submitted single-window block may span up to length + span_tolerance_s to allow inclusive
+    # endpoint samples and slight timestamp jitter while rejecting multi-window spans.
+    span_tolerance_s: float = 60.0
 
     @property
     def length_s(self) -> float:
         return float(pd.Timedelta(self.length).total_seconds())
+
+    @property
+    def max_block_span_s(self) -> float:
+        return self.length_s + self.span_tolerance_s
 
     @property
     def min_samples(self) -> int:
@@ -167,5 +174,12 @@ def block_features(frame: pd.DataFrame, spec: WindowSpec) -> pd.Series:
     """Features for one submitted block treated as a single window (used by the API)."""
     if frame.empty:
         raise ValueError("Cannot compute features for an empty frame")
+    index = pd.DatetimeIndex(frame.index)
+    span_s = float((index.max() - index.min()).total_seconds())
+    if span_s > spec.max_block_span_s:
+        raise ValueError(
+            f"Block time span {span_s:.0f}s exceeds single-window limit "
+            f"{spec.max_block_span_s:.0f}s ({spec.length} + {spec.span_tolerance_s:.0f}s tolerance)"
+        )
     out = _aggregate(frame, np.zeros(len(frame), dtype=np.int64), spec)
     return out.iloc[0]

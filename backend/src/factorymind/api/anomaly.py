@@ -36,6 +36,9 @@ from factorymind.data.metropt3 import (
 
 MAX_SAMPLES = 2000
 MAX_REPLAY = pd.Timedelta(days=7)
+SCORE_WINDOW = pd.Timedelta("10min")
+SCORE_SPAN_TOLERANCE = pd.Timedelta(seconds=60)
+MAX_SCORE_SPAN = SCORE_WINDOW + SCORE_SPAN_TOLERANCE
 
 router = APIRouter(prefix="/api/v1/anomaly", tags=["anomaly"])
 
@@ -100,7 +103,8 @@ class ScoreRequest(BaseModel):
     samples: list[Sample] = Field(
         min_length=1,
         max_length=MAX_SAMPLES,
-        description="Chronological samples forming one window (nominally 10 min at ~0.1 Hz).",
+        description="Chronological samples forming one 10-minute window "
+        "(at most 11 min total span with 60 s tolerance).",
     )
 
     @model_validator(mode="after")
@@ -110,6 +114,10 @@ class ScoreRequest(BaseModel):
             raise ValueError("timestamps must be naive local train time, like the dataset")
         if any(b <= a for a, b in pairwise(stamps)):
             raise ValueError("sample timestamps must be strictly increasing")
+        if pd.Timestamp(stamps[-1]) - pd.Timestamp(stamps[0]) > MAX_SCORE_SPAN:
+            raise ValueError(
+                "sample time span exceeds the 10-minute scoring window (60s tolerance)"
+            )
         return self
 
     def to_frame(self) -> pd.DataFrame:
@@ -192,18 +200,54 @@ class LoeoFold(BaseModel):
 class LoeoSummary(BaseModel):
     events_detected: int
     events_total: int
-    mean_false_alarms_per_day: float
+    mean_false_alarms_per_day: float = Field(
+        description="Mean false alarms per all valid evaluation days (includes stopped days)."
+    )
+    mean_operating_false_alarms_per_day: float = Field(
+        description="Mean false alarms per operating evaluation day (excludes stopped days)."
+    )
     median_abs_delay_minutes: float | None
     folds: list[LoeoFold]
 
 
 class FaultSummary(BaseModel):
-    rate: float | None
     detected: int
     cases: int
+    gross_rate: float | None = Field(
+        description="Share of faulted intervals that raised an alarm (includes control alarms)."
+    )
+    control_detected: int
+    control_alarm_rate: float | None = Field(
+        description="Share of unmodified control intervals that already raised an alarm."
+    )
     control_alarms: str
+    clean_control_cases: int
+    clean_control_detected: int
+    clean_control_sensitivity: float | None = Field(
+        description="Share of clean (non-alarming) control intervals where the injected fault "
+        "raised an alarm."
+    )
+    incremental_lift: float | None = Field(description="gross_rate minus control_alarm_rate.")
     per_type: dict[str, str]
     simulated: bool
+
+
+class ReferenceHoldoutCheck(BaseModel):
+    alpha: float = Field(description="Nominal exceedance alpha tested on split-half holdout.")
+    share_at_or_below_alpha: float | None = Field(
+        description="Observed share of held-out reference windows at or below alpha. "
+        "Values well above alpha show reference drift; exceedance is not a failure probability."
+    )
+    windows: int
+
+
+class ExceedanceCheck(BaseModel):
+    alpha: float
+    share_at_or_below_alpha: float = Field(
+        description="Observed share of far-from-report operating windows at or below alpha."
+    )
+    by_month: dict[str, float]
+    windows: int
 
 
 class ModelInfo(BaseModel):
@@ -222,6 +266,15 @@ class ModelInfo(BaseModel):
     window_length: str
     loeo: LoeoSummary
     fault_injection: FaultSummary | None
+    reference_holdout_check: ReferenceHoldoutCheck | None = Field(
+        default=None,
+        description="Split-half calibration reference stability check. Exceedance is a share of "
+        "reference-normal windows, never a failure probability.",
+    )
+    exceedance_check: ExceedanceCheck | None = Field(
+        default=None,
+        description="Observed exceedance rate on far-from-report operating evaluation windows.",
+    )
     intended_use: str
     limitations: list[str]
     replay_available_from: datetime | None
@@ -279,6 +332,7 @@ def _loeo(summary: dict[str, Any]) -> LoeoSummary:
         events_detected=summary["events_detected"],
         events_total=summary["events_total"],
         mean_false_alarms_per_day=summary["mean_false_alarms_per_day"],
+        mean_operating_false_alarms_per_day=summary["mean_operating_false_alarms_per_day"],
         median_abs_delay_minutes=summary["median_abs_delay_minutes"],
         folds=[
             LoeoFold(
@@ -298,6 +352,8 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
     data_range = service.data_range()
     evaluation = card["evaluation"]
     faults = evaluation["fault_injection"]
+    holdout = evaluation.get("reference_holdout_check")
+    exceedance_eval = evaluation.get("exceedance_check")
     return ModelInfo(
         model_version=bundle.version,
         detector=bundle.detector_name,
@@ -315,6 +371,16 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
         loeo=_loeo(evaluation["loeo"]),
         fault_injection=FaultSummary(**{k: faults[k] for k in FaultSummary.model_fields})
         if faults
+        else None,
+        reference_holdout_check=ReferenceHoldoutCheck(
+            **{k: holdout[k] for k in ReferenceHoldoutCheck.model_fields}
+        )
+        if holdout
+        else None,
+        exceedance_check=ExceedanceCheck(
+            **{k: exceedance_eval[k] for k in ExceedanceCheck.model_fields}
+        )
+        if exceedance_eval
         else None,
         intended_use=card["intended_use"],
         limitations=card["limitations"],

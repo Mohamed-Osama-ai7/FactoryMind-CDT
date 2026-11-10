@@ -11,6 +11,9 @@ export interface LoeoSummary {
   events_detected: number;
   events_total: number;
   folds: LoeoFold[];
+  /** Mean false alarms per all valid evaluation days (includes stopped days). */
   mean_false_alarms_per_day: number;
+  /** Mean false alarms per operating evaluation day (excludes stopped days). */
+  mean_operating_false_alarms_per_day: number;
   median_abs_delay_minutes: number | null;
 }
