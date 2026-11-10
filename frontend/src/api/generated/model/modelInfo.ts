@@ -5,6 +5,7 @@
  * Evidence-grounded, uncertainty-aware decision support. Advisory only.
  * OpenAPI spec version: 0.1.0
  */
+import type { OperatorReport } from './operatorReport';
 import type { SplitMetrics } from './splitMetrics';
 
 export interface ModelInfo {
@@ -16,6 +17,8 @@ export interface ModelInfo {
   intended_use: string;
   limitations: string[];
   model_version: string;
+  /** Operator failure reports used as weak evaluation labels. */
+  operator_reports: OperatorReport[];
   persistence: number;
   replay_available_from: string | null;
   replay_available_to: string | null;

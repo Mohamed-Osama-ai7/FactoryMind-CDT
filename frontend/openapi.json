@@ -155,6 +155,14 @@
             "title": "Model Version",
             "type": "string"
           },
+          "operator_reports": {
+            "description": "Operator failure reports used as weak evaluation labels.",
+            "items": {
+              "$ref": "#/components/schemas/OperatorReport"
+            },
+            "title": "Operator Reports",
+            "type": "array"
+          },
           "persistence": {
             "title": "Persistence",
             "type": "integer"
@@ -221,7 +229,8 @@
           "intended_use",
           "limitations",
           "replay_available_from",
-          "replay_available_to"
+          "replay_available_to",
+          "operator_reports"
         ],
         "title": "ModelInfo",
         "type": "object"

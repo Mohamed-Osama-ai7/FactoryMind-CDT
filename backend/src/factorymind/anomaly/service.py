@@ -88,6 +88,10 @@ class AnomalyService:
         self._processed_dir = processed_dir
         self._reports = reports
 
+    @property
+    def reports(self) -> tuple[metropt3.FailureReport, ...]:
+        return self._reports
+
     @cached_property
     def telemetry(self) -> pd.DataFrame:
         try:

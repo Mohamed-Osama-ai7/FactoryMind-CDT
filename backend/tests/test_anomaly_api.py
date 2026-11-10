@@ -47,6 +47,7 @@ def test_model_info(client: TestClient) -> None:
     assert body["dataset_license"] == "CC BY 4.0"
     assert body["persistence"] >= 1
     assert body["replay_available_from"].startswith("2020-01-01")
+    assert [r["report_id"] for r in body["operator_reports"]] == ["V1", "T1"]
 
 
 def test_score_normal_window(client: TestClient) -> None:

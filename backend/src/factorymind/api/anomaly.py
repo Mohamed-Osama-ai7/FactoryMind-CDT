@@ -26,7 +26,12 @@ from factorymind.anomaly.service import (
     load_bundle,
 )
 from factorymind.config import get_settings
-from factorymind.data.metropt3 import ANALOG_SENSORS, DIGITAL_SENSORS, VALID_RANGES
+from factorymind.data.metropt3 import (
+    ANALOG_SENSORS,
+    DIGITAL_SENSORS,
+    VALID_RANGES,
+    FailureReport,
+)
 
 MAX_SAMPLES = 2000
 MAX_REPLAY = pd.Timedelta(days=7)
@@ -186,6 +191,9 @@ class ModelInfo(BaseModel):
     limitations: list[str]
     replay_available_from: datetime | None
     replay_available_to: datetime | None
+    operator_reports: list[OperatorReport] = Field(
+        description="Operator failure reports used as weak evaluation labels."
+    )
 
 
 # ---------------------------------------------------------------- helpers
@@ -206,6 +214,10 @@ def _evidence(e: FeatureEvidence) -> Evidence:
     return Evidence(
         feature=e.feature, value=e.value, training_median=e.training_median, robust_z=e.robust_z
     )
+
+
+def _report(r: FailureReport) -> OperatorReport:
+    return OperatorReport(report_id=r.report_id, start=r.start, end=r.end, failure=r.failure)
 
 
 def _split(metrics: dict[str, Any]) -> SplitMetrics:
@@ -242,6 +254,7 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
         limitations=card["limitations"],
         replay_available_from=data_range[0].to_pydatetime() if data_range else None,
         replay_available_to=data_range[1].to_pydatetime() if data_range else None,
+        operator_reports=[_report(r) for r in service.reports],
     )
 
 
@@ -288,8 +301,5 @@ def anomaly_replay(
             )
             for e in eps
         ],
-        operator_reports=[
-            OperatorReport(report_id=r.report_id, start=r.start, end=r.end, failure=r.failure)
-            for r in reports
-        ],
+        operator_reports=[_report(r) for r in reports],
     )
