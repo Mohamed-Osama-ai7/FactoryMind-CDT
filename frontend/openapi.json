@@ -1,6 +1,93 @@
 {
   "components": {
     "schemas": {
+      "AlarmEpisode": {
+        "properties": {
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "peak_score": {
+            "title": "Peak Score",
+            "type": "number"
+          },
+          "raised_at": {
+            "format": "date-time",
+            "title": "Raised At",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "raised_at",
+          "peak_score"
+        ],
+        "title": "AlarmEpisode",
+        "type": "object"
+      },
+      "Evidence": {
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "robust_z": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deviation from training distribution, not a cause.",
+            "title": "Robust Z"
+          },
+          "training_median": {
+            "title": "Training Median",
+            "type": "number"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "feature",
+          "value",
+          "training_median",
+          "robust_z"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "environment": {
@@ -30,6 +117,508 @@
         ],
         "title": "HealthResponse",
         "type": "object"
+      },
+      "ModelInfo": {
+        "properties": {
+          "data_kind": {
+            "title": "Data Kind",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_license": {
+            "title": "Dataset License",
+            "type": "string"
+          },
+          "dataset_source": {
+            "title": "Dataset Source",
+            "type": "string"
+          },
+          "detector": {
+            "title": "Detector",
+            "type": "string"
+          },
+          "intended_use": {
+            "title": "Intended Use",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "persistence": {
+            "title": "Persistence",
+            "type": "integer"
+          },
+          "replay_available_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Available From"
+          },
+          "replay_available_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Available To"
+          },
+          "test": {
+            "$ref": "#/components/schemas/SplitMetrics"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "training_period": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Training Period",
+            "type": "array"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/SplitMetrics"
+          },
+          "window_length": {
+            "title": "Window Length",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_version",
+          "detector",
+          "dataset_id",
+          "dataset_license",
+          "dataset_source",
+          "data_kind",
+          "training_period",
+          "threshold",
+          "persistence",
+          "window_length",
+          "validation",
+          "test",
+          "intended_use",
+          "limitations",
+          "replay_available_from",
+          "replay_available_to"
+        ],
+        "title": "ModelInfo",
+        "type": "object"
+      },
+      "OperatorReport": {
+        "properties": {
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "failure": {
+            "title": "Failure",
+            "type": "string"
+          },
+          "report_id": {
+            "title": "Report Id",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "report_id",
+          "start",
+          "end",
+          "failure"
+        ],
+        "title": "OperatorReport",
+        "type": "object"
+      },
+      "ReplayResponse": {
+        "properties": {
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/AlarmEpisode"
+            },
+            "title": "Episodes",
+            "type": "array"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "operator_reports": {
+            "items": {
+              "$ref": "#/components/schemas/OperatorReport"
+            },
+            "title": "Operator Reports",
+            "type": "array"
+          },
+          "persistence": {
+            "title": "Persistence",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/WindowResult"
+            },
+            "title": "Windows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model_version",
+          "threshold",
+          "persistence",
+          "start",
+          "end",
+          "windows",
+          "episodes",
+          "operator_reports"
+        ],
+        "title": "ReplayResponse",
+        "type": "object"
+      },
+      "Sample": {
+        "additionalProperties": false,
+        "description": "One APU telemetry sample (MetroPT-3 schema).",
+        "properties": {
+          "COMP": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Comp",
+            "type": "integer"
+          },
+          "Caudal_impulses": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Caudal Impulses",
+            "type": "integer"
+          },
+          "DV_eletric": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Dv Eletric",
+            "type": "integer"
+          },
+          "DV_pressure": {
+            "title": "Dv Pressure",
+            "type": "number"
+          },
+          "H1": {
+            "title": "H1",
+            "type": "number"
+          },
+          "LPS": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Lps",
+            "type": "integer"
+          },
+          "MPG": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Mpg",
+            "type": "integer"
+          },
+          "Motor_current": {
+            "title": "Motor Current",
+            "type": "number"
+          },
+          "Oil_level": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Oil Level",
+            "type": "integer"
+          },
+          "Oil_temperature": {
+            "title": "Oil Temperature",
+            "type": "number"
+          },
+          "Pressure_switch": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Pressure Switch",
+            "type": "integer"
+          },
+          "Reservoirs": {
+            "title": "Reservoirs",
+            "type": "number"
+          },
+          "TP2": {
+            "title": "Tp2",
+            "type": "number"
+          },
+          "TP3": {
+            "title": "Tp3",
+            "type": "number"
+          },
+          "Towers": {
+            "enum": [
+              0,
+              1
+            ],
+            "title": "Towers",
+            "type": "integer"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "TP2",
+          "TP3",
+          "H1",
+          "DV_pressure",
+          "Reservoirs",
+          "Oil_temperature",
+          "Motor_current",
+          "COMP",
+          "DV_eletric",
+          "Towers",
+          "MPG",
+          "LPS",
+          "Pressure_switch",
+          "Oil_level",
+          "Caudal_impulses"
+        ],
+        "title": "Sample",
+        "type": "object"
+      },
+      "ScoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "samples": {
+            "description": "Chronological samples forming one window (nominally 10 min at ~0.1 Hz).",
+            "items": {
+              "$ref": "#/components/schemas/Sample"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Samples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "samples"
+        ],
+        "title": "ScoreRequest",
+        "type": "object"
+      },
+      "ScoreResponse": {
+        "properties": {
+          "advisory": {
+            "default": "Advisory output for human review. FactoryMind never controls equipment.",
+            "title": "Advisory",
+            "type": "string"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/WindowResult"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "model_version",
+          "threshold",
+          "result"
+        ],
+        "title": "ScoreResponse",
+        "type": "object"
+      },
+      "SplitMetrics": {
+        "properties": {
+          "average_precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Precision"
+          },
+          "events_detected": {
+            "title": "Events Detected",
+            "type": "integer"
+          },
+          "events_total": {
+            "title": "Events Total",
+            "type": "integer"
+          },
+          "false_alarms_per_day": {
+            "title": "False Alarms Per Day",
+            "type": "number"
+          },
+          "valid_days": {
+            "title": "Valid Days",
+            "type": "number"
+          }
+        },
+        "required": [
+          "events_detected",
+          "events_total",
+          "false_alarms_per_day",
+          "average_precision",
+          "valid_days"
+        ],
+        "title": "SplitMetrics",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WindowResult": {
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "n_samples": {
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "status": {
+            "enum": [
+              "normal",
+              "anomalous",
+              "insufficient_data"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "window_end": {
+            "format": "date-time",
+            "title": "Window End",
+            "type": "string"
+          },
+          "window_start": {
+            "format": "date-time",
+            "title": "Window Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window_start",
+          "window_end",
+          "n_samples",
+          "status",
+          "score",
+          "evidence"
+        ],
+        "title": "WindowResult",
+        "type": "object"
       }
     }
   },
@@ -40,6 +629,125 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/anomaly/model": {
+      "get": {
+        "operationId": "anomaly_model",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Anomaly Model",
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
+    "/api/v1/anomaly/replay": {
+      "get": {
+        "operationId": "anomaly_replay",
+        "parameters": [
+          {
+            "description": "Range start (naive local train time)",
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "description": "Range start (naive local train time)",
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Range end, exclusive; at most 7 days after start",
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "description": "Range end, exclusive; at most 7 days after start",
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Anomaly Replay",
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
+    "/api/v1/anomaly/score": {
+      "post": {
+        "operationId": "anomaly_score",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Anomaly Score",
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "health",

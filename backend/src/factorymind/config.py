@@ -18,6 +18,12 @@ class Settings(BaseSettings):
 
     environment: str = Field(default="development", pattern="^(development|test|production)$")
     data_dir: Path = Field(default=Path("D:/FactoryMind/data"))
+    artifacts_dir: Path = Field(default=Path("D:/FactoryMind/artifacts"))
+    anomaly_model_name: str = Field(default="metropt3-anomaly", pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+
+    @property
+    def models_dir(self) -> Path:
+        return self.artifacts_dir / "models"
 
     @property
     def raw_dir(self) -> Path:
