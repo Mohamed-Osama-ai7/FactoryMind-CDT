@@ -21,25 +21,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score
 
+from factorymind.anomaly.alarm import AlarmPolicy, Episode, episodes
 from factorymind.data.metropt3 import FailureReport
-
-
-@dataclass(frozen=True)
-class AlarmPolicy:
-    threshold: float
-    persistence: int = 1  # consecutive anomalous windows required to raise an alarm
-
-    def __post_init__(self) -> None:
-        if self.persistence < 1:
-            raise ValueError("persistence must be >= 1")
-
-
-@dataclass(frozen=True)
-class Episode:
-    start: pd.Timestamp  # first anomalous window start
-    end: pd.Timestamp  # last anomalous window end
-    raised_at: pd.Timestamp  # end of the window that satisfied persistence
-    peak_score: float
 
 
 @dataclass(frozen=True)
@@ -53,6 +36,8 @@ class EventResult:
 class EvaluationResult:
     valid_windows: int
     valid_days: float
+    operating_windows: int
+    operating_days: float
     positive_windows: int
     average_precision: float | None
     precision: float | None
@@ -65,6 +50,7 @@ class EvaluationResult:
     alarm_episodes: int
     false_alarm_episodes: int
     false_alarms_per_day: float
+    operating_false_alarms_per_day: float
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -81,39 +67,6 @@ def window_labels(
     return labels
 
 
-def episodes(
-    starts: pd.DatetimeIndex, scores: np.ndarray, window: pd.Timedelta, policy: AlarmPolicy
-) -> list[Episode]:
-    """Group consecutive anomalous windows into episodes; keep those meeting persistence.
-
-    Windows are consecutive only if their starts are exactly one window apart, so gaps in the
-    telemetry break runs instead of joining distant windows.
-    """
-    flagged = scores > policy.threshold
-    result: list[Episode] = []
-    run: list[int] = []
-
-    def close() -> None:
-        if len(run) >= policy.persistence:
-            result.append(
-                Episode(
-                    start=starts[run[0]],
-                    end=starts[run[-1]] + window,
-                    raised_at=starts[run[policy.persistence - 1]] + window,
-                    peak_score=float(np.max(scores[run])),
-                )
-            )
-
-    for i in range(len(starts)):
-        if flagged[i] and run and starts[i] - starts[run[-1]] == window:
-            run.append(i)
-        else:
-            close()
-            run = [i] if flagged[i] else []
-    close()
-    return result
-
-
 def evaluate(
     starts: pd.DatetimeIndex,
     scores: np.ndarray,
@@ -123,11 +76,17 @@ def evaluate(
     *,
     early_horizon: pd.Timedelta,
     post_tolerance: pd.Timedelta,
+    suppress: np.ndarray | None = None,
+    precomputed_episodes: Sequence[Episode] | None = None,
 ) -> EvaluationResult:
     if len(starts) != len(scores):
         raise ValueError("starts and scores must have the same length")
     labels = window_labels(starts, window, reports)
-    eps = episodes(starts, scores, window, policy)
+    eps = (
+        list(precomputed_episodes)
+        if precomputed_episodes is not None
+        else episodes(starts, scores, window, policy, suppress)
+    )
 
     decision = np.zeros(len(starts), dtype=bool)
     for ep in eps:
@@ -169,9 +128,15 @@ def evaluate(
 
     false_eps = sum(1 for ep in eps if is_false(ep))
     valid_days = len(starts) * window.total_seconds() / 86400.0
+    operating_windows = (
+        int((~np.asarray(suppress, dtype=bool)).sum()) if suppress is not None else len(starts)
+    )
+    operating_days = operating_windows * window.total_seconds() / 86400.0
     return EvaluationResult(
         valid_windows=len(starts),
         valid_days=round(valid_days, 2),
+        operating_windows=operating_windows,
+        operating_days=round(operating_days, 2),
         positive_windows=int(labels.sum()),
         average_precision=ap,
         precision=precision,
@@ -184,4 +149,18 @@ def evaluate(
         alarm_episodes=len(eps),
         false_alarm_episodes=false_eps,
         false_alarms_per_day=round(false_eps / valid_days, 3) if valid_days else 0.0,
+        operating_false_alarms_per_day=round(false_eps / operating_days, 3)
+        if operating_days
+        else 0.0,
     )
+
+
+__all__ = [
+    "AlarmPolicy",
+    "Episode",
+    "EvaluationResult",
+    "EventResult",
+    "episodes",
+    "evaluate",
+    "window_labels",
+]

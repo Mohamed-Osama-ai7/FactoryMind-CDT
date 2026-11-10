@@ -6,11 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * `stopped` is an explained state (machine off), not an anomaly.
+ */
 export type WindowResultStatus = typeof WindowResultStatus[keyof typeof WindowResultStatus];
 
 
 export const WindowResultStatus = {
   normal: 'normal',
   anomalous: 'anomalous',
+  stopped: 'stopped',
   insufficient_data: 'insufficient_data',
 } as const;

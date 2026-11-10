@@ -1,5 +1,10 @@
 # M1 — Compressor anomaly detection (MetroPT-3)
 
+> **Superseded protocol.** The evaluation protocol and results below are the M1 record. WP0 replaced
+> the single-validation-event protocol with nested leave-one-event-out evaluation and added a physics
+> baseline; see [m2-wp0-detection-hardening.md](m2-wp0-detection-hardening.md) for the current
+> protocol, results and default detector.
+
 First end-to-end pipeline: real dataset → validation → preprocessing → baselines → evaluation →
 inference → FastAPI → React. Advisory only: outputs are anomaly scores and evidence for human
 review; nothing controls equipment.

@@ -8,6 +8,11 @@
             "title": "End",
             "type": "string"
           },
+          "ongoing": {
+            "description": "Still anomalous at the end of the requested range.",
+            "title": "Ongoing",
+            "type": "boolean"
+          },
           "peak_score": {
             "title": "Peak Score",
             "type": "number"
@@ -21,13 +26,20 @@
             "format": "date-time",
             "title": "Start",
             "type": "string"
+          },
+          "truncated": {
+            "description": "The run may have started before the scanned range.",
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "required": [
           "start",
           "end",
           "raised_at",
-          "peak_score"
+          "peak_score",
+          "truncated",
+          "ongoing"
         ],
         "title": "AlarmEpisode",
         "type": "object"
@@ -38,6 +50,24 @@
             "title": "Feature",
             "type": "string"
           },
+          "group": {
+            "description": "Physical signal group; at most one item per group.",
+            "title": "Group",
+            "type": "string"
+          },
+          "group_label": {
+            "title": "Group Label",
+            "type": "string"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
+          },
+          "novel": {
+            "description": "The feature never varied in training and now differs.",
+            "title": "Novel",
+            "type": "boolean"
+          },
           "robust_z": {
             "anyOf": [
               {
@@ -47,7 +77,7 @@
                 "type": "null"
               }
             ],
-            "description": "Deviation from training distribution, not a cause.",
+            "description": "Deviation from the training distribution; null when the feature never varied in training (see `novel`). A deviation is not a cause.",
             "title": "Robust Z"
           },
           "training_median": {
@@ -55,6 +85,70 @@
             "type": "number"
           },
           "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "group",
+          "group_label",
+          "feature",
+          "value",
+          "training_median",
+          "robust_z",
+          "novel",
+          "meaning"
+        ],
+        "title": "Evidence",
+        "type": "object"
+      },
+      "ExceedanceCheck": {
+        "properties": {
+          "alpha": {
+            "title": "Alpha",
+            "type": "number"
+          },
+          "by_month": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "By Month",
+            "type": "object"
+          },
+          "share_at_or_below_alpha": {
+            "description": "Observed share of far-from-report operating windows at or below alpha.",
+            "title": "Share At Or Below Alpha",
+            "type": "number"
+          },
+          "windows": {
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alpha",
+          "share_at_or_below_alpha",
+          "by_month",
+          "windows"
+        ],
+        "title": "ExceedanceCheck",
+        "type": "object"
+      },
+      "FaultSummary": {
+        "properties": {
+          "cases": {
+            "title": "Cases",
+            "type": "integer"
+          },
+          "clean_control_cases": {
+            "title": "Clean Control Cases",
+            "type": "integer"
+          },
+          "clean_control_detected": {
+            "title": "Clean Control Detected",
+            "type": "integer"
+          },
+          "clean_control_sensitivity": {
             "anyOf": [
               {
                 "type": "number"
@@ -63,16 +157,84 @@
                 "type": "null"
               }
             ],
-            "title": "Value"
+            "description": "Share of clean (non-alarming) control intervals where the injected fault raised an alarm.",
+            "title": "Clean Control Sensitivity"
+          },
+          "control_alarm_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of unmodified control intervals that already raised an alarm.",
+            "title": "Control Alarm Rate"
+          },
+          "control_alarms": {
+            "title": "Control Alarms",
+            "type": "string"
+          },
+          "control_detected": {
+            "title": "Control Detected",
+            "type": "integer"
+          },
+          "detected": {
+            "title": "Detected",
+            "type": "integer"
+          },
+          "gross_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of faulted intervals that raised an alarm (includes control alarms).",
+            "title": "Gross Rate"
+          },
+          "incremental_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "gross_rate minus control_alarm_rate.",
+            "title": "Incremental Lift"
+          },
+          "per_type": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Per Type",
+            "type": "object"
+          },
+          "simulated": {
+            "title": "Simulated",
+            "type": "boolean"
           }
         },
         "required": [
-          "feature",
-          "value",
-          "training_median",
-          "robust_z"
+          "detected",
+          "cases",
+          "gross_rate",
+          "control_detected",
+          "control_alarm_rate",
+          "control_alarms",
+          "clean_control_cases",
+          "clean_control_detected",
+          "clean_control_sensitivity",
+          "incremental_lift",
+          "per_type",
+          "simulated"
         ],
-        "title": "Evidence",
+        "title": "FaultSummary",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -118,6 +280,86 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "LoeoFold": {
+        "properties": {
+          "delay_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Minutes"
+          },
+          "detected": {
+            "title": "Detected",
+            "type": "boolean"
+          },
+          "held_out": {
+            "title": "Held Out",
+            "type": "string"
+          }
+        },
+        "required": [
+          "held_out",
+          "detected",
+          "delay_minutes"
+        ],
+        "title": "LoeoFold",
+        "type": "object"
+      },
+      "LoeoSummary": {
+        "properties": {
+          "events_detected": {
+            "title": "Events Detected",
+            "type": "integer"
+          },
+          "events_total": {
+            "title": "Events Total",
+            "type": "integer"
+          },
+          "folds": {
+            "items": {
+              "$ref": "#/components/schemas/LoeoFold"
+            },
+            "title": "Folds",
+            "type": "array"
+          },
+          "mean_false_alarms_per_day": {
+            "description": "Mean false alarms per all valid evaluation days (includes stopped days).",
+            "title": "Mean False Alarms Per Day",
+            "type": "number"
+          },
+          "mean_operating_false_alarms_per_day": {
+            "description": "Mean false alarms per operating evaluation day (excludes stopped days).",
+            "title": "Mean Operating False Alarms Per Day",
+            "type": "number"
+          },
+          "median_abs_delay_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Abs Delay Minutes"
+          }
+        },
+        "required": [
+          "events_detected",
+          "events_total",
+          "mean_false_alarms_per_day",
+          "mean_operating_false_alarms_per_day",
+          "median_abs_delay_minutes",
+          "folds"
+        ],
+        "title": "LoeoSummary",
+        "type": "object"
+      },
       "ModelInfo": {
         "properties": {
           "data_kind": {
@@ -140,6 +382,31 @@
             "title": "Detector",
             "type": "string"
           },
+          "exceedance_at_threshold": {
+            "title": "Exceedance At Threshold",
+            "type": "number"
+          },
+          "exceedance_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExceedanceCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed exceedance rate on far-from-report operating evaluation windows."
+          },
+          "fault_injection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FaultSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "intended_use": {
             "title": "Intended Use",
             "type": "string"
@@ -150,6 +417,9 @@
             },
             "title": "Limitations",
             "type": "array"
+          },
+          "loeo": {
+            "$ref": "#/components/schemas/LoeoSummary"
           },
           "model_version": {
             "title": "Model Version",
@@ -166,6 +436,17 @@
           "persistence": {
             "title": "Persistence",
             "type": "integer"
+          },
+          "reference_holdout_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferenceHoldoutCheck"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Split-half calibration reference stability check. Exceedance is a share of reference-normal windows, never a failure probability."
           },
           "replay_available_from": {
             "anyOf": [
@@ -191,8 +472,13 @@
             ],
             "title": "Replay Available To"
           },
-          "test": {
-            "$ref": "#/components/schemas/SplitMetrics"
+          "selected_as_default": {
+            "title": "Selected As Default",
+            "type": "boolean"
+          },
+          "selection_rationale": {
+            "title": "Selection Rationale",
+            "type": "string"
           },
           "threshold": {
             "title": "Threshold",
@@ -205,9 +491,6 @@
             "title": "Training Period",
             "type": "array"
           },
-          "validation": {
-            "$ref": "#/components/schemas/SplitMetrics"
-          },
           "window_length": {
             "title": "Window Length",
             "type": "string"
@@ -216,6 +499,8 @@
         "required": [
           "model_version",
           "detector",
+          "selected_as_default",
+          "selection_rationale",
           "dataset_id",
           "dataset_license",
           "dataset_source",
@@ -223,9 +508,10 @@
           "training_period",
           "threshold",
           "persistence",
+          "exceedance_at_threshold",
           "window_length",
-          "validation",
-          "test",
+          "loeo",
+          "fault_injection",
           "intended_use",
           "limitations",
           "replay_available_from",
@@ -263,6 +549,38 @@
           "failure"
         ],
         "title": "OperatorReport",
+        "type": "object"
+      },
+      "ReferenceHoldoutCheck": {
+        "properties": {
+          "alpha": {
+            "description": "Nominal exceedance alpha tested on split-half holdout.",
+            "title": "Alpha",
+            "type": "number"
+          },
+          "share_at_or_below_alpha": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed share of held-out reference windows at or below alpha. Values well above alpha show reference drift; exceedance is not a failure probability.",
+            "title": "Share At Or Below Alpha"
+          },
+          "windows": {
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alpha",
+          "share_at_or_below_alpha",
+          "windows"
+        ],
+        "title": "ReferenceHoldoutCheck",
         "type": "object"
       },
       "ReplayResponse": {
@@ -451,7 +769,7 @@
         "additionalProperties": false,
         "properties": {
           "samples": {
-            "description": "Chronological samples forming one window (nominally 10 min at ~0.1 Hz).",
+            "description": "Chronological samples forming one 10-minute window at ~0.1 Hz (>= 48 samples required to score; total span 7-11 min with 60 s tolerance, median sampling period 5-15 s, internal gaps <= 60 s, no silent resampling).",
             "items": {
               "$ref": "#/components/schemas/Sample"
             },
@@ -474,6 +792,10 @@
             "title": "Advisory",
             "type": "string"
           },
+          "exceedance_at_threshold": {
+            "title": "Exceedance At Threshold",
+            "type": "number"
+          },
           "model_version": {
             "title": "Model Version",
             "type": "string"
@@ -489,49 +811,10 @@
         "required": [
           "model_version",
           "threshold",
+          "exceedance_at_threshold",
           "result"
         ],
         "title": "ScoreResponse",
-        "type": "object"
-      },
-      "SplitMetrics": {
-        "properties": {
-          "average_precision": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Average Precision"
-          },
-          "events_detected": {
-            "title": "Events Detected",
-            "type": "integer"
-          },
-          "events_total": {
-            "title": "Events Total",
-            "type": "integer"
-          },
-          "false_alarms_per_day": {
-            "title": "False Alarms Per Day",
-            "type": "number"
-          },
-          "valid_days": {
-            "title": "Valid Days",
-            "type": "number"
-          }
-        },
-        "required": [
-          "events_detected",
-          "events_total",
-          "false_alarms_per_day",
-          "average_precision",
-          "valid_days"
-        ],
-        "title": "SplitMetrics",
         "type": "object"
       },
       "ValidationError": {
@@ -583,6 +866,18 @@
             "title": "Evidence",
             "type": "array"
           },
+          "exceedance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of reference-normal windows scoring at least this high (smoothed). Not a failure probability.",
+            "title": "Exceedance"
+          },
           "n_samples": {
             "title": "N Samples",
             "type": "integer"
@@ -599,9 +894,11 @@
             "title": "Score"
           },
           "status": {
+            "description": "`stopped` is an explained state (machine off), not an anomaly.",
             "enum": [
               "normal",
               "anomalous",
+              "stopped",
               "insufficient_data"
             ],
             "title": "Status",
@@ -624,6 +921,7 @@
           "n_samples",
           "status",
           "score",
+          "exceedance",
           "evidence"
         ],
         "title": "WindowResult",

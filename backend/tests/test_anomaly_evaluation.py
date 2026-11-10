@@ -93,3 +93,27 @@ def test_length_mismatch_rejected() -> None:
             early_horizon=pd.Timedelta(0),
             post_tolerance=pd.Timedelta(0),
         )
+
+
+def test_operating_false_alarms_per_day_excludes_suppressed_stopped_windows() -> None:
+    starts = _starts(6 * 24 * 2)  # 2 days = 288 windows
+    scores = np.zeros(len(starts))
+    # One isolated false alarm
+    scores[10:14] = 1.0
+    # Half of the period (144 windows = 1 day) is stopped/suppressed
+    suppress = np.zeros(len(starts), dtype=bool)
+    suppress[144:] = True
+    result = evaluate(
+        starts,
+        scores,
+        W,
+        AlarmPolicy(threshold=0.5, persistence=3),
+        [],
+        early_horizon=pd.Timedelta(0),
+        post_tolerance=pd.Timedelta(0),
+        suppress=suppress,
+    )
+    assert result.valid_days == pytest.approx(2.0)
+    assert result.operating_days == pytest.approx(1.0)
+    assert result.false_alarms_per_day == pytest.approx(0.5)
+    assert result.operating_false_alarms_per_day == pytest.approx(1.0)

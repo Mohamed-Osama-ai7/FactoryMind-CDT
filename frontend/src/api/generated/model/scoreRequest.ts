@@ -9,7 +9,7 @@ import type { Sample } from './sample';
 
 export interface ScoreRequest {
   /**
-     * Chronological samples forming one window (nominally 10 min at ~0.1 Hz).
+     * Chronological samples forming one 10-minute window at ~0.1 Hz (>= 48 samples required to score; total span 7-11 min with 60 s tolerance, median sampling period 5-15 s, internal gaps <= 60 s, no silent resampling).
      * @minItems 1
      * @maxItems 2000
      */

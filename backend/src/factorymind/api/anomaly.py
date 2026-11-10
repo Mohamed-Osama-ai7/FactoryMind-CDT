@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+import statistics
 from datetime import datetime
 from functools import lru_cache
 from itertools import pairwise
@@ -17,11 +18,13 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from factorymind.anomaly.evidence import EvidenceItem
+from factorymind.anomaly.features import WindowSpec
 from factorymind.anomaly.service import (
     AnomalyService,
     DataUnavailableError,
-    FeatureEvidence,
     ModelUnavailableError,
+    ReplayEpisode,
     WindowScore,
     load_bundle,
 )
@@ -29,12 +32,20 @@ from factorymind.config import get_settings
 from factorymind.data.metropt3 import (
     ANALOG_SENSORS,
     DIGITAL_SENSORS,
+    MAX_PERIOD_S,
+    MIN_PERIOD_S,
     VALID_RANGES,
     FailureReport,
 )
 
+_SCORE_SPEC = WindowSpec()
 MAX_SAMPLES = 2000
 MAX_REPLAY = pd.Timedelta(days=7)
+SCORE_WINDOW = pd.Timedelta(_SCORE_SPEC.length)
+SCORE_SPAN_TOLERANCE = pd.Timedelta(seconds=_SCORE_SPEC.span_tolerance_s)
+MIN_SCORE_SAMPLES = _SCORE_SPEC.min_samples
+MIN_SCORE_SPAN = pd.Timedelta(seconds=_SCORE_SPEC.min_block_span_s)
+MAX_SCORE_SPAN = pd.Timedelta(seconds=_SCORE_SPEC.max_block_span_s)
 
 router = APIRouter(prefix="/api/v1/anomaly", tags=["anomaly"])
 
@@ -99,7 +110,9 @@ class ScoreRequest(BaseModel):
     samples: list[Sample] = Field(
         min_length=1,
         max_length=MAX_SAMPLES,
-        description="Chronological samples forming one window (nominally 10 min at ~0.1 Hz).",
+        description="Chronological samples forming one 10-minute window at ~0.1 Hz "
+        "(>= 48 samples required to score; total span 7-11 min with 60 s tolerance, "
+        "median sampling period 5-15 s, internal gaps <= 60 s, no silent resampling).",
     )
 
     @model_validator(mode="after")
@@ -109,6 +122,25 @@ class ScoreRequest(BaseModel):
             raise ValueError("timestamps must be naive local train time, like the dataset")
         if any(b <= a for a, b in pairwise(stamps)):
             raise ValueError("sample timestamps must be strictly increasing")
+        span = pd.Timestamp(stamps[-1]) - pd.Timestamp(stamps[0])
+        if span > MAX_SCORE_SPAN:
+            raise ValueError(
+                "sample time span exceeds the 10-minute scoring window (60s tolerance)"
+            )
+        if len(stamps) >= MIN_SCORE_SAMPLES:
+            if span < MIN_SCORE_SPAN:
+                raise ValueError(
+                    "sample time span is below minimum 10-minute temporal coverage "
+                    f"({int(_SCORE_SPEC.min_block_span_s)}s required)"
+                )
+            deltas = [(b - a).total_seconds() for a, b in pairwise(stamps)]
+            median_period = float(statistics.median(deltas))
+            if not MIN_PERIOD_S <= median_period <= MAX_PERIOD_S:
+                raise ValueError(
+                    f"median sampling period {median_period:.2f}s violates the "
+                    f"{MIN_PERIOD_S:g}-{MAX_PERIOD_S:g}s (~0.1 Hz) contract; "
+                    "submit native 0.1 Hz telemetry without silent resampling"
+                )
         return self
 
     def to_frame(self) -> pd.DataFrame:
@@ -119,24 +151,38 @@ class ScoreRequest(BaseModel):
 
 
 class Evidence(BaseModel):
+    group: str = Field(description="Physical signal group; at most one item per group.")
+    group_label: str
     feature: str
-    value: float | None
+    value: float
     training_median: float
-    robust_z: float | None = Field(description="Deviation from training distribution, not a cause.")
+    robust_z: float | None = Field(
+        description="Deviation from the training distribution; null when the feature never "
+        "varied in training (see `novel`). A deviation is not a cause."
+    )
+    novel: bool = Field(description="The feature never varied in training and now differs.")
+    meaning: str
 
 
 class WindowResult(BaseModel):
     window_start: datetime
     window_end: datetime
     n_samples: int
-    status: Literal["normal", "anomalous", "insufficient_data"]
+    status: Literal["normal", "anomalous", "stopped", "insufficient_data"] = Field(
+        description="`stopped` is an explained state (machine off), not an anomaly."
+    )
     score: float | None
+    exceedance: float | None = Field(
+        description="Share of reference-normal windows scoring at least this high (smoothed). "
+        "Not a failure probability."
+    )
     evidence: list[Evidence]
 
 
 class ScoreResponse(BaseModel):
     model_version: str
     threshold: float
+    exceedance_at_threshold: float
     result: WindowResult
     advisory: str = "Advisory output for human review. FactoryMind never controls equipment."
 
@@ -146,6 +192,8 @@ class AlarmEpisode(BaseModel):
     end: datetime
     raised_at: datetime
     peak_score: float
+    truncated: bool = Field(description="The run may have started before the scanned range.")
+    ongoing: bool = Field(description="Still anomalous at the end of the requested range.")
 
 
 class OperatorReport(BaseModel):
@@ -166,17 +214,70 @@ class ReplayResponse(BaseModel):
     operator_reports: list[OperatorReport]
 
 
-class SplitMetrics(BaseModel):
+class LoeoFold(BaseModel):
+    held_out: str
+    detected: bool
+    delay_minutes: float | None
+
+
+class LoeoSummary(BaseModel):
     events_detected: int
     events_total: int
-    false_alarms_per_day: float
-    average_precision: float | None
-    valid_days: float
+    mean_false_alarms_per_day: float = Field(
+        description="Mean false alarms per all valid evaluation days (includes stopped days)."
+    )
+    mean_operating_false_alarms_per_day: float = Field(
+        description="Mean false alarms per operating evaluation day (excludes stopped days)."
+    )
+    median_abs_delay_minutes: float | None
+    folds: list[LoeoFold]
+
+
+class FaultSummary(BaseModel):
+    detected: int
+    cases: int
+    gross_rate: float | None = Field(
+        description="Share of faulted intervals that raised an alarm (includes control alarms)."
+    )
+    control_detected: int
+    control_alarm_rate: float | None = Field(
+        description="Share of unmodified control intervals that already raised an alarm."
+    )
+    control_alarms: str
+    clean_control_cases: int
+    clean_control_detected: int
+    clean_control_sensitivity: float | None = Field(
+        description="Share of clean (non-alarming) control intervals where the injected fault "
+        "raised an alarm."
+    )
+    incremental_lift: float | None = Field(description="gross_rate minus control_alarm_rate.")
+    per_type: dict[str, str]
+    simulated: bool
+
+
+class ReferenceHoldoutCheck(BaseModel):
+    alpha: float = Field(description="Nominal exceedance alpha tested on split-half holdout.")
+    share_at_or_below_alpha: float | None = Field(
+        description="Observed share of held-out reference windows at or below alpha. "
+        "Values well above alpha show reference drift; exceedance is not a failure probability."
+    )
+    windows: int
+
+
+class ExceedanceCheck(BaseModel):
+    alpha: float
+    share_at_or_below_alpha: float = Field(
+        description="Observed share of far-from-report operating windows at or below alpha."
+    )
+    by_month: dict[str, float]
+    windows: int
 
 
 class ModelInfo(BaseModel):
     model_version: str
     detector: str
+    selected_as_default: bool
+    selection_rationale: str
     dataset_id: str
     dataset_license: str
     dataset_source: str
@@ -184,9 +285,19 @@ class ModelInfo(BaseModel):
     training_period: list[str]
     threshold: float
     persistence: int
+    exceedance_at_threshold: float
     window_length: str
-    validation: SplitMetrics
-    test: SplitMetrics
+    loeo: LoeoSummary
+    fault_injection: FaultSummary | None
+    reference_holdout_check: ReferenceHoldoutCheck | None = Field(
+        default=None,
+        description="Split-half calibration reference stability check. Exceedance is a share of "
+        "reference-normal windows, never a failure probability.",
+    )
+    exceedance_check: ExceedanceCheck | None = Field(
+        default=None,
+        description="Observed exceedance rate on far-from-report operating evaluation windows.",
+    )
     intended_use: str
     limitations: list[str]
     replay_available_from: datetime | None
@@ -206,13 +317,21 @@ def _window(w: WindowScore) -> WindowResult:
         n_samples=w.n_samples,
         status=w.status,
         score=w.score,
+        exceedance=w.exceedance,
         evidence=[_evidence(e) for e in w.evidence],
     )
 
 
-def _evidence(e: FeatureEvidence) -> Evidence:
+def _evidence(e: EvidenceItem) -> Evidence:
     return Evidence(
-        feature=e.feature, value=e.value, training_median=e.training_median, robust_z=e.robust_z
+        group=e.group,
+        group_label=e.group_label,
+        feature=e.feature,
+        value=e.value,
+        training_median=e.training_median,
+        robust_z=e.robust_z,
+        novel=e.novel,
+        meaning=e.meaning,
     )
 
 
@@ -220,13 +339,30 @@ def _report(r: FailureReport) -> OperatorReport:
     return OperatorReport(report_id=r.report_id, start=r.start, end=r.end, failure=r.failure)
 
 
-def _split(metrics: dict[str, Any]) -> SplitMetrics:
-    return SplitMetrics(
-        events_detected=metrics["events_detected"],
-        events_total=metrics["events_total"],
-        false_alarms_per_day=metrics["false_alarms_per_day"],
-        average_precision=metrics["average_precision"],
-        valid_days=metrics["valid_days"],
+def _episode(e: ReplayEpisode) -> AlarmEpisode:
+    return AlarmEpisode(
+        start=e.episode.start.to_pydatetime(),
+        end=e.episode.end.to_pydatetime(),
+        raised_at=e.episode.raised_at.to_pydatetime(),
+        peak_score=e.episode.peak_score,
+        truncated=e.truncated,
+        ongoing=e.ongoing,
+    )
+
+
+def _loeo(summary: dict[str, Any]) -> LoeoSummary:
+    return LoeoSummary(
+        events_detected=summary["events_detected"],
+        events_total=summary["events_total"],
+        mean_false_alarms_per_day=summary["mean_false_alarms_per_day"],
+        mean_operating_false_alarms_per_day=summary["mean_operating_false_alarms_per_day"],
+        median_abs_delay_minutes=summary["median_abs_delay_minutes"],
+        folds=[
+            LoeoFold(
+                held_out=f["held_out"], detected=f["detected"], delay_minutes=f["delay_minutes"]
+            )
+            for f in summary["folds"]
+        ],
     )
 
 
@@ -237,9 +373,15 @@ def _split(metrics: dict[str, Any]) -> SplitMetrics:
 def anomaly_model(service: ServiceDep) -> ModelInfo:
     card, bundle = service.card, service.bundle
     data_range = service.data_range()
+    evaluation = card["evaluation"]
+    faults = evaluation["fault_injection"]
+    holdout = evaluation.get("reference_holdout_check")
+    exceedance_eval = evaluation.get("exceedance_check")
     return ModelInfo(
         model_version=bundle.version,
         detector=bundle.detector_name,
+        selected_as_default=evaluation["selected_as_default"],
+        selection_rationale=evaluation["selection_rationale"],
         dataset_id=card["dataset"]["id"],
         dataset_license=card["dataset"]["license"],
         dataset_source=card["dataset"]["source"],
@@ -247,9 +389,22 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
         training_period=card["training_period"],
         threshold=bundle.policy.threshold,
         persistence=bundle.policy.persistence,
+        exceedance_at_threshold=card["exceedance_at_threshold"],
         window_length=bundle.spec.length,
-        validation=_split(card["evaluation"]["validation"]),
-        test=_split(card["evaluation"]["test"]),
+        loeo=_loeo(evaluation["loeo"]),
+        fault_injection=FaultSummary(**{k: faults[k] for k in FaultSummary.model_fields})
+        if faults
+        else None,
+        reference_holdout_check=ReferenceHoldoutCheck(
+            **{k: holdout[k] for k in ReferenceHoldoutCheck.model_fields}
+        )
+        if holdout
+        else None,
+        exceedance_check=ExceedanceCheck(
+            **{k: exceedance_eval[k] for k in ExceedanceCheck.model_fields}
+        )
+        if exceedance_eval
+        else None,
         intended_use=card["intended_use"],
         limitations=card["limitations"],
         replay_available_from=data_range[0].to_pydatetime() if data_range else None,
@@ -264,6 +419,9 @@ def anomaly_score(request: ScoreRequest, service: ServiceDep) -> ScoreResponse:
     return ScoreResponse(
         model_version=service.bundle.version,
         threshold=service.bundle.policy.threshold,
+        exceedance_at_threshold=float(
+            service.bundle.calibrator.p_value(service.bundle.policy.threshold)[0]
+        ),
         result=_window(result),
     )
 
@@ -282,7 +440,7 @@ def anomaly_replay(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "end must be after start and within 7 days"
         )
     try:
-        windows, eps, reports = service.replay(lo, hi)
+        windows, episodes, reports = service.replay(lo, hi)
     except DataUnavailableError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     return ReplayResponse(
@@ -292,14 +450,6 @@ def anomaly_replay(
         start=start,
         end=end,
         windows=[_window(w) for w in windows],
-        episodes=[
-            AlarmEpisode(
-                start=e.start.to_pydatetime(),
-                end=e.end.to_pydatetime(),
-                raised_at=e.raised_at.to_pydatetime(),
-                peak_score=e.peak_score,
-            )
-            for e in eps
-        ],
+        episodes=[_episode(e) for e in episodes],
         operator_reports=[_report(r) for r in reports],
     )

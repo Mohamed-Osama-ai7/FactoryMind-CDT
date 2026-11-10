@@ -5,6 +5,7 @@ anomalous*. Scores are not probabilities; the alarm threshold is calibrated sepa
 
 - ``lps_rule``: the plant's own low-pressure switch (fraction of samples with LPS active). It
   represents the alarm that already exists, and is the baseline the models must beat.
+- ``duty_rule``: compressor load duty alone, the physics baseline.
 - ``robust_z``: max absolute robust z-score across features (median/MAD from training).
 - ``isolation_forest``: scikit-learn IsolationForest on imputed, robust-scaled features.
 - ``pca_spe``: PCA squared prediction error (SPE/Q statistic), a classic process-monitoring
@@ -24,7 +25,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler, StandardScaler
 
-DetectorName = Literal["lps_rule", "robust_z", "isolation_forest", "pca_spe"]
+DetectorName = Literal["lps_rule", "duty_rule", "robust_z", "isolation_forest", "pca_spe"]
 
 _MAD_TO_SIGMA = 1.4826
 _MIN_SCALE = 1e-6
@@ -73,6 +74,25 @@ class LpsRule:
 
     def score(self, features: pd.DataFrame) -> np.ndarray:
         return features["LPS_mean"].to_numpy(dtype="float64")
+
+
+@dataclass
+class DutyRule:
+    """Physics baseline: share of the window the compressor spent under load.
+
+    A healthy APU runs loaded roughly 7 % of the time (median over normal windows); an air leak
+    forces it to stay loaded for hours. One interpretable feature, no learning.
+    """
+
+    name: str = "duty_rule"
+
+    def fit(self, features: pd.DataFrame) -> DutyRule:
+        if "load_duty" not in features:
+            raise ValueError("load_duty feature required")
+        return self
+
+    def score(self, features: pd.DataFrame) -> np.ndarray:
+        return features["load_duty"].to_numpy(dtype="float64")
 
 
 @dataclass
@@ -149,6 +169,8 @@ class PcaSpe:
 def build_detector(name: DetectorName, params: dict[str, object], seed: int) -> Detector:
     if name == "lps_rule":
         return LpsRule()
+    if name == "duty_rule":
+        return DutyRule()
     if name == "robust_z":
         return RobustZ(**params)  # type: ignore[arg-type]
     if name == "isolation_forest":

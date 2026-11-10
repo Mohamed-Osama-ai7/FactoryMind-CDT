@@ -18,6 +18,8 @@ def simulate_apu(
     *,
     leak_from: str | None = None,
     leak_to: str | None = None,
+    off_from: str | None = None,
+    off_to: str | None = None,
     seed: int = 0,
 ) -> pd.DataFrame:
     """Simple APU compressor cycle at 10 s: pressure decays while unloaded and the compressor
@@ -27,11 +29,16 @@ def simulate_apu(
     leak = np.zeros(periods, dtype=bool)
     if leak_from and leak_to:
         leak = (index >= pd.Timestamp(leak_from)) & (index < pd.Timestamp(leak_to))
+    off = np.zeros(periods, dtype=bool)
+    if off_from and off_to:
+        off = (index >= pd.Timestamp(off_from)) & (index < pd.Timestamp(off_to))
     tp3 = np.empty(periods)
     loading = np.zeros(periods, dtype=bool)
     p, on = 9.0, False
     for i in range(periods):
-        if on:
+        if off[i]:
+            on = False
+        elif on:
             p += 0.08
             on = p < 9.5
         else:
@@ -47,7 +54,8 @@ def simulate_apu(
             "DV_pressure": np.where(loading, 0.0, 0.0) + np.abs(noise),
             "Reservoirs": tp3 - 0.01 + noise,
             "Oil_temperature": np.where(loading, 70.0, 60.0) + rng.normal(0, 0.2, periods),
-            "Motor_current": np.where(loading, 7.0, 4.0) + rng.normal(0, 0.05, periods),
+            "Motor_current": np.where(off, 0.04, np.where(loading, 7.0, 4.0))
+            + rng.normal(0, 0.05, periods),
             "COMP": np.where(loading, 0.0, 1.0),
             "DV_eletric": np.where(loading, 1.0, 0.0),
             "Towers": (np.arange(periods) // 300 % 2).astype(float),

@@ -10,8 +10,11 @@ import type { WindowResultStatus } from './windowResultStatus';
 
 export interface WindowResult {
   evidence: Evidence[];
+  /** Share of reference-normal windows scoring at least this high (smoothed). Not a failure probability. */
+  exceedance: number | null;
   n_samples: number;
   score: number | null;
+  /** `stopped` is an explained state (machine off), not an anomaly. */
   status: WindowResultStatus;
   window_end: string;
   window_start: string;

@@ -6,10 +6,4 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SplitMetrics {
-  average_precision: number | null;
-  events_detected: number;
-  events_total: number;
-  false_alarms_per_day: number;
-  valid_days: number;
-}
+export type ExceedanceCheckByMonth = {[key: string]: number};

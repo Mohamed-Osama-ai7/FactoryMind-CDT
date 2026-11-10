@@ -29,12 +29,15 @@ public [MetroPT-3 dataset](https://archive.ics.uci.edu/dataset/791/metropt+3+dat
 modes have known ground truth. Results on public, synthetic and simulated data are always reported
 separately.
 
-### M1 results at a glance
+### Detection results at a glance
 
-On held-out MetroPT-3 test data (82 days, three operator air-leak reports), the selected Isolation
-Forest detected 2/3 reports with no false alarms; PCA SPE detected 3/3 at 0.085 false alarms/day;
-the plant's own low-pressure switch caught 1/3. Selection, protocol and limitations are documented
-in [docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md).
+On real MetroPT-3 data (four operator air-leak reports), a physics rule on compressor load duty
+detects 4/4 reports at 0.034 false alarms/day (0.044 operating-day FA/day) under nested
+leave-one-event-out evaluation; learned detectors (Isolation Forest, PCA SPE) did not beat it on
+leaks, though PCA SPE catches simulated sensor faults the rule cannot. The plant's own
+low-pressure switch caught 1/4. Protocol, results and limitations:
+[docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md) (M1 record:
+[docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md)).
 
 ## Repository layout
 
