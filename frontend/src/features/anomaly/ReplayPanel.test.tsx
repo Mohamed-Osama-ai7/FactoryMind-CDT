@@ -107,17 +107,26 @@ function renderPanel() {
   )
 }
 
-function respond(body: unknown, status = 200) {
+const VIEWER = {
+  actor_id: 'vera',
+  tenant_id: 'acme',
+  roles: ['viewer'],
+  permissions: ['anomaly:read', 'incident:read'],
+  asset_ids: ['metropt3-apu-1'],
+}
+
+function respond(body: unknown, status = 200, me: unknown = VIEWER) {
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify(body), {
-          status,
+    vi.fn().mockImplementation((url: string) => {
+      const isMe = String(url).startsWith('/api/v1/me')
+      return Promise.resolve(
+        new Response(JSON.stringify(isMe ? me : body), {
+          status: isMe ? 200 : status,
           headers: { 'Content-Type': 'application/json' },
         }),
-      ),
-    ),
+      )
+    }),
   )
 }
 
@@ -132,7 +141,9 @@ describe('ReplayPanel', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByText(/F3 Air leak/)).toBeInTheDocument()
-    const url = String(vi.mocked(fetch).mock.calls[0]?.[0])
+    const url = String(
+      vi.mocked(fetch).mock.calls.find(([u]) => String(u).includes('/anomaly/replay'))?.[0],
+    )
     expect(url).toContain('start=2020-06-05T09%3A00%3A00')
     expect(url).toContain('end=2020-06-05T15%3A00%3A00')
   })

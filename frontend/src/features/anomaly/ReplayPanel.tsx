@@ -3,6 +3,7 @@ import { describeApiError } from '../../api/errors'
 import { useAnomalyReplay } from '../../api/generated/anomaly/anomaly'
 import type { AlarmEpisode, ReplayResponse, WindowResult } from '../../api/generated/model'
 import { addHours, formatNaive, toEpochMs } from '../../lib/naiveTime'
+import { CreateIncidentButton } from './CreateIncidentButton'
 import { ScoreChart } from './ScoreChart'
 
 export interface ReplayPanelProps {
@@ -173,6 +174,9 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
                 <th scope="col" className="font-normal">
                   <span className="sr-only">Evidence</span>
                 </th>
+                <th scope="col" className="pl-4 font-normal">
+                  <span className="sr-only">Incident</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -203,10 +207,17 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
                         {selected === i ? 'Hide evidence' : 'Show evidence'}
                       </button>
                     </td>
+                    <td className="py-1 pl-4">
+                      <CreateIncidentButton
+                        rangeStart={start}
+                        rangeEnd={end}
+                        episodeStart={e.start}
+                      />
+                    </td>
                   </tr>
                   {selected === i && evidenceWindow && (
                     <tr>
-                      <td colSpan={5} className="pb-3">
+                      <td colSpan={6} className="pb-3">
                         <EvidenceTable window={evidenceWindow} />
                       </td>
                     </tr>

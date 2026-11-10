@@ -67,4 +67,27 @@ role strings in a token are ignored; a token with no recognised role gets no per
 
 ## Results
 
-(filled in at the end of the work package)
+Verified locally on Windows 11 (Python 3.12 venv, Node via npm):
+
+| Gate | Result |
+|---|---|
+| Backend tests | 374 passed |
+| Backend ruff check / format / mypy | clean |
+| Frontend biome / tsc | clean |
+| Frontend vitest | 25 passed |
+| Frontend production build | succeeds |
+| OpenAPI client regeneration | no drift after regeneration |
+
+Evidence is from automated tests with locally generated RSA keys and a static JWKS. Not verified:
+behaviour against a real identity provider (issuer metadata, key rotation, refresh), the browser
+sign-in redirect end to end, PostgreSQL (tests use SQLite), and multi-process deployment (the rate
+limiter is in-process, so limits are per worker). No production-readiness claim is made.
+
+Remaining risks and unfinished items:
+
+- Access tokens are held in memory only, so a page reload re-runs sign-in; silent renew is off.
+- Roles/tenant/asset claim names are configurable but untested against a specific IdP.
+- Rate limiting is single-process; a shared store is needed before scaling out.
+- Audit hash chain detects tampering after the fact; it does not prevent a database owner rewriting it.
+- No UI yet for recording decisions or reading the audit log (API only).
+
