@@ -23,6 +23,13 @@ function RootLayout() {
           >
             Overview
           </Link>
+          <Link
+            to="/anomaly"
+            className="rounded px-2 py-1.5 text-muted hover:bg-border hover:text-ink"
+            activeProps={{ className: 'bg-border text-ink' }}
+          >
+            Anomaly monitor
+          </Link>
         </nav>
       </aside>
       <main className="flex-1 p-6">

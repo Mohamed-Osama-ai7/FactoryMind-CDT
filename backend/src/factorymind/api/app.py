@@ -12,6 +12,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
 from factorymind import __version__
+from factorymind.api.anomaly import router as anomaly_router
 from factorymind.config import get_settings
 
 
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
             operating_mode="advisory-read-only",
         )
 
+    app.include_router(anomaly_router)
     return app
 
 

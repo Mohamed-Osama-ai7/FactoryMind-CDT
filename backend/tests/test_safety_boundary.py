@@ -11,7 +11,11 @@ from fastapi.routing import APIRoute
 from factorymind.api.app import create_app
 
 # Internal workflow writes (incidents, reviews, audit) will be listed here as they are added.
-ALLOWED_MUTATING_PATHS: frozenset[str] = frozenset()
+ALLOWED_MUTATING_PATHS: frozenset[str] = frozenset(
+    {
+        "/api/v1/anomaly/score",  # stateless scoring of submitted samples; persists nothing
+    }
+)
 
 FORBIDDEN_PATH_PATTERN = re.compile(
     r"(plc|setpoint|actuat|write[-_]?tag|command|control)", re.IGNORECASE
