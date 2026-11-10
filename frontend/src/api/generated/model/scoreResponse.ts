@@ -9,6 +9,7 @@ import type { WindowResult } from './windowResult';
 
 export interface ScoreResponse {
   advisory?: string;
+  exceedance_at_threshold: number;
   model_version: string;
   result: WindowResult;
   threshold: number;

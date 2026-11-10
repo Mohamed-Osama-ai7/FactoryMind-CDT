@@ -31,12 +31,13 @@ function Summary({ data }: { data: ReplayResponse }) {
       acc[w.status] += 1
       return acc
     },
-    { normal: 0, anomalous: 0, insufficient_data: 0 },
+    { normal: 0, anomalous: 0, stopped: 0, insufficient_data: 0 },
   )
   return (
     <p className="text-sm text-muted">
       {data.windows.length} windows: {counts.normal} normal, {counts.anomalous} above threshold,{' '}
-      {counts.insufficient_data} with insufficient data · {data.episodes.length} alarm episode
+      {counts.stopped} machine stopped (explained), {counts.insufficient_data} with insufficient
+      data · {data.episodes.length} alarm episode
       {data.episodes.length === 1 ? '' : 's'} (≥{data.persistence} consecutive windows)
     </p>
   )
@@ -46,11 +47,15 @@ function EvidenceTable({ window }: { window: WindowResult }) {
   return (
     <table className="mt-2 w-full text-sm">
       <caption className="text-left text-muted">
-        Largest deviations from the training distribution in the peak window (
-        {formatNaive(window.window_start)}). Deviation is evidence for review, not a root cause.
+        Evidence in the peak window ({formatNaive(window.window_start)}), one item per physical
+        signal group. A deviation from the training distribution shows an unusual state, not a
+        cause.
       </caption>
       <thead>
         <tr className="text-left text-muted">
+          <th scope="col" className="pr-4 font-normal">
+            Signal group
+          </th>
           <th scope="col" className="pr-4 font-normal">
             Feature
           </th>
@@ -61,17 +66,27 @@ function EvidenceTable({ window }: { window: WindowResult }) {
             Training median
           </th>
           <th scope="col" className="font-normal">
-            Robust z
+            Deviation (robust z)
           </th>
         </tr>
       </thead>
       <tbody>
         {window.evidence.map((e) => (
-          <tr key={e.feature} className="border-t border-border">
+          <tr key={e.group} className="border-t border-border align-top">
+            <td className="py-1 pr-4">
+              <span className="font-medium">{e.group_label}</span>
+              <span className="block text-xs text-muted">{e.meaning}</span>
+            </td>
             <td className="py-1 pr-4 font-mono">{e.feature}</td>
-            <td className="py-1 pr-4">{e.value === null ? 'n/a' : e.value.toFixed(3)}</td>
+            <td className="py-1 pr-4">{e.value.toFixed(3)}</td>
             <td className="py-1 pr-4">{e.training_median.toFixed(3)}</td>
-            <td className="py-1">{e.robust_z === null ? 'n/a' : e.robust_z.toFixed(1)}</td>
+            <td className="py-1">
+              {e.novel
+                ? 'never varied in training'
+                : e.robust_z === null
+                  ? 'n/a'
+                  : e.robust_z.toFixed(1)}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -164,8 +179,18 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
               {replay.episodes.map((e, i) => (
                 <Fragment key={e.start}>
                   <tr className="border-t border-border">
-                    <td className="py-1 pr-4">{formatNaive(e.raised_at)}</td>
-                    <td className="py-1 pr-4">{formatNaive(e.start)}</td>
+                    <td className="py-1 pr-4">
+                      {formatNaive(e.raised_at)}
+                      {e.ongoing && <span className="block text-xs text-muted">ongoing</span>}
+                    </td>
+                    <td className="py-1 pr-4">
+                      {formatNaive(e.start)}
+                      {e.truncated && (
+                        <span className="block text-xs text-muted">
+                          started earlier (look-back limit)
+                        </span>
+                      )}
+                    </td>
                     <td className="py-1 pr-4">{formatNaive(e.end)}</td>
                     <td className="py-1 pr-4">{e.peak_score.toFixed(3)}</td>
                     <td className="py-1">

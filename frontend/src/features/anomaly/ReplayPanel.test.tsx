@@ -25,6 +25,7 @@ const replay: ReplayResponse = {
       n_samples: 60,
       status: 'normal',
       score: 0.5,
+      exceedance: 0.4,
       evidence: [],
     },
     {
@@ -33,6 +34,7 @@ const replay: ReplayResponse = {
       n_samples: 12,
       status: 'insufficient_data',
       score: null,
+      exceedance: null,
       evidence: [],
     },
     {
@@ -41,7 +43,19 @@ const replay: ReplayResponse = {
       n_samples: 60,
       status: 'anomalous',
       score: 0.8,
-      evidence: [{ feature: 'load_duty', value: 0.9, training_median: 0.1, robust_z: 12.5 }],
+      exceedance: 0.01,
+      evidence: [
+        {
+          group: 'operating_state',
+          group_label: 'Operating state',
+          feature: 'load_duty',
+          value: 0.9,
+          training_median: 0.1,
+          robust_z: 12.5,
+          novel: false,
+          meaning: 'Share of the window the compressor spent under load.',
+        },
+      ],
     },
     {
       window_start: '2020-06-05T09:30:00',
@@ -49,7 +63,19 @@ const replay: ReplayResponse = {
       n_samples: 60,
       status: 'anomalous',
       score: 0.75,
-      evidence: [{ feature: 'TP2_mean', value: 9.1, training_median: 0.0, robust_z: 4.0 }],
+      exceedance: 0.02,
+      evidence: [
+        {
+          group: 'pressure_level',
+          group_label: 'Pressure level',
+          feature: 'TP2_mean',
+          value: 9.1,
+          training_median: 0.0,
+          robust_z: 4.0,
+          novel: false,
+          meaning: 'Compressor outlet pressure (TP2).',
+        },
+      ],
     },
   ],
   episodes: [
@@ -58,6 +84,8 @@ const replay: ReplayResponse = {
       end: '2020-06-05T09:40:00',
       raised_at: '2020-06-05T09:40:00',
       peak_score: 0.8,
+      truncated: false,
+      ongoing: false,
     },
   ],
   operator_reports: [
@@ -99,7 +127,9 @@ describe('ReplayPanel', () => {
     renderPanel()
     expect(await screen.findByTestId('score-chart')).toHaveTextContent('4 windows')
     expect(
-      screen.getByText(/1 normal, 2 above threshold, 1 with insufficient data/),
+      screen.getByText(
+        /1 normal, 2 above threshold, 0 machine stopped \(explained\), 1 with insufficient\s+data/,
+      ),
     ).toBeInTheDocument()
     expect(screen.getByText(/F3 Air leak/)).toBeInTheDocument()
     const url = String(vi.mocked(fetch).mock.calls[0]?.[0])
@@ -126,5 +156,39 @@ describe('ReplayPanel', () => {
     respond({ detail: 'telemetry.parquet not found' }, 503)
     renderPanel()
     expect(await screen.findByRole('alert')).toHaveTextContent('telemetry.parquet not found')
+  })
+
+  it('shows stopped windows as explained and novel evidence without an absurd z-score', async () => {
+    const windows = [
+      { ...replay.windows[0], status: 'stopped' as const, score: null, exceedance: null },
+      {
+        ...replay.windows[2],
+        evidence: [
+          {
+            group: 'protection_switches',
+            group_label: 'Protection switches',
+            feature: 'Oil_level_mean',
+            value: 0,
+            training_median: 1,
+            robust_z: null,
+            novel: true,
+            meaning: 'Oil-level switch, active when the oil is below the expected level.',
+          },
+        ],
+      },
+      replay.windows[3],
+    ]
+    respond({
+      ...replay,
+      windows,
+      episodes: [{ ...replay.episodes[0], ongoing: true, truncated: true }],
+    })
+    renderPanel()
+    expect(await screen.findByText(/1 machine stopped \(explained\)/)).toBeInTheDocument()
+    expect(screen.getByText('ongoing')).toBeInTheDocument()
+    expect(screen.getByText(/started earlier/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Show evidence' }))
+    expect(screen.getByText('never varied in training')).toBeInTheDocument()
+    expect(screen.getByText('Protection switches')).toBeInTheDocument()
   })
 })

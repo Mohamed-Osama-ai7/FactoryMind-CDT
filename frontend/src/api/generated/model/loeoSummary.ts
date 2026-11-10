@@ -5,11 +5,12 @@
  * Evidence-grounded, uncertainty-aware decision support. Advisory only.
  * OpenAPI spec version: 0.1.0
  */
+import type { LoeoFold } from './loeoFold';
 
-export interface SplitMetrics {
-  average_precision: number | null;
+export interface LoeoSummary {
   events_detected: number;
   events_total: number;
-  false_alarms_per_day: number;
-  valid_days: number;
+  folds: LoeoFold[];
+  mean_false_alarms_per_day: number;
+  median_abs_delay_minutes: number | null;
 }

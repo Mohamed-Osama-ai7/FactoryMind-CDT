@@ -8,8 +8,14 @@
 
 export interface Evidence {
   feature: string;
-  /** Deviation from training distribution, not a cause. */
+  /** Physical signal group; at most one item per group. */
+  group: string;
+  group_label: string;
+  meaning: string;
+  /** The feature never varied in training and now differs. */
+  novel: boolean;
+  /** Deviation from the training distribution; null when the feature never varied in training (see `novel`). A deviation is not a cause. */
   robust_z: number | null;
   training_median: number;
-  value: number | null;
+  value: number;
 }

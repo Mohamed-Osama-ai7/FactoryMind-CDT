@@ -8,7 +8,11 @@
 
 export interface AlarmEpisode {
   end: string;
+  /** Still anomalous at the end of the requested range. */
+  ongoing: boolean;
   peak_score: number;
   raised_at: string;
   start: string;
+  /** The run may have started before the scanned range. */
+  truncated: boolean;
 }
