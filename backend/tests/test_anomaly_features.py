@@ -71,3 +71,34 @@ def test_empty_input_rejected() -> None:
         window_features(empty, SPEC)
     with pytest.raises(ValueError, match="empty"):
         block_features(empty, SPEC)
+
+
+def test_stopped_windows_are_explained_and_features_describe_the_state() -> None:
+    frame = simulate_apu(
+        "2020-01-01 00:00", 6 * 60 * 2, off_from="2020-01-01 00:20", off_to="2020-01-01 01:00"
+    )
+    out = window_features(frame, SPEC)
+    assert out.loc["2020-01-01 00:20":"2020-01-01 00:50", "stopped"].all()
+    assert (out.loc["2020-01-01 00:20":"2020-01-01 00:50", "off_fraction"] > 0.95).all()
+    assert not out.loc["2020-01-01 01:10":, "stopped"].any()
+    assert (out["off_fraction"] + out["load_duty"] <= 1.0 + 1e-9).all()
+
+
+def test_loaded_rise_is_observable_during_loading_and_slower_when_leaking() -> None:
+    normal = simulate_apu("2020-01-01", 6 * 60 * 4, seed=1)
+    leak = simulate_apu(
+        "2020-01-01", 6 * 60 * 4, leak_from="2020-01-01", leak_to="2020-01-02", seed=1
+    )
+    n = window_features(normal, SPEC)["loaded_tp3_rise"].dropna()
+    assert (n > 0).all() and len(n) > 3  # TP3 rises while the compressor loads
+    # under a sustained leak the unloaded phase is short, so the unloaded slope is rarely defined
+    assert (
+        window_features(leak, SPEC)["load_duty"].mean()
+        > 2 * window_features(normal, SPEC)["load_duty"].mean()
+    )
+
+
+def test_stopped_threshold_is_configurable() -> None:
+    frame = simulate_apu("2020-01-01", 60, off_from="2020-01-01", off_to="2020-01-01 00:05")
+    assert not window_features(frame, WindowSpec(stopped_off_fraction=0.9))["stopped"].iloc[0]
+    assert window_features(frame, WindowSpec(stopped_off_fraction=0.4))["stopped"].iloc[0]

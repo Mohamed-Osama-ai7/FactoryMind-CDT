@@ -1,7 +1,7 @@
 """Command-line entry points for the MetroPT-3 pipeline.
 
 uv run python -m factorymind.anomaly.cli prepare    # download, verify, validate, store Parquet
-uv run python -m factorymind.anomaly.cli train      # run experiment, save results and models
+uv run python -m factorymind.anomaly.cli train      # run the protocol, save results and models
 """
 
 from __future__ import annotations
@@ -19,19 +19,25 @@ DEFAULT_CONFIG = Path(__file__).resolve().parents[3] / "configs" / "metropt3_ano
 
 
 def _summary(results: dict[str, Any]) -> str:
-    lines = [f"version {results['version']}  selected: {results['selected_detector']}"]
+    lines = [
+        f"version {results['version']}  default: {results['selected_detector']} "
+        f"({results['selection_rationale']})",
+        f"{'detector':<17}{'LOEO leaks':>11}{'FA/day':>8}{'|delay|':>9}"
+        f"{'faults':>9}{'ctrl':>7}{'p<=a':>8}",
+    ]
     detectors: dict[str, Any] = results["detectors"]
-    header = f"{'detector':<18}{'split':<11}{'events':>8}{'FA/day':>9}{'AP':>8}{'q':>7}{'k':>3}"
-    lines.append(header)
-    for name, det in detectors.items():
-        for split in ("validation", "test"):
-            r = det[split]
-            ap = r["average_precision"]
-            lines.append(
-                f"{name:<18}{split:<11}{r['events_detected']:>4}/{r['events_total']:<3}"
-                f"{r['false_alarms_per_day']:>9.3f}{(ap if ap is not None else float('nan')):>8.3f}"
-                f"{det['threshold_quantile']:>7}{det['persistence']:>3}"
-            )
+    for name, d in detectors.items():
+        loeo = d["loeo"]
+        faults = d["fault_injection"]
+        delay = loeo["median_abs_delay_minutes"]
+        lines.append(
+            f"{name:<17}{loeo['events_detected']:>8}/{loeo['events_total']:<2}"
+            f"{loeo['mean_false_alarms_per_day']:>8.3f}"
+            f"{(f'{delay:.0f}' if delay is not None else '-'):>9}"
+            f"{(f'{faults["detected"]}/{faults["cases"]}' if faults else '-'):>9}"
+            f"{(faults['control_alarms'] if faults else '-'):>7}"
+            f"{d['exceedance_check']['share_at_or_below_alpha']:>8.3f}"
+        )
     return "\n".join(lines)
 
 
@@ -41,6 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("prepare", help="download, verify and validate MetroPT-3")
     train = sub.add_parser("train", help="run the experiment and save models")
     train.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    train.add_argument(
+        "--no-sensitivity", action="store_true", help="skip the exclusion-sensitivity re-run"
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -51,11 +60,16 @@ def main(argv: list[str] | None = None) -> int:
 
     config = experiment.ExperimentConfig.load(args.config)
     telemetry = metropt3.load_processed(settings.processed_dir)
-    results, bundles, scored = experiment.run(config, telemetry)
+    output = experiment.run(config, telemetry)
+    extra = None
+    if not args.no_sensitivity:
+        extra = {"sensitivity": experiment.run_sensitivity(config, telemetry)}
     run_dir = experiment.save(
-        results, bundles, scored, settings.artifacts_dir, settings.anomaly_model_name
+        output, settings.artifacts_dir, settings.anomaly_model_name, extra=extra
     )
-    print(_summary(results))
+    print(_summary(output.results))
+    if extra:
+        print("sensitivity (no extreme-duty exclusion):", json.dumps(extra["sensitivity"]))
     print(f"results: {run_dir / 'results.json'}")
     return 0
 

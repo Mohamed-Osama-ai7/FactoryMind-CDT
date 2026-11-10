@@ -4,12 +4,21 @@ The same functions are used for offline training/evaluation and for online infer
 API and the experiments cannot diverge. Missing data is never interpolated: windows with too
 few samples or an internal gap are marked invalid instead.
 
-Physically motivated derived features (air leaks make the compressor run loaded more often and
-make pressure decay faster while unloaded):
-- ``load_duty``: fraction of samples with the motor under load (current > 5.5 A).
+Operating states follow the motor current, which is clearly trimodal in MetroPT-3 (~0.04 A off,
+~4 A running unloaded, ~7 A under load): *off* < 1 A, *unloaded* 1-5.5 A, *loaded* > 5.5 A.
+
+Physically motivated derived features (an air leak makes the compressor run loaded more often,
+slows the pressure rise while loading and speeds up the decay while unloaded):
+- ``load_duty``: fraction of samples with the motor under load.
+- ``off_fraction``: fraction of samples with the motor off.
 - ``load_starts``: rising edges of the outlet-valve signal (load cycles started).
-- ``unloaded_tp3_slope``: median TP3 slope (bar/min) while the compressor is not loading.
+- ``unloaded_tp3_slope``: median TP3 slope (bar/min) while unloaded. Observable only when the
+  compressor actually unloads; during a sustained leak it never does.
+- ``loaded_tp3_rise``: median TP3 slope (bar/min) while loading; a leak slows it.
 - ``tp3_reservoir_gap``: mean TP3 minus reservoir pressure.
+
+A window is ``stopped`` (an *explained* state, not an anomaly) when the machine was off for at
+least ``stopped_off_fraction`` of it.
 """
 
 from __future__ import annotations
@@ -23,8 +32,16 @@ import pandas as pd
 from factorymind.data.metropt3 import ANALOG_SENSORS, DIGITAL_SENSORS, NOMINAL_PERIOD_S
 
 LOADED_CURRENT_A: Final = 5.5
+OFF_CURRENT_A: Final = 1.0
 _ANALOG_STATS: Final = ("mean", "std", "min", "max")
-DERIVED_FEATURES: Final = ("load_duty", "load_starts", "unloaded_tp3_slope", "tp3_reservoir_gap")
+DERIVED_FEATURES: Final = (
+    "load_duty",
+    "off_fraction",
+    "load_starts",
+    "unloaded_tp3_slope",
+    "loaded_tp3_rise",
+    "tp3_reservoir_gap",
+)
 FEATURE_NAMES: Final[tuple[str, ...]] = (
     *(f"{s}_{stat}" for s in ANALOG_SENSORS for stat in _ANALOG_STATS),
     *(f"{s}_mean" for s in DIGITAL_SENSORS),
@@ -40,6 +57,7 @@ class WindowSpec:
     min_coverage: float = 0.8  # fraction of nominal samples required
     max_gap_s: float = 60.0  # an internal gap longer than this invalidates the window
     resume_gap_s: float = 600.0  # a gap longer than this starts a new operating segment
+    stopped_off_fraction: float = 0.9  # off this share of a window => explained "stopped"
 
     @property
     def length_s(self) -> float:
@@ -61,14 +79,20 @@ def _sample_helpers(frame: pd.DataFrame, spec: WindowSpec) -> pd.DataFrame:
     slope = np.full(len(frame), np.nan)
     ok = contiguous & ~loading & ~prev_loading
     slope[ok] = (tp3[ok] - np.roll(tp3, 1)[ok]) / dt[ok] * 60.0
+    rise = np.full(len(frame), np.nan)
+    ok_rise = contiguous & loading & prev_loading
+    rise[ok_rise] = (tp3[ok_rise] - np.roll(tp3, 1)[ok_rise]) / dt[ok_rise] * 60.0
     starts = (contiguous & loading & ~prev_loading).astype("float64")
+    current = frame["Motor_current"].to_numpy()
     resume = ~((dt > 0) & (dt <= spec.resume_gap_s))
     segment_start = index.to_series().where(resume).ffill().to_numpy()
     return pd.DataFrame(
         {
-            "loaded": (frame["Motor_current"].to_numpy() > LOADED_CURRENT_A).astype("float64"),
+            "loaded": (current > LOADED_CURRENT_A).astype("float64"),
+            "off": (current < OFF_CURRENT_A).astype("float64"),
             "load_start": starts,
             "unloaded_slope": slope,
+            "loaded_rise": rise,
             "tp3_res_gap": tp3 - frame["Reservoirs"].to_numpy(),
             "gap_s": np.where(np.isnan(dt), 0.0, dt),
             "segment_start": segment_start,
@@ -90,8 +114,10 @@ def _aggregate(frame: pd.DataFrame, keys: np.ndarray, spec: WindowSpec) -> pd.Da
     derived = pd.DataFrame(
         {
             "load_duty": hg["loaded"].mean(),
+            "off_fraction": hg["off"].mean(),
             "load_starts": hg["load_start"].sum(),
             "unloaded_tp3_slope": hg["unloaded_slope"].median(),
+            "loaded_tp3_rise": hg["loaded_rise"].median(),
             "tp3_reservoir_gap": hg["tp3_res_gap"].mean(),
         }
     )
@@ -119,6 +145,7 @@ def _aggregate(frame: pd.DataFrame, keys: np.ndarray, spec: WindowSpec) -> pd.Da
     meta["valid"] = (meta["n_samples"] >= spec.min_samples) & (
         meta["max_internal_gap_s"] <= spec.max_gap_s
     )
+    meta["stopped"] = features["off_fraction"] >= spec.stopped_off_fraction
     return pd.concat([meta.drop(columns="segment_start"), features], axis=1)
 
 

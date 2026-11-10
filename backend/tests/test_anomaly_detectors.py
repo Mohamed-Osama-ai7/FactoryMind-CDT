@@ -69,3 +69,11 @@ def test_unfitted_detectors_raise() -> None:
             build_detector(name, {}, seed=0).score(frame)  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         build_detector("nope", {}, seed=0)  # type: ignore[arg-type]
+
+
+def test_duty_rule_scores_the_load_duty_and_needs_no_fit_data() -> None:
+    frame = pd.DataFrame({"load_duty": [0.05, 0.7]})
+    detector = build_detector("duty_rule", {}, seed=0).fit(frame)
+    assert detector.score(frame).tolist() == [0.05, 0.7]
+    with pytest.raises(ValueError, match="load_duty"):
+        build_detector("duty_rule", {}, seed=0).fit(pd.DataFrame({"x": [1.0]}))

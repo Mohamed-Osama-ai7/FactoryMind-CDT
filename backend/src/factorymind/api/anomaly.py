@@ -17,11 +17,12 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from factorymind.anomaly.evidence import EvidenceItem
 from factorymind.anomaly.service import (
     AnomalyService,
     DataUnavailableError,
-    FeatureEvidence,
     ModelUnavailableError,
+    ReplayEpisode,
     WindowScore,
     load_bundle,
 )
@@ -119,24 +120,38 @@ class ScoreRequest(BaseModel):
 
 
 class Evidence(BaseModel):
+    group: str = Field(description="Physical signal group; at most one item per group.")
+    group_label: str
     feature: str
-    value: float | None
+    value: float
     training_median: float
-    robust_z: float | None = Field(description="Deviation from training distribution, not a cause.")
+    robust_z: float | None = Field(
+        description="Deviation from the training distribution; null when the feature never "
+        "varied in training (see `novel`). A deviation is not a cause."
+    )
+    novel: bool = Field(description="The feature never varied in training and now differs.")
+    meaning: str
 
 
 class WindowResult(BaseModel):
     window_start: datetime
     window_end: datetime
     n_samples: int
-    status: Literal["normal", "anomalous", "insufficient_data"]
+    status: Literal["normal", "anomalous", "stopped", "insufficient_data"] = Field(
+        description="`stopped` is an explained state (machine off), not an anomaly."
+    )
     score: float | None
+    exceedance: float | None = Field(
+        description="Share of reference-normal windows scoring at least this high (smoothed). "
+        "Not a failure probability."
+    )
     evidence: list[Evidence]
 
 
 class ScoreResponse(BaseModel):
     model_version: str
     threshold: float
+    exceedance_at_threshold: float
     result: WindowResult
     advisory: str = "Advisory output for human review. FactoryMind never controls equipment."
 
@@ -146,6 +161,8 @@ class AlarmEpisode(BaseModel):
     end: datetime
     raised_at: datetime
     peak_score: float
+    truncated: bool = Field(description="The run may have started before the scanned range.")
+    ongoing: bool = Field(description="Still anomalous at the end of the requested range.")
 
 
 class OperatorReport(BaseModel):
@@ -166,17 +183,34 @@ class ReplayResponse(BaseModel):
     operator_reports: list[OperatorReport]
 
 
-class SplitMetrics(BaseModel):
+class LoeoFold(BaseModel):
+    held_out: str
+    detected: bool
+    delay_minutes: float | None
+
+
+class LoeoSummary(BaseModel):
     events_detected: int
     events_total: int
-    false_alarms_per_day: float
-    average_precision: float | None
-    valid_days: float
+    mean_false_alarms_per_day: float
+    median_abs_delay_minutes: float | None
+    folds: list[LoeoFold]
+
+
+class FaultSummary(BaseModel):
+    rate: float | None
+    detected: int
+    cases: int
+    control_alarms: str
+    per_type: dict[str, str]
+    simulated: bool
 
 
 class ModelInfo(BaseModel):
     model_version: str
     detector: str
+    selected_as_default: bool
+    selection_rationale: str
     dataset_id: str
     dataset_license: str
     dataset_source: str
@@ -184,9 +218,10 @@ class ModelInfo(BaseModel):
     training_period: list[str]
     threshold: float
     persistence: int
+    exceedance_at_threshold: float
     window_length: str
-    validation: SplitMetrics
-    test: SplitMetrics
+    loeo: LoeoSummary
+    fault_injection: FaultSummary | None
     intended_use: str
     limitations: list[str]
     replay_available_from: datetime | None
@@ -206,13 +241,21 @@ def _window(w: WindowScore) -> WindowResult:
         n_samples=w.n_samples,
         status=w.status,
         score=w.score,
+        exceedance=w.exceedance,
         evidence=[_evidence(e) for e in w.evidence],
     )
 
 
-def _evidence(e: FeatureEvidence) -> Evidence:
+def _evidence(e: EvidenceItem) -> Evidence:
     return Evidence(
-        feature=e.feature, value=e.value, training_median=e.training_median, robust_z=e.robust_z
+        group=e.group,
+        group_label=e.group_label,
+        feature=e.feature,
+        value=e.value,
+        training_median=e.training_median,
+        robust_z=e.robust_z,
+        novel=e.novel,
+        meaning=e.meaning,
     )
 
 
@@ -220,13 +263,29 @@ def _report(r: FailureReport) -> OperatorReport:
     return OperatorReport(report_id=r.report_id, start=r.start, end=r.end, failure=r.failure)
 
 
-def _split(metrics: dict[str, Any]) -> SplitMetrics:
-    return SplitMetrics(
-        events_detected=metrics["events_detected"],
-        events_total=metrics["events_total"],
-        false_alarms_per_day=metrics["false_alarms_per_day"],
-        average_precision=metrics["average_precision"],
-        valid_days=metrics["valid_days"],
+def _episode(e: ReplayEpisode) -> AlarmEpisode:
+    return AlarmEpisode(
+        start=e.episode.start.to_pydatetime(),
+        end=e.episode.end.to_pydatetime(),
+        raised_at=e.episode.raised_at.to_pydatetime(),
+        peak_score=e.episode.peak_score,
+        truncated=e.truncated,
+        ongoing=e.ongoing,
+    )
+
+
+def _loeo(summary: dict[str, Any]) -> LoeoSummary:
+    return LoeoSummary(
+        events_detected=summary["events_detected"],
+        events_total=summary["events_total"],
+        mean_false_alarms_per_day=summary["mean_false_alarms_per_day"],
+        median_abs_delay_minutes=summary["median_abs_delay_minutes"],
+        folds=[
+            LoeoFold(
+                held_out=f["held_out"], detected=f["detected"], delay_minutes=f["delay_minutes"]
+            )
+            for f in summary["folds"]
+        ],
     )
 
 
@@ -237,9 +296,13 @@ def _split(metrics: dict[str, Any]) -> SplitMetrics:
 def anomaly_model(service: ServiceDep) -> ModelInfo:
     card, bundle = service.card, service.bundle
     data_range = service.data_range()
+    evaluation = card["evaluation"]
+    faults = evaluation["fault_injection"]
     return ModelInfo(
         model_version=bundle.version,
         detector=bundle.detector_name,
+        selected_as_default=evaluation["selected_as_default"],
+        selection_rationale=evaluation["selection_rationale"],
         dataset_id=card["dataset"]["id"],
         dataset_license=card["dataset"]["license"],
         dataset_source=card["dataset"]["source"],
@@ -247,9 +310,12 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
         training_period=card["training_period"],
         threshold=bundle.policy.threshold,
         persistence=bundle.policy.persistence,
+        exceedance_at_threshold=card["exceedance_at_threshold"],
         window_length=bundle.spec.length,
-        validation=_split(card["evaluation"]["validation"]),
-        test=_split(card["evaluation"]["test"]),
+        loeo=_loeo(evaluation["loeo"]),
+        fault_injection=FaultSummary(**{k: faults[k] for k in FaultSummary.model_fields})
+        if faults
+        else None,
         intended_use=card["intended_use"],
         limitations=card["limitations"],
         replay_available_from=data_range[0].to_pydatetime() if data_range else None,
@@ -264,6 +330,9 @@ def anomaly_score(request: ScoreRequest, service: ServiceDep) -> ScoreResponse:
     return ScoreResponse(
         model_version=service.bundle.version,
         threshold=service.bundle.policy.threshold,
+        exceedance_at_threshold=float(
+            service.bundle.calibrator.p_value(service.bundle.policy.threshold)[0]
+        ),
         result=_window(result),
     )
 
@@ -282,7 +351,7 @@ def anomaly_replay(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "end must be after start and within 7 days"
         )
     try:
-        windows, eps, reports = service.replay(lo, hi)
+        windows, episodes, reports = service.replay(lo, hi)
     except DataUnavailableError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     return ReplayResponse(
@@ -292,14 +361,6 @@ def anomaly_replay(
         start=start,
         end=end,
         windows=[_window(w) for w in windows],
-        episodes=[
-            AlarmEpisode(
-                start=e.start.to_pydatetime(),
-                end=e.end.to_pydatetime(),
-                raised_at=e.raised_at.to_pydatetime(),
-                peak_score=e.peak_score,
-            )
-            for e in eps
-        ],
+        episodes=[_episode(e) for e in episodes],
         operator_reports=[_report(r) for r in reports],
     )
