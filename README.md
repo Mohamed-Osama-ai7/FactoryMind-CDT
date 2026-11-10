@@ -44,6 +44,10 @@ frontend/   React + TypeScript application
 docs/       Project documentation (reference material in docs/reference/)
 ```
 
+Start with [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md) (current state and next task), then
+[docs/architecture-review-post-m1.md](docs/architecture-review-post-m1.md) (review, roadmap,
+acceptance criteria) and [docs/decisions.md](docs/decisions.md) (architecture decisions).
+
 Large data, model caches and experiment runs are kept outside Git (see `.env.example`).
 
 ## Quick start
