@@ -29,7 +29,13 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
-from factorymind.data.metropt3 import ANALOG_SENSORS, DIGITAL_SENSORS, NOMINAL_PERIOD_S
+from factorymind.data.metropt3 import (
+    ANALOG_SENSORS,
+    DIGITAL_SENSORS,
+    MAX_PERIOD_S,
+    MIN_PERIOD_S,
+    NOMINAL_PERIOD_S,
+)
 
 LOADED_CURRENT_A: Final = 5.5
 OFF_CURRENT_A: Final = 1.0
@@ -58,13 +64,20 @@ class WindowSpec:
     max_gap_s: float = 60.0  # an internal gap longer than this invalidates the window
     resume_gap_s: float = 600.0  # a gap longer than this starts a new operating segment
     stopped_off_fraction: float = 0.9  # off this share of a window => explained "stopped"
-    # A submitted single-window block may span up to length + span_tolerance_s to allow inclusive
-    # endpoint samples and slight timestamp jitter while rejecting multi-window spans.
+    # A submitted single-window block may span [min_coverage * length - span_tolerance_s,
+    # length + span_tolerance_s] (7-11 min for a 10-min window) and must match the 0.1 Hz
+    # MetroPT-3 sampling cadence contract [min_period_s, max_period_s] without resampling.
     span_tolerance_s: float = 60.0
+    min_period_s: float = MIN_PERIOD_S
+    max_period_s: float = MAX_PERIOD_S
 
     @property
     def length_s(self) -> float:
         return float(pd.Timedelta(self.length).total_seconds())
+
+    @property
+    def min_block_span_s(self) -> float:
+        return max(0.0, self.min_coverage * self.length_s - self.span_tolerance_s)
 
     @property
     def max_block_span_s(self) -> float:
@@ -132,25 +145,33 @@ def _aggregate(frame: pd.DataFrame, keys: np.ndarray, spec: WindowSpec) -> pd.Da
     features = pd.concat(parts, axis=1)[list(FEATURE_NAMES)]
 
     ts = pd.Series(pd.DatetimeIndex(frame.index), index=frame.index)
+    key_series = pd.Series(keys, index=frame.index)
+    # The first sample's gap belongs to the previous window, so exclude it from internal metrics.
+    internal_gaps = helpers["gap_s"].where(key_series.eq(key_series.shift(1)))
     meta = pd.DataFrame(
         {
-            "first_sample": ts.groupby(keys).min().to_numpy(),
-            "last_sample": ts.groupby(keys).max().to_numpy(),
+            "first_sample": ts.groupby(keys, sort=True).min().to_numpy(),
+            "last_sample": ts.groupby(keys, sort=True).max().to_numpy(),
             "n_samples": grouped.size().to_numpy(),
-            # the first sample's gap belongs to the previous window, so exclude it
-            "max_internal_gap_s": helpers["gap_s"]
-            .groupby(keys)
-            .apply(lambda g: float(g.iloc[1:].max()) if len(g) > 1 else 0.0)
+            "max_internal_gap_s": internal_gaps.groupby(keys, sort=True)
+            .max()
+            .fillna(0.0)
             .to_numpy(),
-            "segment_start": helpers["segment_start"].groupby(keys).min().to_numpy(),
+            "median_period_s": internal_gaps.groupby(keys, sort=True).median().to_numpy(),
+            "segment_start": helpers["segment_start"].groupby(keys, sort=True).min().to_numpy(),
         },
         index=features.index,
     )
+    meta["span_s"] = (meta["last_sample"] - meta["first_sample"]).dt.total_seconds()
     meta["minutes_since_resume"] = (
         meta["first_sample"] - meta["segment_start"]
     ).dt.total_seconds() / 60.0
-    meta["valid"] = (meta["n_samples"] >= spec.min_samples) & (
-        meta["max_internal_gap_s"] <= spec.max_gap_s
+    meta["valid"] = (
+        (meta["n_samples"] >= spec.min_samples)
+        & (meta["max_internal_gap_s"] <= spec.max_gap_s)
+        & (meta["span_s"] >= spec.min_block_span_s)
+        & (meta["median_period_s"] >= spec.min_period_s)
+        & (meta["median_period_s"] <= spec.max_period_s)
     )
     meta["stopped"] = features["off_fraction"] >= spec.stopped_off_fraction
     return pd.concat([meta.drop(columns="segment_start"), features], axis=1)

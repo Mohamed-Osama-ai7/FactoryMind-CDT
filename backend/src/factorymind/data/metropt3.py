@@ -35,6 +35,8 @@ ARCHIVE_SHA256: Final = "aab991a970e58210de853bb8078ce0e63abb4d9412fdc5c79792dae
 CSV_MEMBER: Final = "MetroPT3(AirCompressor).csv"
 EXPECTED_ROWS: Final = 1_516_948
 NOMINAL_PERIOD_S: Final = 10.0
+MIN_PERIOD_S: Final = 5.0
+MAX_PERIOD_S: Final = 15.0
 
 ANALOG_SENSORS: Final[dict[str, str]] = {
     "TP2": "bar",  # compressor pressure
@@ -202,8 +204,11 @@ def validate_contract(report: QualityReport, *, expected_rows: int | None = EXPE
         problems.append(f"row count {report.rows} != expected {expected_rows}")
     if report.duplicate_timestamps:
         problems.append(f"{report.duplicate_timestamps} duplicate timestamps")
-    if not 5.0 <= report.median_period_s <= 15.0:
-        problems.append(f"median sampling period {report.median_period_s}s outside 5-15s")
+    if not MIN_PERIOD_S <= report.median_period_s <= MAX_PERIOD_S:
+        problems.append(
+            f"median sampling period {report.median_period_s}s outside "
+            f"{MIN_PERIOD_S:g}-{MAX_PERIOD_S:g}s"
+        )
     if problems:
         raise DataValidationError("; ".join(problems))
 

@@ -58,10 +58,10 @@ const sampleModel: ModelInfo = {
 }
 
 describe('ModelCard', () => {
-  it('displays operating-day false alarms, fault lift metrics, and calibration holdout check', () => {
+  it('displays distinguishable valid-day and operating-day false alarm rates, fault lift metrics, and calibration holdout check', () => {
     render(<ModelCard model={sampleModel} />)
     expect(
-      screen.getByText(/0\.032 false alarms\/day \(0\.041 operating days\)/),
+      screen.getByText(/0\.032 false alarms \/ valid day \(0\.041 false alarms \/ operating day\)/),
     ).toBeInTheDocument()
     expect(screen.getByText(/gross detection 6\/60 \(10\.0 %\)/)).toBeInTheDocument()
     expect(screen.getByText(/clean-control sensitivity 0\/54 \(0\.0 %\)/)).toBeInTheDocument()

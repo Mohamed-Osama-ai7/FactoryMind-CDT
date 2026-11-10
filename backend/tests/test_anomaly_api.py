@@ -129,6 +129,22 @@ def test_score_rejects_max_sample_count_with_oversized_duration(client: TestClie
     assert response.status_code == 422
 
 
+def test_score_rejects_short_duration_48_sample_burst(client: TestClient) -> None:
+    # 48 samples ~1 s apart (47 s span) must never be scored as a valid 10-minute window.
+    frame = simulate_apu("2020-01-05 12:00", 48, seed=11)
+    frame.index = pd.date_range("2020-01-05 12:00:00", periods=48, freq="1s", name="timestamp")
+    response = client.post("/api/v1/anomaly/score", json=payload(frame))
+    assert response.status_code == 422
+
+
+def test_score_rejects_dense_high_frequency_10_minute_block(client: TestClient) -> None:
+    # 600 samples at 1 Hz over ~10 min violates the 5-15 s (~0.1 Hz) contract; no silent resampling.
+    frame = simulate_apu("2020-01-05 12:00", 600, seed=11)
+    frame.index = pd.date_range("2020-01-05 12:00:00", periods=600, freq="1s", name="timestamp")
+    response = client.post("/api/v1/anomaly/score", json=payload(frame))
+    assert response.status_code == 422
+
+
 def test_score_handles_irregular_timestamps(client: TestClient) -> None:
     # Irregular timestamps within 10 min containing an internal gap > 60 s => insufficient_data
     frame = simulate_apu("2020-01-05 12:00", 60, seed=11)

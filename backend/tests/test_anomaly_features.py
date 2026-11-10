@@ -105,13 +105,23 @@ def test_stopped_threshold_is_configurable() -> None:
 
 
 def test_block_features_enforces_window_span_tolerance() -> None:
-    # 10 min 30 s span is within 60 s tolerance
+    # 10 min 30 s span at ~0.1 Hz cadence is within 60 s tolerance
     jittered = simulate_apu("2020-01-01 00:00", 60)
     idx = pd.DatetimeIndex(jittered.index).to_numpy().copy()
     idx[-1] = pd.Timestamp("2020-01-01 00:10:30")
     jittered.index = pd.DatetimeIndex(idx, name="timestamp")
     ok = block_features(jittered, SPEC)
     assert bool(ok["valid"])
+
+    # 48 samples packed ~1 s apart (47 s span) fails temporal coverage and cadence checks
+    burst = simulate_apu("2020-01-01 00:00", 48)
+    burst.index = pd.date_range("2020-01-01 00:00:00", periods=48, freq="1s", name="timestamp")
+    assert not bool(block_features(burst, SPEC)["valid"])
+
+    # Dense 1 Hz block spanning 10 min (600 samples) fails the 5-15 s cadence contract
+    dense_10m = simulate_apu("2020-01-01 00:00", 600)
+    dense_10m.index = pd.date_range("2020-01-01 00:00:00", periods=600, freq="1s", name="timestamp")
+    assert not bool(block_features(dense_10m, SPEC)["valid"])
 
     # 20-minute span exceeds 10 min + 60 s tolerance
     oversized = simulate_apu("2020-01-01 00:00", 120)

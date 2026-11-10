@@ -77,11 +77,16 @@ def evaluate(
     early_horizon: pd.Timedelta,
     post_tolerance: pd.Timedelta,
     suppress: np.ndarray | None = None,
+    precomputed_episodes: Sequence[Episode] | None = None,
 ) -> EvaluationResult:
     if len(starts) != len(scores):
         raise ValueError("starts and scores must have the same length")
     labels = window_labels(starts, window, reports)
-    eps = episodes(starts, scores, window, policy, suppress)
+    eps = (
+        list(precomputed_episodes)
+        if precomputed_episodes is not None
+        else episodes(starts, scores, window, policy, suppress)
+    )
 
     decision = np.zeros(len(starts), dtype=bool)
     for ep in eps:

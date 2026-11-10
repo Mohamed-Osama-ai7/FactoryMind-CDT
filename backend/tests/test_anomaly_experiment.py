@@ -150,6 +150,53 @@ def test_loeo_reports_operating_false_alarms_alongside_all_valid_days(
         assert all("operating_false_alarms_per_day" in f for f in loeo["folds"])
 
 
+def test_loeo_selection_does_not_leak_held_out_false_alarm_masking() -> None:
+    """Moving the held-out report onto a spurious alarm must not change the fold's chosen policy."""
+    base = telemetry().copy()
+    # V1 starts with moderate duty (0.5) for 1 h then high duty (0.85) for 3 h so threshold 0.3
+    # detects V1 earlier (+30 min) than threshold 0.7 (+90 min).
+    idx = base.index
+    v1_early = (idx >= "2020-01-06 06:00") & (idx < "2020-01-06 07:00")
+    v1_late = (idx >= "2020-01-06 07:00") & (idx < "2020-01-06 10:00")
+    base.loc[v1_early, "Motor_current"] = [
+        7.0 if i % 2 == 0 else 4.0 for i in range(int(v1_early.sum()))
+    ]
+    base.loc[v1_late, "Motor_current"] = [
+        7.0 if i % 10 < 8 else 4.0 for i in range(int(v1_late.sum()))
+    ]
+    # Spurious 2 h burst at duty=0.5 on Jan 7 (alarms at threshold 0.3, silent at 0.7).
+    burst = (idx >= "2020-01-07 12:00") & (idx < "2020-01-07 14:00")
+    base.loc[burst, "Motor_current"] = [7.0 if i % 2 == 0 else 4.0 for i in range(int(burst.sum()))]
+
+    cfg = config(
+        detectors={
+            "duty_rule": {"threshold": {"mode": "absolute", "grid": [0.3, 0.7]}},
+        },
+        selection={"preference": ["duty_rule"], "rule_detectors": ["duty_rule"]},
+        persistence_grid=[3],
+    )
+    v1 = FailureReport("V1", datetime(2020, 1, 6, 6), datetime(2020, 1, 6, 10), "Air leak")
+    # Held-out T1 placed on top of the Jan 7 burst vs placed on quiet Jan 11:
+    reports_overlap = (
+        v1,
+        FailureReport("T1", datetime(2020, 1, 7, 12), datetime(2020, 1, 7, 14), "Air leak"),
+    )
+    reports_separate = (
+        v1,
+        FailureReport("T1", datetime(2020, 1, 11, 12), datetime(2020, 1, 11, 14), "Air leak"),
+    )
+
+    fold_overlap = experiment.run(cfg, base, reports_overlap).results["detectors"]["duty_rule"][
+        "loeo"
+    ]["folds"][1]
+    fold_separate = experiment.run(cfg, base, reports_separate).results["detectors"]["duty_rule"][
+        "loeo"
+    ]["folds"][1]
+    assert fold_overlap["held_out"] == "T1"
+    assert fold_overlap["threshold"] == "0.7"
+    assert fold_separate["threshold"] == "0.7"
+
+
 def test_exceedance_and_reference_checks_are_present(output: experiment.RunOutput) -> None:
     for d in output.results["detectors"].values():
         assert d["exceedance_check"]["windows"] > 0

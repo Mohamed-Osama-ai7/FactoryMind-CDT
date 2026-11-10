@@ -38,7 +38,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from factorymind import __version__
-from factorymind.anomaly.alarm import AlarmPolicy, AlarmTracker
+from factorymind.anomaly.alarm import AlarmPolicy, AlarmTracker, Episode, episodes
 from factorymind.anomaly.calibration import ExceedanceCalibrator
 from factorymind.anomaly.detectors import Detector, DetectorName, FeatureProfile, build_detector
 from factorymind.anomaly.evaluation import EvaluationResult, evaluate
@@ -195,7 +195,12 @@ def _selection_key(c: Candidate, exclude_event: str | None) -> tuple[int, float,
 
 
 def select_policy(candidates: list[Candidate], exclude_event: str | None = None) -> Candidate:
-    """Best candidate by the pre-registered criterion, ignoring one report if given."""
+    """Best candidate by the pre-registered criterion, ignoring one report if given.
+
+    Note: for leakage-free LOEO selection, callers must evaluate ``candidates`` with the held-out
+    report omitted from ``reports`` so that it does not mask false alarms in
+    ``false_alarms_per_day`` (relying only on ``exclude_event`` would still mask held-out alarms).
+    """
     return min(candidates, key=lambda c: _selection_key(c, exclude_event))
 
 
@@ -203,21 +208,52 @@ def _median_abs_delay(delays: list[float]) -> float | None:
     return round(float(np.median([abs(d) for d in delays])), 1) if delays else None
 
 
-def _loeo_summary(candidates: list[Candidate], report_ids: list[str]) -> dict[str, Any]:
+def _candidate_key(c: Candidate) -> tuple[int, str, int]:
+    return (c.variant, c.threshold_label, c.persistence)
+
+
+def _loeo_summary(
+    fold_candidates: dict[str, list[Candidate]],
+    full_candidates: list[Candidate],
+    reports: tuple[metropt3.FailureReport, ...],
+    ev_index: pd.DatetimeIndex,
+    variant_evs: list[np.ndarray],
+    window: pd.Timedelta,
+    early: pd.Timedelta,
+    post: pd.Timedelta,
+    suppress: np.ndarray,
+    episodes_by_key: dict[tuple[int, str, int], list[Episode]],
+) -> dict[str, Any]:
+    full_by_key = {_candidate_key(c): c for c in full_candidates}
     folds: list[dict[str, Any]] = []
-    for rid in report_ids:
-        chosen = select_policy(candidates, exclude_event=rid)
-        held = next(e for e in chosen.result.events if e.report_id == rid)
+    for r in reports:
+        # Policy selection sees ONLY other reports (both event detection and FA masking).
+        chosen = select_policy(fold_candidates[r.report_id])
+        key = _candidate_key(chosen)
+        # Evaluate the selected policy on the held-out report separately.
+        held_eval = evaluate(
+            ev_index,
+            variant_evs[chosen.variant],
+            window,
+            AlarmPolicy(chosen.threshold, chosen.persistence),
+            (r,),
+            early_horizon=early,
+            post_tolerance=post,
+            suppress=suppress,
+            precomputed_episodes=episodes_by_key[key],
+        )
+        held = held_eval.events[0]
+        full = full_by_key[key]
         folds.append(
             {
-                "held_out": rid,
+                "held_out": r.report_id,
                 "variant": chosen.params,
                 "threshold": chosen.threshold_label,
                 "persistence": chosen.persistence,
                 "detected": held.detected,
                 "delay_minutes": held.delay_minutes,
-                "false_alarms_per_day": chosen.result.false_alarms_per_day,
-                "operating_false_alarms_per_day": chosen.result.operating_false_alarms_per_day,
+                "false_alarms_per_day": full.result.false_alarms_per_day,
+                "operating_false_alarms_per_day": full.result.operating_false_alarms_per_day,
             }
         )
     delays = [f["delay_minutes"] for f in folds if f["detected"] and f["delay_minutes"] is not None]
@@ -390,11 +426,16 @@ def run(
     results: dict[str, Any] = {"detectors": {}}
     bundles: dict[str, ModelBundle] = {}
     all_candidates: dict[str, list[Candidate]] = {}
+    all_fold_candidates: dict[str, dict[str, list[Candidate]]] = {}
+    all_episodes: dict[str, dict[tuple[int, str, int], list[Episode]]] = {}
+    all_variant_evs: dict[str, list[np.ndarray]] = {}
     fitted: dict[str, tuple[Detector, np.ndarray, np.ndarray, np.ndarray, Candidate]] = {}
     cases: list[FaultCase] | None = None
 
     for name, dcfg in config.detectors.items():
         candidates: list[Candidate] = []
+        fold_candidates: dict[str, list[Candidate]] = {r.report_id: [] for r in reports}
+        episodes_by_key: dict[tuple[int, str, int], list[Episode]] = {}
         variant_scores: list[tuple[Detector, np.ndarray, np.ndarray, np.ndarray]] = []
         for v, params in enumerate(dcfg.variants):
             det = build_detector(name, params, config.seed).fit(x_train)
@@ -408,18 +449,43 @@ def run(
                 thresholds = [(f"{g}", float(g)) for g in dcfg.threshold.grid]
             for label, thr in thresholds:
                 for k in config.persistence_grid:
+                    policy = AlarmPolicy(thr, k)
+                    eps = episodes(ev_index, evs, window, policy, suppress)
+                    episodes_by_key[(v, label, k)] = eps
                     res = evaluate(
                         ev_index,
                         evs,
                         window,
-                        AlarmPolicy(thr, k),
+                        policy,
                         reports,
                         early_horizon=early,
                         post_tolerance=post,
                         suppress=suppress,
+                        precomputed_episodes=eps,
                     )
                     candidates.append(Candidate(name, v, params, label, thr, k, res))
+                    for r in reports:
+                        other_reports = tuple(
+                            other for other in reports if other.report_id != r.report_id
+                        )
+                        sel_res = evaluate(
+                            ev_index,
+                            evs,
+                            window,
+                            policy,
+                            other_reports,
+                            early_horizon=early,
+                            post_tolerance=post,
+                            suppress=suppress,
+                            precomputed_episodes=eps,
+                        )
+                        fold_candidates[r.report_id].append(
+                            Candidate(name, v, params, label, thr, k, sel_res)
+                        )
         all_candidates[name] = candidates
+        all_fold_candidates[name] = fold_candidates
+        all_episodes[name] = episodes_by_key
+        all_variant_evs[name] = [vs[3] for vs in variant_scores]
         final = select_policy(candidates)
         det, tr, ref, evs = variant_scores[final.variant]
         fitted[name] = (det, tr, ref, evs, final)
@@ -427,7 +493,18 @@ def run(
     summary: dict[str, dict[str, Any]] = {}
     fault_results: dict[str, dict[str, Any]] = {}
     for name, (det, _tr, _ref, _evs, final) in fitted.items():
-        summary[name] = _loeo_summary(all_candidates[name], report_ids)
+        summary[name] = _loeo_summary(
+            all_fold_candidates[name],
+            all_candidates[name],
+            reports,
+            ev_index,
+            all_variant_evs[name],
+            window,
+            early,
+            post,
+            suppress,
+            all_episodes[name],
+        )
         if name in ML_DETECTORS or name == "duty_rule":
             if cases is None:
                 cases = build_cases(

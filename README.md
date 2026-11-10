@@ -32,10 +32,11 @@ separately.
 ### Detection results at a glance
 
 On real MetroPT-3 data (four operator air-leak reports), a physics rule on compressor load duty
-detects 4/4 reports at 0.03 false alarms/day under nested leave-one-event-out evaluation; learned
-detectors (Isolation Forest, PCA SPE) did not beat it on leaks, though PCA SPE catches simulated
-sensor faults the rule cannot. The plant's own low-pressure switch caught 1/4. Protocol, results
-and limitations: [docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md) (M1 record:
+detects 4/4 reports at 0.034 false alarms/day (0.044 operating-day FA/day) under nested
+leave-one-event-out evaluation; learned detectors (Isolation Forest, PCA SPE) did not beat it on
+leaks, though PCA SPE catches simulated sensor faults the rule cannot. The plant's own
+low-pressure switch caught 1/4. Protocol, results and limitations:
+[docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md) (M1 record:
 [docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md)).
 
 ## Repository layout

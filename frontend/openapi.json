@@ -769,7 +769,7 @@
         "additionalProperties": false,
         "properties": {
           "samples": {
-            "description": "Chronological samples forming one 10-minute window (at most 11 min total span with 60 s tolerance).",
+            "description": "Chronological samples forming one 10-minute window at ~0.1 Hz (>= 48 samples required to score; total span 7-11 min with 60 s tolerance, median sampling period 5-15 s, internal gaps <= 60 s, no silent resampling).",
             "items": {
               "$ref": "#/components/schemas/Sample"
             },

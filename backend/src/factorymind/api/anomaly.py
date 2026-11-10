@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+import statistics
 from datetime import datetime
 from functools import lru_cache
 from itertools import pairwise
@@ -18,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from factorymind.anomaly.evidence import EvidenceItem
+from factorymind.anomaly.features import WindowSpec
 from factorymind.anomaly.service import (
     AnomalyService,
     DataUnavailableError,
@@ -30,15 +32,20 @@ from factorymind.config import get_settings
 from factorymind.data.metropt3 import (
     ANALOG_SENSORS,
     DIGITAL_SENSORS,
+    MAX_PERIOD_S,
+    MIN_PERIOD_S,
     VALID_RANGES,
     FailureReport,
 )
 
+_SCORE_SPEC = WindowSpec()
 MAX_SAMPLES = 2000
 MAX_REPLAY = pd.Timedelta(days=7)
-SCORE_WINDOW = pd.Timedelta("10min")
-SCORE_SPAN_TOLERANCE = pd.Timedelta(seconds=60)
-MAX_SCORE_SPAN = SCORE_WINDOW + SCORE_SPAN_TOLERANCE
+SCORE_WINDOW = pd.Timedelta(_SCORE_SPEC.length)
+SCORE_SPAN_TOLERANCE = pd.Timedelta(seconds=_SCORE_SPEC.span_tolerance_s)
+MIN_SCORE_SAMPLES = _SCORE_SPEC.min_samples
+MIN_SCORE_SPAN = pd.Timedelta(seconds=_SCORE_SPEC.min_block_span_s)
+MAX_SCORE_SPAN = pd.Timedelta(seconds=_SCORE_SPEC.max_block_span_s)
 
 router = APIRouter(prefix="/api/v1/anomaly", tags=["anomaly"])
 
@@ -103,8 +110,9 @@ class ScoreRequest(BaseModel):
     samples: list[Sample] = Field(
         min_length=1,
         max_length=MAX_SAMPLES,
-        description="Chronological samples forming one 10-minute window "
-        "(at most 11 min total span with 60 s tolerance).",
+        description="Chronological samples forming one 10-minute window at ~0.1 Hz "
+        "(>= 48 samples required to score; total span 7-11 min with 60 s tolerance, "
+        "median sampling period 5-15 s, internal gaps <= 60 s, no silent resampling).",
     )
 
     @model_validator(mode="after")
@@ -114,10 +122,25 @@ class ScoreRequest(BaseModel):
             raise ValueError("timestamps must be naive local train time, like the dataset")
         if any(b <= a for a, b in pairwise(stamps)):
             raise ValueError("sample timestamps must be strictly increasing")
-        if pd.Timestamp(stamps[-1]) - pd.Timestamp(stamps[0]) > MAX_SCORE_SPAN:
+        span = pd.Timestamp(stamps[-1]) - pd.Timestamp(stamps[0])
+        if span > MAX_SCORE_SPAN:
             raise ValueError(
                 "sample time span exceeds the 10-minute scoring window (60s tolerance)"
             )
+        if len(stamps) >= MIN_SCORE_SAMPLES:
+            if span < MIN_SCORE_SPAN:
+                raise ValueError(
+                    "sample time span is below minimum 10-minute temporal coverage "
+                    f"({int(_SCORE_SPEC.min_block_span_s)}s required)"
+                )
+            deltas = [(b - a).total_seconds() for a, b in pairwise(stamps)]
+            median_period = float(statistics.median(deltas))
+            if not MIN_PERIOD_S <= median_period <= MAX_PERIOD_S:
+                raise ValueError(
+                    f"median sampling period {median_period:.2f}s violates the "
+                    f"{MIN_PERIOD_S:g}-{MAX_PERIOD_S:g}s (~0.1 Hz) contract; "
+                    "submit native 0.1 Hz telemetry without silent resampling"
+                )
         return self
 
     def to_frame(self) -> pd.DataFrame:

@@ -52,9 +52,9 @@ function Loeo({ loeo }: { loeo: LoeoSummary }) {
             {loeo.events_detected}/{loeo.events_total}
           </td>
           <td className="py-1.5">
-            {loeo.mean_false_alarms_per_day.toFixed(3)} false alarms/day (
-            {loeo.mean_operating_false_alarms_per_day.toFixed(3)} operating days) · median |delay|{' '}
-            {minutes(loeo.median_abs_delay_minutes)}
+            {loeo.mean_false_alarms_per_day.toFixed(3)} false alarms / valid day (
+            {loeo.mean_operating_false_alarms_per_day.toFixed(3)} false alarms / operating day) ·
+            median |delay| {minutes(loeo.median_abs_delay_minutes)}
           </td>
         </tr>
       </tfoot>
