@@ -7,8 +7,8 @@ _Last updated: 2026-11-10 (post-M1 review)._
 
 ## Current milestone
 
-**M1 complete in code; PR 2 awaiting review and merge.** Next: M2, beginning with WP0 hardening. M2 must not
-start until PR 2 is reviewed and merged. Owner approved the WP0-first plan (decision D1) on 2026-11-10. Review and plan:
+**M1 merged (PR 2, squash `1f9a893`).** Next: M2, beginning with WP0 hardening. Owner approved the WP0-first plan (D1)
+and the authentication-first revision of D3 (SD-1) on 2026-11-10. The docs PR (PR 3) is open. Review and plan:
 [architecture-review-post-m1.md](architecture-review-post-m1.md).
 
 ## Verified completed work
@@ -16,18 +16,19 @@ start until PR 2 is reviewed and merged. Owner approved the WP0-first plan (deci
 | Item | State | Evidence |
 |---|---|---|
 | M0 foundation (backend, React, CI) | Merged to `main` (PR 1, `666a956`) | CI green |
-| M1 detection pipeline, API, React monitor, docs | Pushed on `feat/m1-ml-pipeline` (`2ccd434`, `6ef0810`, `2e95e90`); **PR 2 open, not merged** | CI green on all three commits; backend 60 tests, frontend 12 tests |
-| Post-M1 review, ADR log, this record | On `docs/post-m1-review` (based on the M1 branch) | This commit |
+| M1 detection pipeline, API, React monitor, docs | **Merged to `main`** (PR 2, squash `1f9a893`) | CI green; backend 60 tests, frontend 12 tests |
+| Post-M1 review, ADR log, this record | On `docs/post-m1-review-rebased`, PR 3 open | This commit |
+| Security audit (read-only) | Report outside the repo: `D:\FactoryMind\security-audit\FactoryMind-security-audit-2026-11-10.md`; findings F-01–F-13, recommendations REC-01–30, decisions SD-1–12 | No code or settings changed by the audit |
 
 ## Branches
 
-`main` = `666a956`. `feat/m1-ml-pipeline` = `2e95e90`. `docs/post-m1-review` = M1 plus the review commit
-(merge M1 first; its diff against `main` then contains only the review).
+`main` = `1f9a893`. `docs/post-m1-review-rebased` = `main` plus the review commits (PR 3). The older
+`docs/post-m1-review` and `feat/m1-ml-pipeline` branches are superseded.
 
 ## Active architecture decisions
 
 See [decisions.md](decisions.md). Open: ADR-007 (under revision), ADR-010 (persistence, owner
-decision D2), ADR-012 (tenancy, D3).
+decision D2). ADR-012 revised and accepted (authentication before persistence).
 
 ## Evaluation status (real MetroPT-3 data, four operator air-leak reports)
 
@@ -46,16 +47,20 @@ artifacts require trusted storage; nothing deployed or validated in a plant.
 
 ## Remaining dependencies
 
-- PR 2 (M1) reviewed and merged. The GitHub CLI is not signed in on the development machine; use
-  the GitHub fallback agent for GitHub operations.
-- Owner decisions D2–D6 in the review (persistence, tenancy, maintenance dates, corpus, LLM); D1 is
-  approved. WP0 does not need D2–D6.
+- PR 3 (docs) review and merge. The GitHub CLI is not signed in on the development machine; use the
+  GitHub fallback agent for GitHub operations.
+- Owner decisions D2, D4–D6 in the review (persistence, maintenance dates, corpus, LLM); D1 and D3 are
+  approved. WP0 does not need them.
+- Security decisions SD-2–SD-12 (personal data in the public repo, license, GitHub settings, IdP,
+  deployment model, LLM policy, artifact format, compliance, ownership, workstation, residency).
+  Priority P0 settings (REC-01: `main` ruleset, SHA-pinned actions, Dependabot, secret scanning,
+  CodeQL) require repository admin action.
 - Docker/WSL is not set up; C: has about 2 GB free (data, caches and the repository are on D:).
 - Retrieval corpus with usable licences (needed for M3).
 
 ## Immediate next task
 
-After PR 2 is merged: M2-WP0 per review §10 (duty-cycle baseline,
+M2-WP0 per review §10 (branch from `main`) (duty-cycle baseline,
 leave-one-event-out protocol, exceedance calibration, alarm tracker, deduplicated evidence,
 operating-state features).
 

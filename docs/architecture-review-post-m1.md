@@ -118,7 +118,7 @@ which model to ship.
    (a stopped machine is *explained*, not anomalous) (E9).
 
 **Defer**
-- Authentication/tenancy (see decision D3), model registry/MLflow, drift monitoring, streaming
+- Full multi-tenancy and enterprise SSO (authentication itself is **not** deferred; see D3 as revised), model registry/MLflow, drift monitoring, streaming
   ingestion, async job queue, deep-learning detectors, any LLM.
 - Replacing joblib model artifacts (pickle). Accepted risk while artifacts are produced locally;
   record in ADR-009 and revisit before any shared deployment.
@@ -203,7 +203,7 @@ workspace.
 |---|---|---|
 | D1 | Adopt the WP0-first sequencing and the "ML must earn its place" rule (§10.2) | Accept |
 | D2 | Persistence: PostgreSQL via Docker/WSL (needs admin, reboot, D: disk image) vs SQLite for local development with SQLAlchemy models plus a PostgreSQL service container in GitHub CI | Revise: SQLite locally, PostgreSQL in CI, avoiding PostgreSQL-only features; revisit before multi-user use |
-| D3 | Authentication/tenancy (System Analysis marks it Must; MVP scope documents do not) | Defer; keep `asset_id` and `actor_id` in every contract; record as accepted scope reduction |
+| D3 | Authentication/tenancy (System Analysis marks it Must; MVP scope documents do not) | **Revised and approved 2026-11-10 (security audit SD-1):** minimal OIDC authentication with roles and audit before M2-WP1 persists anything; full tenancy deferred; `tenant_id`, `asset_id`, `actor_id` in every contract. Originally recommended deferral; reversed because approvals need authenticated actors |
 | D4 | Maintenance-date ambiguity in the source report table | Ask the dataset authors or treat dates as unverified; do not build VERIFY on them until resolved |
 | D5 | Retrieval corpus: which public documents are legally usable | Owner to nominate sources; Claude verifies licences |
 | D6 | LLM provider and budget | Defer to M4; structured outputs and template report come first |
