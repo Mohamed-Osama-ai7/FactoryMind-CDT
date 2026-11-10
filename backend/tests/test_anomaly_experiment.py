@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from factorymind.anomaly import experiment
 from factorymind.anomaly.evaluation import AlarmPolicy, evaluate
 from factorymind.anomaly.experiment import Candidate, SelectionConfig, choose_default
+from factorymind.anomaly.features import window_features
 from factorymind.anomaly.service import ModelUnavailableError, load_bundle
 from factorymind.data.metropt3 import FailureReport
 from tests.conftest import simulate_apu
@@ -152,10 +153,13 @@ def test_loeo_reports_operating_false_alarms_alongside_all_valid_days(
 
 def test_loeo_selection_does_not_leak_held_out_false_alarm_masking() -> None:
     """Moving the held-out report onto a spurious alarm must not change the fold's chosen policy."""
-    base = telemetry().copy()
-    # V1 starts with moderate duty (0.5) for 1 h then high duty (0.85) for 3 h so threshold 0.3
-    # detects V1 earlier (+30 min) than threshold 0.7 (+90 min).
+    # Clean 12-day normal telemetry (Jan 1-12) with NO unrelated Jan 9 leak.
+    base = simulate_apu("2020-01-01", 6 * 60 * 24 * 12, seed=1)
     idx = base.index
+    # V1 (Jan 6 06:00-10:00): duty 0.5 for 1 h then duty 0.8 for 3 h so:
+    # - threshold 0.3 detects V1 earlier (+30 min)
+    # - threshold 0.7 detects V1 later (+90 min)
+    # - threshold 0.9 misses V1 (0 detected)
     v1_early = (idx >= "2020-01-06 06:00") & (idx < "2020-01-06 07:00")
     v1_late = (idx >= "2020-01-06 07:00") & (idx < "2020-01-06 10:00")
     base.loc[v1_early, "Motor_current"] = [
@@ -164,19 +168,18 @@ def test_loeo_selection_does_not_leak_held_out_false_alarm_masking() -> None:
     base.loc[v1_late, "Motor_current"] = [
         7.0 if i % 10 < 8 else 4.0 for i in range(int(v1_late.sum()))
     ]
-    # Spurious 2 h burst at duty=0.5 on Jan 7 (alarms at threshold 0.3, silent at 0.7).
+    # Single spurious 2 h burst at duty=0.5 on Jan 7 12:00-14:00 (alarms at 0.3, silent at 0.7/0.9).
     burst = (idx >= "2020-01-07 12:00") & (idx < "2020-01-07 14:00")
     base.loc[burst, "Motor_current"] = [7.0 if i % 2 == 0 else 4.0 for i in range(int(burst.sum()))]
 
     cfg = config(
         detectors={
-            "duty_rule": {"threshold": {"mode": "absolute", "grid": [0.3, 0.7]}},
+            "duty_rule": {"threshold": {"mode": "absolute", "grid": [0.3, 0.7, 0.9]}},
         },
         selection={"preference": ["duty_rule"], "rule_detectors": ["duty_rule"]},
         persistence_grid=[3],
     )
     v1 = FailureReport("V1", datetime(2020, 1, 6, 6), datetime(2020, 1, 6, 10), "Air leak")
-    # Held-out T1 placed on top of the Jan 7 burst vs placed on quiet Jan 11:
     reports_overlap = (
         v1,
         FailureReport("T1", datetime(2020, 1, 7, 12), datetime(2020, 1, 7, 14), "Air leak"),
@@ -186,15 +189,87 @@ def test_loeo_selection_does_not_leak_held_out_false_alarm_masking() -> None:
         FailureReport("T1", datetime(2020, 1, 11, 12), datetime(2020, 1, 11, 14), "Air leak"),
     )
 
-    fold_overlap = experiment.run(cfg, base, reports_overlap).results["detectors"]["duty_rule"][
-        "loeo"
-    ]["folds"][1]
-    fold_separate = experiment.run(cfg, base, reports_separate).results["detectors"]["duty_rule"][
-        "loeo"
-    ]["folds"][1]
+    # Test-local reproduction of the historical buggy LOEO selection (evaluate against ALL reports,
+    # then ignore T1 only in _selection_key's event list while keeping T1's FA masking).
+    ev_feats = window_features(base, cfg.window.spec())
+    ev_feats = ev_feats[
+        ev_feats["valid"]
+        & (ev_feats.index >= cfg.periods["evaluation"][0])
+        & (ev_feats.index < cfg.periods["evaluation"][1])
+    ]
+    ev_idx = pd.DatetimeIndex(ev_feats.index)
+    scores = ev_feats["load_duty"].to_numpy()
+    suppress = ev_feats["stopped"].to_numpy(dtype=bool)
+
+    def legacy_buggy_candidates(reports: tuple[FailureReport, ...]) -> dict[str, Candidate]:
+        out: dict[str, Candidate] = {}
+        for thr in (0.3, 0.7, 0.9):
+            res = evaluate(
+                ev_idx,
+                scores,
+                pd.Timedelta("10min"),
+                AlarmPolicy(thr, 3),
+                reports,
+                early_horizon=pd.Timedelta(hours=cfg.early_horizon_hours),
+                post_tolerance=pd.Timedelta(hours=cfg.post_tolerance_hours),
+                suppress=suppress,
+            )
+            out[str(thr)] = Candidate("duty_rule", 0, {}, str(thr), thr, 3, res)
+        return out
+
+    buggy_overlap = legacy_buggy_candidates(reports_overlap)
+    assert buggy_overlap["0.3"].result.false_alarm_episodes == 0
+    assert buggy_overlap["0.3"].result.false_alarms_per_day == 0.0
+    assert buggy_overlap["0.7"].result.false_alarms_per_day == 0.0
+    assert buggy_overlap["0.3"].result.events[0].delay_minutes == 30.0
+    assert buggy_overlap["0.7"].result.events[0].delay_minutes == 90.0
+    assert not buggy_overlap["0.9"].result.events[0].detected
+    # Overlap masks Jan 7 FA => 0.3 & 0.7 tie on (detected=1, fa=0.0), median delay picks wrong 0.3.
+    assert (
+        experiment.select_policy(list(buggy_overlap.values()), exclude_event="T1").threshold_label
+        == "0.3"
+    )
+
+    buggy_separate = legacy_buggy_candidates(reports_separate)
+    assert buggy_separate["0.3"].result.false_alarm_episodes == 1
+    assert buggy_separate["0.3"].result.false_alarms_per_day > 0.0
+    assert (
+        experiment.select_policy(list(buggy_separate.values()), exclude_event="T1").threshold_label
+        == "0.7"
+    )
+
+    # Current production LOEO implementation must ignore T1's timing in both scenarios.
+    out_overlap = experiment.run(cfg, base, reports_overlap)
+    out_separate = experiment.run(cfg, base, reports_separate)
+    fold_overlap = out_overlap.results["detectors"]["duty_rule"]["loeo"]["folds"][1]
+    fold_separate = out_separate.results["detectors"]["duty_rule"]["loeo"]["folds"][1]
     assert fold_overlap["held_out"] == "T1"
     assert fold_overlap["threshold"] == "0.7"
     assert fold_separate["threshold"] == "0.7"
+    assert fold_overlap["persistence"] == fold_separate["persistence"] == 3
+
+
+def test_selection_key_tie_breaking_hierarchy() -> None:
+    """Verify _selection_key priority: detected > FA/day > median delay > candidate order."""
+    # 1. Higher detected wins even with worse FA/day and worse delay.
+    more_events = _candidate([True, True], 0.5, [120.0, 120.0], "more_events")
+    fewer_events = _candidate([True, False], 0.0, [10.0, None], "fewer_events")
+    assert experiment.select_policy([fewer_events, more_events]).threshold_label == "more_events"
+
+    # 2. Equal detected: lower false_alarms_per_day wins even with worse median delay.
+    lower_fa = _candidate([True, True], 0.0, [90.0, 90.0], "lower_fa")
+    higher_fa = _candidate([True, True], 0.1, [10.0, 10.0], "higher_fa")
+    assert experiment.select_policy([higher_fa, lower_fa]).threshold_label == "lower_fa"
+
+    # 3. Equal detected & FA/day: smaller median absolute delay wins.
+    slower = _candidate([True, True], 0.0, [90.0, 90.0], "slower")
+    faster = _candidate([True, True], 0.0, [-20.0, 40.0], "faster")  # median(|-20|, |40|) = 30
+    assert experiment.select_policy([slower, faster]).threshold_label == "faster"
+
+    # 4. Exact 3-way tie preserves candidate order.
+    first = _candidate([True, True], 0.0, [30.0, 30.0], "first")
+    second = _candidate([True, True], 0.0, [30.0, 30.0], "second")
+    assert experiment.select_policy([first, second]).threshold_label == "first"
 
 
 def test_exceedance_and_reference_checks_are_present(output: experiment.RunOutput) -> None:
