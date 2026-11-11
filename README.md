@@ -12,7 +12,8 @@ ESTIMATE IMPACT → HUMAN REVIEW → VERIFY → LEARN
 > OIDC auth, RBAC and persistent incidents ([docs/m2-wp1-auth-persistence.md](docs/m2-wp1-auth-persistence.md)),
 > and operating-regime / consistency-warning separation
 > ([docs/m2-wp2-operating-regime-warning-separation.md](docs/m2-wp2-operating-regime-warning-separation.md)).
-> M2 evidence/RCA, simulation and the full decision workflow remain work in progress. Nothing here
+> M2 evidence/RCA, simulation and the full decision workflow are tracked in
+> [docs/roadmap-execution-tracker.md](docs/roadmap-execution-tracker.md). Nothing here
 > has been deployed in a real factory; reported results come only from the evaluation pipeline in
 > this repository.
 

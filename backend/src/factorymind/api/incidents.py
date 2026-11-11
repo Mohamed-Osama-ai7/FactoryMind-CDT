@@ -8,7 +8,7 @@ alarm. It never triggers anything outside this database and never reaches indust
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
@@ -16,14 +16,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from factorymind.anomaly.evidence_package import build_event_evidence_package
 from factorymind.anomaly.service import DataUnavailableError, WindowScore
 from factorymind.api.anomaly import MAX_REPLAY, ServiceDep
 from factorymind.api.security import request_id_of
 from factorymind.auth.deps import get_principal, record_audit, require
 from factorymind.auth.principal import Permission, Principal
 from factorymind.config import IDENTIFIER, Settings
+from factorymind.contracts.events import (
+    EventEvidencePackage,
+    HumanObservationCategory,
+    HumanObservationOut,
+)
 from factorymind.db.audit import append_audit, verify_chain
-from factorymind.db.models import AuditEvent, Decision, EvidenceRow, Incident
+from factorymind.db.models import AuditEvent, Decision, EvidenceRow, HumanObservation, Incident
 from factorymind.db.repository import (
     DuplicateIncidentError,
     IncidentRepo,
@@ -130,9 +136,33 @@ class IncidentOut(BaseModel):
     created_at: datetime
 
 
+class HumanObservationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: HumanObservationCategory
+    note: str = Field(min_length=1, max_length=2000)
+    observed_at: datetime | None = None
+
+    @field_validator("note")
+    @classmethod
+    def _clean_note(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("observation note must not be blank")
+        return cleaned
+
+    @field_validator("observed_at")
+    @classmethod
+    def _naive_observed_at(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            raise ValueError("observed_at must be naive local train time")
+        return value
+
+
 class IncidentDetail(IncidentOut):
     evidence: list[EvidenceOut]
     decisions: list[DecisionOut]
+    observations: list[HumanObservationOut] = Field(default_factory=list)
 
 
 class IncidentList(BaseModel):
@@ -213,11 +243,25 @@ def _decision_out(d: Decision) -> DecisionOut:
     )
 
 
+def _observation_out(obs: HumanObservation) -> HumanObservationOut:
+    return HumanObservationOut(
+        id=obs.id,
+        incident_id=obs.incident_id,
+        asset_id=obs.asset_id,
+        actor_id=obs.actor_id,
+        category=cast(HumanObservationCategory, obs.category),
+        observed_at=obs.observed_at,
+        note=obs.note,
+        created_at=obs.created_at,
+    )
+
+
 def _detail(repo: IncidentRepo, incident: Incident) -> IncidentDetail:
     return IncidentDetail(
         **_incident_out(incident).model_dump(),
         evidence=[_evidence_out(e) for e in repo.evidence(incident)],
         decisions=[_decision_out(d) for d in repo.decisions(incident)],
+        observations=[_observation_out(o) for o in repo.observations(incident)],
     )
 
 
@@ -381,6 +425,87 @@ def get_incident(
         if incident is None:
             raise _not_found()
         return _detail(repo, incident)
+
+
+@router.get(
+    "/incidents/{incident_id}/evidence-package",
+    response_model=EventEvidencePackage,
+)
+def get_incident_evidence_package(
+    incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ, cost=5))],
+    service: ServiceDep,
+    baseline_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 4.0,
+    recovery_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 2.0,
+) -> EventEvidencePackage:
+    settings = _settings(request)
+    denial = principal.data_source_denial(settings)
+    with _db(request).session() as session:
+        repo = IncidentRepo(session, principal)
+        incident = repo.get(incident_id)
+        if incident is None:
+            raise _not_found()
+        if denial is not None:
+            _audit_denied(request, principal, denial, incident.id)
+            raise _not_found()
+        if incident.asset_id != settings.data_source_asset_id:
+            _audit_denied(request, principal, "asset_mismatch", incident.id)
+            raise _not_found()
+        observations = [_observation_out(o) for o in repo.observations(incident)]
+    try:
+        return build_event_evidence_package(
+            service,
+            asset_id=incident.asset_id,
+            event_start=pd.Timestamp(incident.episode_start),
+            event_end=pd.Timestamp(incident.episode_end),
+            raised_at=pd.Timestamp(incident.raised_at),
+            incident_id=incident.id,
+            human_observations=observations,
+            baseline_hours=baseline_hours,
+            recovery_hours=recovery_hours,
+        )
+    except DataUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.post(
+    "/incidents/{incident_id}/observations",
+    response_model=HumanObservationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_observation(
+    incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
+    body: HumanObservationCreate,
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Permission.OBSERVATION_CREATE, write=True))],
+) -> HumanObservationOut:
+    def work(session: Session) -> HumanObservationOut:
+        repo = IncidentRepo(session, principal)
+        incident = repo.get(incident_id)
+        if incident is None:
+            raise _not_found()
+        obs = repo.add_observation(
+            incident,
+            category=body.category,
+            note=body.note,
+            observed_at=body.observed_at,
+        )
+        append_audit(
+            session,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.actor_id,
+            roles=principal.roles,
+            action="observation.create",
+            object_type="incident",
+            object_id=incident.id,
+            outcome="allowed",
+            request_id=request_id_of(request),
+            details={"category": body.category, "observation_id": obs.id},
+        )
+        return _observation_out(obs)
+
+    return _db(request).run_with_retry(work)
 
 
 @router.post(

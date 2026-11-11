@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from 'react'
 import { describeApiError } from '../../api/errors'
-import { useAnomalyReplay } from '../../api/generated/anomaly/anomaly'
+import { useAnomalyEventEvidence, useAnomalyReplay } from '../../api/generated/anomaly/anomaly'
 import type {
   AlarmEpisode,
   Evidence,
@@ -9,6 +9,7 @@ import type {
   WindowResult,
 } from '../../api/generated/model'
 import { addHours, formatNaive, toEpochMs } from '../../lib/naiveTime'
+import { EventEvidencePackageView } from '../incidents/EventEvidencePackageView'
 import { CreateIncidentButton } from './CreateIncidentButton'
 import { ScoreChart } from './ScoreChart'
 
@@ -186,12 +187,51 @@ function EvidenceTable({
   )
 }
 
+function InlineEventEvidence({
+  eventStart,
+  eventEnd,
+  raisedAt,
+}: {
+  eventStart: string
+  eventEnd: string
+  raisedAt?: string
+}) {
+  const pkgQuery = useAnomalyEventEvidence({
+    start: eventStart,
+    end: eventEnd,
+    ...(raisedAt ? { raised_at: raisedAt } : {}),
+  })
+  if (pkgQuery.isPending) return <p role="status">Building event evidence package…</p>
+  if (pkgQuery.isError) {
+    return (
+      <p role="alert" className="rounded border border-critical p-2 text-xs">
+        Could not load event package: {describeApiError(pkgQuery.error)}
+      </p>
+    )
+  }
+  const pkg = pkgQuery.data?.status === 200 ? pkgQuery.data.data : undefined
+  return pkg ? <EventEvidencePackageView key={pkg.package_id} pkg={pkg} headingLevel="h4" /> : null
+}
+
 /** Replays recorded telemetry through primary and warning detectors with regime context. */
 export function ReplayPanel({ start, hours }: ReplayPanelProps) {
   const end = addHours(start, hours)
   const { data, isPending, isError, error, isFetching } = useAnomalyReplay({ start, end })
   const [selected, setSelected] = useState<number | null>(null)
   const [selectedWarning, setSelectedWarning] = useState<number | null>(null)
+  const [inspectedEvent, setInspectedEvent] = useState<{
+    start: string
+    end: string
+    raisedAt?: string
+  } | null>(null)
+  const rangeKey = `${start}-${hours}`
+  const [prevRangeKey, setPrevRangeKey] = useState(rangeKey)
+  if (rangeKey !== prevRangeKey) {
+    setPrevRangeKey(rangeKey)
+    setSelected(null)
+    setSelectedWarning(null)
+    setInspectedEvent(null)
+  }
 
   // Non-2xx responses throw (see api/http.ts), so a resolved response is always the 200 shape.
   const replay = data?.status === 200 ? data.data : undefined
@@ -335,11 +375,29 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
                         )}
                       </td>
                       <td className="py-1.5 pl-4">
-                        <CreateIncidentButton
-                          rangeStart={start}
-                          rangeEnd={end}
-                          episodeStart={e.start}
-                        />
+                        <div className="flex flex-col items-start gap-1">
+                          <CreateIncidentButton
+                            rangeStart={start}
+                            rangeEnd={end}
+                            episodeStart={e.start}
+                          />
+                          <button
+                            type="button"
+                            className="text-xs text-accent underline"
+                            aria-pressed={inspectedEvent?.start === e.start}
+                            onClick={() =>
+                              setInspectedEvent(
+                                inspectedEvent?.start === e.start
+                                  ? null
+                                  : { start: e.start, end: e.end, raisedAt: e.raised_at },
+                              )
+                            }
+                          >
+                            {inspectedEvent?.start === e.start
+                              ? 'Hide event package'
+                              : 'Inspect event package'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {selected === i && evidenceWindow && (
@@ -459,6 +517,30 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
           </div>
         )}
       </section>
+
+      {inspectedEvent && (
+        <section aria-label="Selected event evidence package" className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium">
+              Event evidence package ({formatNaive(inspectedEvent.start)} to{' '}
+              {formatNaive(inspectedEvent.end)})
+            </h3>
+            <button
+              type="button"
+              onClick={() => setInspectedEvent(null)}
+              className="text-xs text-accent underline"
+            >
+              Close
+            </button>
+          </div>
+          <InlineEventEvidence
+            key={`${inspectedEvent.start}-${inspectedEvent.end}`}
+            eventStart={inspectedEvent.start}
+            eventEnd={inspectedEvent.end}
+            raisedAt={inspectedEvent.raisedAt}
+          />
+        </section>
+      )}
     </div>
   )
 }

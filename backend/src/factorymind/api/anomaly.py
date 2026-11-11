@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from factorymind.anomaly.events import EventClass
 from factorymind.anomaly.events import WarningEpisode as ServiceWarningEpisode
 from factorymind.anomaly.evidence import EvidenceItem
+from factorymind.anomaly.evidence_package import build_event_evidence_package
 from factorymind.anomaly.features import WindowSpec
 from factorymind.anomaly.regimes import OperatingRegime, RegimeConfidence
 from factorymind.anomaly.service import (
@@ -33,6 +34,7 @@ from factorymind.anomaly.service import (
 )
 from factorymind.auth.deps import require_data_source
 from factorymind.auth.principal import Permission
+from factorymind.contracts.events import EventEvidencePackage
 from factorymind.data.metropt3 import (
     ANALOG_SENSORS,
     DIGITAL_SENSORS,
@@ -677,3 +679,45 @@ def anomaly_replay(
         warnings=[_warning_episode(w) for w in out.warnings],
         operator_reports=[_report(r) for r in out.reports],
     )
+
+
+@router.get(
+    "/event-evidence",
+    response_model=EventEvidencePackage,
+    dependencies=[Depends(require_data_source(Permission.ANOMALY_READ, cost=5))],
+)
+def anomaly_event_evidence(
+    request: Request,
+    service: ServiceDep,
+    start: Annotated[datetime, Query(description="Event start (naive local train time)")],
+    end: Annotated[datetime, Query(description="Event end, exclusive; at most 7 days after start")],
+    raised_at: Annotated[
+        datetime | None, Query(description="Optional alarm raised_at timestamp")
+    ] = None,
+    baseline_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 4.0,
+    recovery_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 2.0,
+) -> EventEvidencePackage:
+    lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+    if (
+        lo.tzinfo is not None
+        or hi.tzinfo is not None
+        or (raised_at is not None and raised_at.tzinfo is not None)
+    ):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "use naive timestamps")
+    if hi <= lo or hi - lo > MAX_REPLAY:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "end must be after start and within 7 days"
+        )
+    settings = request.app.state.settings
+    try:
+        return build_event_evidence_package(
+            service,
+            asset_id=settings.data_source_asset_id,
+            event_start=lo,
+            event_end=hi,
+            raised_at=pd.Timestamp(raised_at) if raised_at is not None else None,
+            baseline_hours=baseline_hours,
+            recovery_hours=recovery_hours,
+        )
+    except DataUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc

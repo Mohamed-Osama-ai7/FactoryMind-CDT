@@ -99,6 +99,7 @@ RANGE = {
     "episode_start": "2020-01-09T00:00:00",
 }
 DECISION = {"decision": "dismiss", "rationale": "ok", "expected_version": 1}
+OBSERVATION = {"category": "field_inspection", "note": "Verified intake valve visually."}
 
 MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
     ("GET", "/api/v1/anomaly/model", None, VIEW_ROLES),
@@ -108,10 +109,23 @@ MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
         None,
         VIEW_ROLES,
     ),
+    (
+        "GET",
+        "/api/v1/anomaly/event-evidence?start=2020-01-09T00:00:00&end=2020-01-09T01:00:00",
+        None,
+        VIEW_ROLES,
+    ),
     ("POST", "/api/v1/anomaly/score", {}, VIEW_ROLES),
     ("GET", "/api/v1/incidents", None, INCIDENT_READERS),
     ("GET", f"/api/v1/incidents/{ZERO_ID}", None, INCIDENT_READERS),
+    ("GET", f"/api/v1/incidents/{ZERO_ID}/evidence-package", None, INCIDENT_READERS),
     ("POST", "/api/v1/incidents", RANGE, {"engineer", "admin"}),
+    (
+        "POST",
+        f"/api/v1/incidents/{ZERO_ID}/observations",
+        OBSERVATION,
+        {"engineer", "approver", "admin"},
+    ),
     ("POST", f"/api/v1/incidents/{ZERO_ID}/decisions", DECISION, {"approver"}),
     ("GET", "/api/v1/audit/events", None, {"auditor", "admin"}),
     ("GET", "/api/v1/audit/verify", None, {"auditor", "admin"}),

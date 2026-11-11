@@ -210,6 +210,23 @@ def window_features(frame: pd.DataFrame, spec: WindowSpec) -> pd.DataFrame:
     return out
 
 
+def anchored_window_features(
+    frame: pd.DataFrame,
+    spec: WindowSpec,
+    anchor: pd.Timestamp,
+) -> pd.DataFrame:
+    """Cut telemetry into contiguous ``spec.length`` buckets anchored at ``anchor``."""
+    if frame.empty:
+        raise ValueError("Cannot compute features for an empty frame")
+    idx = pd.DatetimeIndex(frame.index)
+    step = pd.Timedelta(spec.length)
+    bucket = np.floor((idx - anchor) / step).astype("int64")
+    keys = np.array([anchor + int(b) * step for b in bucket])
+    out = _aggregate(frame, keys, spec)
+    out.index = pd.DatetimeIndex(out.index, name="window_start")
+    return out
+
+
 def block_features(frame: pd.DataFrame, spec: WindowSpec) -> pd.Series:
     """Features for one submitted block treated as a single window (used by the API)."""
     if frame.empty:

@@ -29,7 +29,11 @@ import type {
   AuditList,
   AuditVerification,
   DecisionCreate,
+  EventEvidencePackage,
+  GetIncidentEvidencePackageParams,
   HTTPValidationError,
+  HumanObservationCreate,
+  HumanObservationOut,
   IncidentCreate,
   IncidentDetail,
   IncidentList,
@@ -750,6 +754,245 @@ export const useCreateDecision = <TError = HTTPValidationError,
         TContext
       > => {
       return useMutation(getCreateDecisionMutationOptions(options), queryClient);
+    }
+    export type getIncidentEvidencePackageResponse200 = {
+  data: EventEvidencePackage
+  status: 200
+}
+
+export type getIncidentEvidencePackageResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type getIncidentEvidencePackageResponseSuccess = (getIncidentEvidencePackageResponse200) & {
+  headers: Headers;
+};
+export type getIncidentEvidencePackageResponseError = (getIncidentEvidencePackageResponse422) & {
+  headers: Headers;
+};
+
+export type getIncidentEvidencePackageResponse = (getIncidentEvidencePackageResponseSuccess | getIncidentEvidencePackageResponseError)
+
+export const getGetIncidentEvidencePackageUrl = (incidentId: string,
+    params?: GetIncidentEvidencePackageParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/incidents/${incidentId}/evidence-package?${stringifiedParams}` : `/api/v1/incidents/${incidentId}/evidence-package`
+}
+
+/**
+ * @summary Get Incident Evidence Package
+ */
+export const getIncidentEvidencePackage = async (incidentId: string,
+    params?: GetIncidentEvidencePackageParams, options?: Parameters<typeof apiFetch>[1]): Promise<getIncidentEvidencePackageResponse> => {
+
+  return apiFetch<getIncidentEvidencePackageResponse>(getGetIncidentEvidencePackageUrl(incidentId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIncidentEvidencePackageQueryKey = (incidentId: string,
+    params?: GetIncidentEvidencePackageParams,) => {
+    return [
+    `/api/v1/incidents/${incidentId}/evidence-package`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetIncidentEvidencePackageQueryOptions = <TData = Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError = HTTPValidationError>(incidentId: string,
+    params?: GetIncidentEvidencePackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIncidentEvidencePackageQueryKey(incidentId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIncidentEvidencePackage>>> = ({ signal }) => getIncidentEvidencePackage(incidentId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: incidentId !== null && incidentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIncidentEvidencePackageQueryResult = NonNullable<Awaited<ReturnType<typeof getIncidentEvidencePackage>>>
+export type GetIncidentEvidencePackageQueryError = HTTPValidationError
+
+
+/** @summary Get Incident Evidence Package */
+export function useGetIncidentEvidencePackage<TData = Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params: undefined |  GetIncidentEvidencePackageParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIncidentEvidencePackage>>,
+          TError,
+          Awaited<ReturnType<typeof getIncidentEvidencePackage>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get Incident Evidence Package */
+export function useGetIncidentEvidencePackage<TData = Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params?: GetIncidentEvidencePackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIncidentEvidencePackage>>,
+          TError,
+          Awaited<ReturnType<typeof getIncidentEvidencePackage>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get Incident Evidence Package */
+export function useGetIncidentEvidencePackage<TData = Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params?: GetIncidentEvidencePackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get Incident Evidence Package */
+export function useGetIncidentEvidencePackage<TData = Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params?: GetIncidentEvidencePackageParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentEvidencePackage>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetIncidentEvidencePackageQueryOptions(incidentId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createObservationResponse201 = {
+  data: HumanObservationOut
+  status: 201
+}
+
+export type createObservationResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type createObservationResponseSuccess = (createObservationResponse201) & {
+  headers: Headers;
+};
+export type createObservationResponseError = (createObservationResponse422) & {
+  headers: Headers;
+};
+
+export type createObservationResponse = (createObservationResponseSuccess | createObservationResponseError)
+
+export const getCreateObservationUrl = (incidentId: string,) => {
+
+
+
+
+  return `/api/v1/incidents/${incidentId}/observations`
+}
+
+/**
+ * @summary Create Observation
+ */
+export const createObservation = async (incidentId: string,
+    humanObservationCreate: HumanObservationCreate, options?: Parameters<typeof apiFetch>[1]): Promise<createObservationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiFetch<createObservationResponse>(getCreateObservationUrl(incidentId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(humanObservationCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateObservationMutationKey = () => ['createObservation'] as const;
+
+export const getCreateObservationMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObservation>>, TError,CreateObservationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createObservation>>, TError,CreateObservationMutationVariables, TContext> => {
+
+const mutationKey = getCreateObservationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createObservation>>, CreateObservationMutationVariables> = (props) => {
+          const {incidentId,data} = props ?? {};
+
+          return  createObservation(incidentId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateObservationMutationResult = NonNullable<Awaited<ReturnType<typeof createObservation>>>
+    export type CreateObservationMutationBody = HumanObservationCreate
+    export type CreateObservationMutationError = HTTPValidationError
+    export type CreateObservationMutationVariables = {incidentId: string;data: HumanObservationCreate}
+
+    /** @summary Create Observation */
+export const useCreateObservation = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createObservation>>, TError,CreateObservationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createObservation>>,
+        TError,
+        CreateObservationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateObservationMutationOptions(options), queryClient);
     }
     export type meResponse200 = {
   data: MeResponse
