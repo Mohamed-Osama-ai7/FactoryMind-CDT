@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from functools import lru_cache
+
+import numpy as np
+import pandas as pd
+import pytest
 
 from factorymind.contracts.optimization import (
     EconomicAssumptions,
@@ -12,10 +17,49 @@ from factorymind.contracts.optimization import (
 )
 from factorymind.db.repository import IncidentRepo, NewEvidence
 from factorymind.decision.optimizer import compare_maintenance_options
+from factorymind.twin import CompressorReservoirTwin, TwinCalibrationError
 from tests.auth_helpers import ASSET, AuthKit, make_client
 
 
+@lru_cache(maxsize=1)
+def _calibrated_twin() -> CompressorReservoirTwin:
+    idx = pd.date_range("2020-02-15", periods=500, freq="10s").append(
+        pd.date_range("2020-04-10", periods=420, freq="10s")
+    )
+    n = len(idx)
+    tp3 = np.empty(n, dtype="float64")
+    oil = np.empty(n, dtype="float64")
+    loaded = np.zeros(n, dtype="float64")
+    p, t_oil, on = 9.0, 60.0, False
+    dt = 1.0 / 6.0
+    for i in range(n):
+        if p <= 8.1:
+            on = True
+        elif p >= 10.1:
+            on = False
+        loaded[i] = 1.0 if on else 0.0
+        tp3[i], oil[i] = p, t_oil
+        p += (0.86 if on else -0.085) * dt
+        t_oil += (2.1 * loaded[i] - 0.05 * (t_oil - 55.0)) * dt
+    df = pd.DataFrame(
+        {
+            "TP3": tp3,
+            "Reservoirs": tp3 - 0.05,
+            "Oil_temperature": oil,
+            "Motor_current": np.where(loaded > 0.5, 7.0, 4.0),
+            "DV_eletric": loaded,
+        },
+        index=idx,
+    )
+    return CompressorReservoirTwin.fit_from_telemetry(df)
+
+
 def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints() -> None:
+    twin = _calibrated_twin()
+
+    with pytest.raises(TwinCalibrationError, match="Calibrated CompressorReservoirTwin"):
+        compare_maintenance_options(MaintenanceDecisionRequest(), twin=None)
+
     # Case 1: Active high leak rate under air_leakage hypothesis -> monitor violates LPS safety
     leak_res = compare_maintenance_options(
         MaintenanceDecisionRequest(
@@ -24,7 +68,8 @@ def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints(
             measured_oil_temp_c=74.0,
             dominant_hypothesis="air_leakage",
             assumptions=EconomicAssumptions(leak_rate_bar_per_min=0.95),
-        )
+        ),
+        twin=twin,
     )
     tiers = {q.tier for q in leak_res.impact_quantities}
     assert tiers == {
@@ -50,7 +95,8 @@ def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints(
                 max_allowable_duty=0.60,
                 max_allowable_oil_temp_c=85.0,
             ),
-        )
+        ),
+        twin=twin,
     )
     s_by_opt = {o.option: o for o in strict_res.options}
     assert s_by_opt["schedule"].feasible is False
@@ -66,7 +112,8 @@ def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints(
             weights=OptimizationWeights(
                 cost_weight=0.0, reliability_weight=1.0, downtime_weight=0.0
             ),
-        )
+        ),
+        twin=twin,
     )
     assert tie_res.recommended_option == "monitor"
     t_by_opt = {o.option: o for o in tie_res.options}
@@ -77,10 +124,12 @@ def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints(
     long_res = compare_maintenance_options(
         MaintenanceDecisionRequest(
             assumptions=EconomicAssumptions(leak_rate_bar_per_min=0.95, planning_horizon_hours=72.0)
-        )
+        ),
+        twin=twin,
     )
     long_repair = next(o for o in long_res.options if o.option == "repair_now")
     assert long_repair.projected_lps_risk_minutes == 0.0
+    assert any("exceeds" in w or "validated only up to" in w for w in long_res.uncertainty_warnings)
 
     # Case 5: sensor_malfunction vs abnormal_high_demand
     sensor_res = compare_maintenance_options(
@@ -90,7 +139,8 @@ def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints(
             measured_oil_temp_c=61.0,
             dominant_hypothesis="sensor_malfunction",
             assumptions=EconomicAssumptions(leak_rate_bar_per_min=0.35),
-        )
+        ),
+        twin=twin,
     )
     assert sensor_res.recommended_option == "monitor"
     assert any("verify instrumentation/demand" in w for w in sensor_res.uncertainty_warnings)
@@ -100,16 +150,19 @@ def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints(
             measured_load_duty=0.80,
             dominant_hypothesis="abnormal_high_demand",
             assumptions=EconomicAssumptions(leak_rate_bar_per_min=0.20),
-        )
+        ),
+        twin=twin,
     )
     assert any("verify instrumentation/demand" in w for w in demand_res.uncertainty_warnings)
 
     # Case 6: Configurable tariff assumptions directly change expected energy cost
     low_tariff = compare_maintenance_options(
-        MaintenanceDecisionRequest(assumptions=EconomicAssumptions(electricity_eur_per_kwh=0.05))
+        MaintenanceDecisionRequest(assumptions=EconomicAssumptions(electricity_eur_per_kwh=0.05)),
+        twin=twin,
     )
     high_tariff = compare_maintenance_options(
-        MaintenanceDecisionRequest(assumptions=EconomicAssumptions(electricity_eur_per_kwh=1.50))
+        MaintenanceDecisionRequest(assumptions=EconomicAssumptions(electricity_eur_per_kwh=1.50)),
+        twin=twin,
     )
     low_c = next(o.expected_total_cost_eur for o in low_tariff.options if o.option == "schedule")
     high_c = next(o.expected_total_cost_eur for o in high_tariff.options if o.option == "schedule")
@@ -119,6 +172,18 @@ def test_impact_stratifies_tiers_and_respects_safety_and_diagnostic_constraints(
 def test_optimization_api_nan_safety_and_incident_provenance(kit: AuthKit) -> None:
     client = make_client(kit)
     viewer = kit.headers(roles=["viewer"], assets=[ASSET])
+
+    # Unconfigured twin telemetry surfaces 503 explicitly instead of silent fallback
+    assert (
+        client.post(
+            "/api/v1/optimization/compare",
+            json={"asset_id": ASSET, "dominant_hypothesis": "air_leakage"},
+            headers=viewer,
+        ).status_code
+        == 503
+    )
+
+    client.app.state.digital_twin = _calibrated_twin()  # type: ignore[union-attr]
 
     # Raw JSON NaN / Infinity returns clean 422 instead of 500
     for bad_json in ['{"measured_load_duty": NaN}', '{"measured_load_duty": Infinity}']:

@@ -7,6 +7,7 @@
  */
 import type { TwinParameterEstimate } from './twinParameterEstimate';
 import type { TwinScenarioSummary } from './twinScenarioSummary';
+import type { TwinSimulationResponseHorizonSupportStatus } from './twinSimulationResponseHorizonSupportStatus';
 import type { TwinSimulationResponseScenario } from './twinSimulationResponseScenario';
 import type { TwinTrajectoryPoint } from './twinTrajectoryPoint';
 import type { UnidentifiableParameter } from './unidentifiableParameter';
@@ -17,6 +18,9 @@ import type { UnidentifiableParameter } from './unidentifiableParameter';
 export interface TwinSimulationResponse {
   advisory_note: string;
   asset_id: string;
+  horizon_support_status: TwinSimulationResponseHorizonSupportStatus;
+  horizon_supported: boolean;
+  horizon_warning?: string | null;
   params_used: TwinParameterEstimate[];
   provenance_origin?: 'simulated_projection';
   scenario: TwinSimulationResponseScenario;

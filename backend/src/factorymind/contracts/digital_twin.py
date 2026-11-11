@@ -39,8 +39,63 @@ class UnidentifiableParameter(BaseModel):
     assumption_or_proxy: str
 
 
+class TwinHorizonEvaluation(BaseModel):
+    """Per-horizon out-of-sample metrics separating teacher-forced vs closed-loop accuracy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    horizon_minutes: float = Field(gt=0.0)
+    segment_count: int = Field(ge=0)
+    teacher_forced_tp3_mae_bar: float = Field(ge=0.0)
+    teacher_forced_tp3_median_mae_bar: float = Field(ge=0.0)
+    teacher_forced_tp3_rmse_bar: float = Field(ge=0.0)
+    closed_loop_tp3_mae_bar: float = Field(ge=0.0)
+    closed_loop_tp3_median_mae_bar: float = Field(ge=0.0)
+    closed_loop_tp3_rmse_bar: float = Field(ge=0.0)
+    persistence_tp3_mae_bar: float = Field(ge=0.0)
+    persistence_tp3_median_mae_bar: float = Field(ge=0.0)
+    train_mean_tp3_mae_bar: float = Field(ge=0.0)
+    train_mean_tp3_median_mae_bar: float = Field(ge=0.0)
+    teacher_forced_skill_vs_persistence: float
+    teacher_forced_skill_vs_train_mean: float
+    closed_loop_skill_vs_persistence: float
+    closed_loop_skill_vs_train_mean: float
+    teacher_forced_supported: bool
+    closed_loop_supported: bool
+    duty_cycle_mae: float = Field(ge=0.0, le=1.0)
+    duty_cycle_median_mae: float = Field(ge=0.0, le=1.0)
+    persistence_duty_mae: float = Field(ge=0.0, le=1.0)
+    train_mean_duty_mae: float = Field(ge=0.0, le=1.0)
+    train_mean_duty_median_mae: float = Field(ge=0.0, le=1.0)
+    duty_skill_vs_train_mean: float
+    duty_cycle_supported: bool
+    observed_cycles_per_segment: float = Field(ge=0.0)
+    simulated_cycles_per_segment: float = Field(ge=0.0)
+    cycle_count_mae: float = Field(ge=0.0)
+    closed_loop_oil_mae_c: float = Field(ge=0.0)
+    persistence_oil_mae_c: float = Field(ge=0.0)
+    train_mean_oil_mae_c: float = Field(ge=0.0)
+    support_note: str
+
+
+class TwinSensitivityCheck(BaseModel):
+    """Pre-evaluation parameter perturbation sensitivity (never touches held-out data)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    perturbation: str
+    evaluation_scope: Literal["pre_evaluation_only"] = "pre_evaluation_only"
+    segment_count: int = Field(ge=0)
+    baseline_tp3_mae_10min_bar: float = Field(ge=0.0)
+    perturbed_tp3_mae_10min_bar: float = Field(ge=0.0)
+    delta_tp3_mae_bar: float
+    baseline_duty_mae_10min: float = Field(ge=0.0)
+    perturbed_duty_mae_10min: float = Field(ge=0.0)
+    delta_duty_mae: float
+
+
 class TwinValidationSummary(BaseModel):
-    """Out-of-sample held-out trajectory accuracy, stability & constraint verification."""
+    """Out-of-sample held-out trajectory accuracy, baseline comparisons, stability & limits."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -50,6 +105,16 @@ class TwinValidationSummary(BaseModel):
     mae_10min_bar: float = Field(ge=0.0)
     mae_60min_bar: float = Field(ge=0.0)
     rmse_60min_bar: float = Field(ge=0.0)
+    closed_loop_mae_10min_bar: float = Field(ge=0.0)
+    closed_loop_mae_60min_bar: float = Field(ge=0.0)
+    closed_loop_rmse_60min_bar: float = Field(ge=0.0)
+    max_supported_closed_loop_horizon_minutes: float = Field(ge=0.0)
+    max_supported_teacher_forced_horizon_minutes: float = Field(ge=0.0)
+    max_supported_duty_horizon_minutes: float = Field(ge=0.0)
+    unsupported_horizons: list[str]
+    horizon_evaluations: list[TwinHorizonEvaluation]
+    sensitivity_checks: list[TwinSensitivityCheck]
+    calibration_notes: list[str]
     constraint_violations: int = Field(ge=0)
     step_halving_max_diff_bar: float = Field(ge=0.0)
     leak_vs_normal_residual_ratio: float = Field(ge=0.0)
@@ -143,6 +208,9 @@ class TwinSimulationResponse(BaseModel):
     asset_id: str
     scenario: TwinScenarioKind
     provenance_origin: Literal["simulated_projection"] = "simulated_projection"
+    horizon_supported: bool
+    horizon_support_status: Literal["supported_closed_loop", "unsupported_closed_loop_horizon"]
+    horizon_warning: str | None = None
     params_used: list[TwinParameterEstimate]
     unidentifiable_parameters: list[UnidentifiableParameter]
     trajectory: list[TwinTrajectoryPoint]

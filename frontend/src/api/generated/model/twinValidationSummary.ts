@@ -5,28 +5,46 @@
  * Evidence-grounded, uncertainty-aware decision support. Advisory only.
  * OpenAPI spec version: 0.1.0
  */
+import type { TwinHorizonEvaluation } from './twinHorizonEvaluation';
+import type { TwinSensitivityCheck } from './twinSensitivityCheck';
 import type { TwinValidationSummaryProvenanceOrigin } from './twinValidationSummaryProvenanceOrigin';
 
 /**
- * Out-of-sample held-out trajectory accuracy, stability & constraint verification.
+ * Out-of-sample held-out trajectory accuracy, baseline comparisons, stability & limits.
  */
 export interface TwinValidationSummary {
+  calibration_notes: string[];
+  /** @minimum 0 */
+  closed_loop_mae_10min_bar: number;
+  /** @minimum 0 */
+  closed_loop_mae_60min_bar: number;
+  /** @minimum 0 */
+  closed_loop_rmse_60min_bar: number;
   /** @minimum 0 */
   constraint_violations: number;
   /** @minimum 0 */
   heldout_normal_segments: number;
+  horizon_evaluations: TwinHorizonEvaluation[];
   /** @minimum 0 */
   leak_vs_normal_residual_ratio: number;
   /** @minimum 0 */
   mae_10min_bar: number;
   /** @minimum 0 */
   mae_60min_bar: number;
+  /** @minimum 0 */
+  max_supported_closed_loop_horizon_minutes: number;
+  /** @minimum 0 */
+  max_supported_duty_horizon_minutes: number;
+  /** @minimum 0 */
+  max_supported_teacher_forced_horizon_minutes: number;
   provenance_origin?: TwinValidationSummaryProvenanceOrigin;
   /** @minimum 0 */
   rmse_60min_bar: number;
+  sensitivity_checks: TwinSensitivityCheck[];
   split_policy: string;
   /** @minimum 0 */
   step_halving_max_diff_bar: number;
   /** @minimum 0 */
   train_cal_samples: number;
+  unsupported_horizons: string[];
 }

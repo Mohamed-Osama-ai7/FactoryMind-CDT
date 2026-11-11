@@ -6190,6 +6190,204 @@
         "title": "TimelineEntry",
         "type": "object"
       },
+      "TwinHorizonEvaluation": {
+        "additionalProperties": false,
+        "description": "Per-horizon out-of-sample metrics separating teacher-forced vs closed-loop accuracy.",
+        "properties": {
+          "closed_loop_oil_mae_c": {
+            "minimum": 0.0,
+            "title": "Closed Loop Oil Mae C",
+            "type": "number"
+          },
+          "closed_loop_skill_vs_persistence": {
+            "title": "Closed Loop Skill Vs Persistence",
+            "type": "number"
+          },
+          "closed_loop_skill_vs_train_mean": {
+            "title": "Closed Loop Skill Vs Train Mean",
+            "type": "number"
+          },
+          "closed_loop_supported": {
+            "title": "Closed Loop Supported",
+            "type": "boolean"
+          },
+          "closed_loop_tp3_mae_bar": {
+            "minimum": 0.0,
+            "title": "Closed Loop Tp3 Mae Bar",
+            "type": "number"
+          },
+          "closed_loop_tp3_median_mae_bar": {
+            "minimum": 0.0,
+            "title": "Closed Loop Tp3 Median Mae Bar",
+            "type": "number"
+          },
+          "closed_loop_tp3_rmse_bar": {
+            "minimum": 0.0,
+            "title": "Closed Loop Tp3 Rmse Bar",
+            "type": "number"
+          },
+          "cycle_count_mae": {
+            "minimum": 0.0,
+            "title": "Cycle Count Mae",
+            "type": "number"
+          },
+          "duty_cycle_mae": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Duty Cycle Mae",
+            "type": "number"
+          },
+          "duty_cycle_median_mae": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Duty Cycle Median Mae",
+            "type": "number"
+          },
+          "duty_cycle_supported": {
+            "title": "Duty Cycle Supported",
+            "type": "boolean"
+          },
+          "duty_skill_vs_train_mean": {
+            "title": "Duty Skill Vs Train Mean",
+            "type": "number"
+          },
+          "horizon_minutes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Horizon Minutes",
+            "type": "number"
+          },
+          "observed_cycles_per_segment": {
+            "minimum": 0.0,
+            "title": "Observed Cycles Per Segment",
+            "type": "number"
+          },
+          "persistence_duty_mae": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Persistence Duty Mae",
+            "type": "number"
+          },
+          "persistence_oil_mae_c": {
+            "minimum": 0.0,
+            "title": "Persistence Oil Mae C",
+            "type": "number"
+          },
+          "persistence_tp3_mae_bar": {
+            "minimum": 0.0,
+            "title": "Persistence Tp3 Mae Bar",
+            "type": "number"
+          },
+          "persistence_tp3_median_mae_bar": {
+            "minimum": 0.0,
+            "title": "Persistence Tp3 Median Mae Bar",
+            "type": "number"
+          },
+          "segment_count": {
+            "minimum": 0.0,
+            "title": "Segment Count",
+            "type": "integer"
+          },
+          "simulated_cycles_per_segment": {
+            "minimum": 0.0,
+            "title": "Simulated Cycles Per Segment",
+            "type": "number"
+          },
+          "support_note": {
+            "title": "Support Note",
+            "type": "string"
+          },
+          "teacher_forced_skill_vs_persistence": {
+            "title": "Teacher Forced Skill Vs Persistence",
+            "type": "number"
+          },
+          "teacher_forced_skill_vs_train_mean": {
+            "title": "Teacher Forced Skill Vs Train Mean",
+            "type": "number"
+          },
+          "teacher_forced_supported": {
+            "title": "Teacher Forced Supported",
+            "type": "boolean"
+          },
+          "teacher_forced_tp3_mae_bar": {
+            "minimum": 0.0,
+            "title": "Teacher Forced Tp3 Mae Bar",
+            "type": "number"
+          },
+          "teacher_forced_tp3_median_mae_bar": {
+            "minimum": 0.0,
+            "title": "Teacher Forced Tp3 Median Mae Bar",
+            "type": "number"
+          },
+          "teacher_forced_tp3_rmse_bar": {
+            "minimum": 0.0,
+            "title": "Teacher Forced Tp3 Rmse Bar",
+            "type": "number"
+          },
+          "train_mean_duty_mae": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Train Mean Duty Mae",
+            "type": "number"
+          },
+          "train_mean_duty_median_mae": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Train Mean Duty Median Mae",
+            "type": "number"
+          },
+          "train_mean_oil_mae_c": {
+            "minimum": 0.0,
+            "title": "Train Mean Oil Mae C",
+            "type": "number"
+          },
+          "train_mean_tp3_mae_bar": {
+            "minimum": 0.0,
+            "title": "Train Mean Tp3 Mae Bar",
+            "type": "number"
+          },
+          "train_mean_tp3_median_mae_bar": {
+            "minimum": 0.0,
+            "title": "Train Mean Tp3 Median Mae Bar",
+            "type": "number"
+          }
+        },
+        "required": [
+          "horizon_minutes",
+          "segment_count",
+          "teacher_forced_tp3_mae_bar",
+          "teacher_forced_tp3_median_mae_bar",
+          "teacher_forced_tp3_rmse_bar",
+          "closed_loop_tp3_mae_bar",
+          "closed_loop_tp3_median_mae_bar",
+          "closed_loop_tp3_rmse_bar",
+          "persistence_tp3_mae_bar",
+          "persistence_tp3_median_mae_bar",
+          "train_mean_tp3_mae_bar",
+          "train_mean_tp3_median_mae_bar",
+          "teacher_forced_skill_vs_persistence",
+          "teacher_forced_skill_vs_train_mean",
+          "closed_loop_skill_vs_persistence",
+          "closed_loop_skill_vs_train_mean",
+          "teacher_forced_supported",
+          "closed_loop_supported",
+          "duty_cycle_mae",
+          "duty_cycle_median_mae",
+          "persistence_duty_mae",
+          "train_mean_duty_mae",
+          "train_mean_duty_median_mae",
+          "duty_skill_vs_train_mean",
+          "duty_cycle_supported",
+          "observed_cycles_per_segment",
+          "simulated_cycles_per_segment",
+          "cycle_count_mae",
+          "closed_loop_oil_mae_c",
+          "persistence_oil_mae_c",
+          "train_mean_oil_mae_c",
+          "support_note"
+        ],
+        "title": "TwinHorizonEvaluation",
+        "type": "object"
+      },
       "TwinModelResponse": {
         "additionalProperties": false,
         "description": "Calibrated Physics-Informed Digital Twin specification & held-out validation.",
@@ -6362,6 +6560,67 @@
         "title": "TwinScenarioSummary",
         "type": "object"
       },
+      "TwinSensitivityCheck": {
+        "additionalProperties": false,
+        "description": "Pre-evaluation parameter perturbation sensitivity (never touches held-out data).",
+        "properties": {
+          "baseline_duty_mae_10min": {
+            "minimum": 0.0,
+            "title": "Baseline Duty Mae 10Min",
+            "type": "number"
+          },
+          "baseline_tp3_mae_10min_bar": {
+            "minimum": 0.0,
+            "title": "Baseline Tp3 Mae 10Min Bar",
+            "type": "number"
+          },
+          "delta_duty_mae": {
+            "title": "Delta Duty Mae",
+            "type": "number"
+          },
+          "delta_tp3_mae_bar": {
+            "title": "Delta Tp3 Mae Bar",
+            "type": "number"
+          },
+          "evaluation_scope": {
+            "const": "pre_evaluation_only",
+            "default": "pre_evaluation_only",
+            "title": "Evaluation Scope",
+            "type": "string"
+          },
+          "perturbation": {
+            "title": "Perturbation",
+            "type": "string"
+          },
+          "perturbed_duty_mae_10min": {
+            "minimum": 0.0,
+            "title": "Perturbed Duty Mae 10Min",
+            "type": "number"
+          },
+          "perturbed_tp3_mae_10min_bar": {
+            "minimum": 0.0,
+            "title": "Perturbed Tp3 Mae 10Min Bar",
+            "type": "number"
+          },
+          "segment_count": {
+            "minimum": 0.0,
+            "title": "Segment Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "perturbation",
+          "segment_count",
+          "baseline_tp3_mae_10min_bar",
+          "perturbed_tp3_mae_10min_bar",
+          "delta_tp3_mae_bar",
+          "baseline_duty_mae_10min",
+          "perturbed_duty_mae_10min",
+          "delta_duty_mae"
+        ],
+        "title": "TwinSensitivityCheck",
+        "type": "object"
+      },
       "TwinSimulationRequest": {
         "additionalProperties": false,
         "description": "Counterfactual digital-twin simulation scenario request (advisory only).",
@@ -6450,6 +6709,29 @@
             "title": "Asset Id",
             "type": "string"
           },
+          "horizon_support_status": {
+            "enum": [
+              "supported_closed_loop",
+              "unsupported_closed_loop_horizon"
+            ],
+            "title": "Horizon Support Status",
+            "type": "string"
+          },
+          "horizon_supported": {
+            "title": "Horizon Supported",
+            "type": "boolean"
+          },
+          "horizon_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon Warning"
+          },
           "params_used": {
             "items": {
               "$ref": "#/components/schemas/TwinParameterEstimate"
@@ -6494,6 +6776,8 @@
         "required": [
           "asset_id",
           "scenario",
+          "horizon_supported",
+          "horizon_support_status",
           "params_used",
           "unidentifiable_parameters",
           "trajectory",
@@ -6564,8 +6848,30 @@
       },
       "TwinValidationSummary": {
         "additionalProperties": false,
-        "description": "Out-of-sample held-out trajectory accuracy, stability & constraint verification.",
+        "description": "Out-of-sample held-out trajectory accuracy, baseline comparisons, stability & limits.",
         "properties": {
+          "calibration_notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Calibration Notes",
+            "type": "array"
+          },
+          "closed_loop_mae_10min_bar": {
+            "minimum": 0.0,
+            "title": "Closed Loop Mae 10Min Bar",
+            "type": "number"
+          },
+          "closed_loop_mae_60min_bar": {
+            "minimum": 0.0,
+            "title": "Closed Loop Mae 60Min Bar",
+            "type": "number"
+          },
+          "closed_loop_rmse_60min_bar": {
+            "minimum": 0.0,
+            "title": "Closed Loop Rmse 60Min Bar",
+            "type": "number"
+          },
           "constraint_violations": {
             "minimum": 0.0,
             "title": "Constraint Violations",
@@ -6575,6 +6881,13 @@
             "minimum": 0.0,
             "title": "Heldout Normal Segments",
             "type": "integer"
+          },
+          "horizon_evaluations": {
+            "items": {
+              "$ref": "#/components/schemas/TwinHorizonEvaluation"
+            },
+            "title": "Horizon Evaluations",
+            "type": "array"
           },
           "leak_vs_normal_residual_ratio": {
             "minimum": 0.0,
@@ -6591,6 +6904,21 @@
             "title": "Mae 60Min Bar",
             "type": "number"
           },
+          "max_supported_closed_loop_horizon_minutes": {
+            "minimum": 0.0,
+            "title": "Max Supported Closed Loop Horizon Minutes",
+            "type": "number"
+          },
+          "max_supported_duty_horizon_minutes": {
+            "minimum": 0.0,
+            "title": "Max Supported Duty Horizon Minutes",
+            "type": "number"
+          },
+          "max_supported_teacher_forced_horizon_minutes": {
+            "minimum": 0.0,
+            "title": "Max Supported Teacher Forced Horizon Minutes",
+            "type": "number"
+          },
           "provenance_origin": {
             "default": "empirical_validation",
             "enum": [
@@ -6605,6 +6933,13 @@
             "title": "Rmse 60Min Bar",
             "type": "number"
           },
+          "sensitivity_checks": {
+            "items": {
+              "$ref": "#/components/schemas/TwinSensitivityCheck"
+            },
+            "title": "Sensitivity Checks",
+            "type": "array"
+          },
           "split_policy": {
             "title": "Split Policy",
             "type": "string"
@@ -6618,6 +6953,13 @@
             "minimum": 0.0,
             "title": "Train Cal Samples",
             "type": "integer"
+          },
+          "unsupported_horizons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unsupported Horizons",
+            "type": "array"
           }
         },
         "required": [
@@ -6627,6 +6969,16 @@
           "mae_10min_bar",
           "mae_60min_bar",
           "rmse_60min_bar",
+          "closed_loop_mae_10min_bar",
+          "closed_loop_mae_60min_bar",
+          "closed_loop_rmse_60min_bar",
+          "max_supported_closed_loop_horizon_minutes",
+          "max_supported_teacher_forced_horizon_minutes",
+          "max_supported_duty_horizon_minutes",
+          "unsupported_horizons",
+          "horizon_evaluations",
+          "sensitivity_checks",
+          "calibration_notes",
           "constraint_violations",
           "step_halving_max_diff_bar",
           "leak_vs_normal_residual_ratio"
