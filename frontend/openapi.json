@@ -4885,6 +4885,450 @@
         "title": "TimelineEntry",
         "type": "object"
       },
+      "TwinModelResponse": {
+        "additionalProperties": false,
+        "description": "Calibrated Physics-Informed Digital Twin specification & held-out validation.",
+        "properties": {
+          "advisory_note": {
+            "title": "Advisory Note",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "governing_equations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Governing Equations",
+            "type": "array"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/TwinParameterEstimate"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "provenance_origin": {
+            "const": "advisory_physics_twin",
+            "default": "advisory_physics_twin",
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "unidentifiable_parameters": {
+            "items": {
+              "$ref": "#/components/schemas/UnidentifiableParameter"
+            },
+            "title": "Unidentifiable Parameters",
+            "type": "array"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/TwinValidationSummary"
+          }
+        },
+        "required": [
+          "asset_id",
+          "model_version",
+          "governing_equations",
+          "parameters",
+          "unidentifiable_parameters",
+          "validation",
+          "advisory_note"
+        ],
+        "title": "TwinModelResponse",
+        "type": "object"
+      },
+      "TwinParameterEstimate": {
+        "additionalProperties": false,
+        "description": "Calibrated normalized ODE parameter fitted strictly on normal train/calibration data.",
+        "properties": {
+          "fit_source": {
+            "title": "Fit Source",
+            "type": "string"
+          },
+          "identifiable": {
+            "default": true,
+            "title": "Identifiable",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "uncertainty_note": {
+            "title": "Uncertainty Note",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "unit",
+          "fit_source",
+          "uncertainty_note"
+        ],
+        "title": "TwinParameterEstimate",
+        "type": "object"
+      },
+      "TwinScenarioSummary": {
+        "additionalProperties": false,
+        "description": "Aggregate KPIs and constraint audit for one counterfactual twin trajectory.",
+        "properties": {
+          "advisory_interpretation": {
+            "title": "Advisory Interpretation",
+            "type": "string"
+          },
+          "constraint_violations": {
+            "minimum": 0.0,
+            "title": "Constraint Violations",
+            "type": "integer"
+          },
+          "final_oil_temp_c": {
+            "title": "Final Oil Temp C",
+            "type": "number"
+          },
+          "lps_excursion_minutes": {
+            "minimum": 0.0,
+            "title": "Lps Excursion Minutes",
+            "type": "number"
+          },
+          "max_tp3_bar": {
+            "title": "Max Tp3 Bar",
+            "type": "number"
+          },
+          "mean_load_duty": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Mean Load Duty",
+            "type": "number"
+          },
+          "min_tp3_bar": {
+            "title": "Min Tp3 Bar",
+            "type": "number"
+          },
+          "peak_load_duty": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Peak Load Duty",
+            "type": "number"
+          },
+          "scenario": {
+            "enum": [
+              "baseline",
+              "leak",
+              "continued_operation",
+              "maintenance_repair"
+            ],
+            "title": "Scenario",
+            "type": "string"
+          },
+          "time_above_duty_threshold_minutes": {
+            "minimum": 0.0,
+            "title": "Time Above Duty Threshold Minutes",
+            "type": "number"
+          }
+        },
+        "required": [
+          "scenario",
+          "mean_load_duty",
+          "peak_load_duty",
+          "min_tp3_bar",
+          "max_tp3_bar",
+          "lps_excursion_minutes",
+          "time_above_duty_threshold_minutes",
+          "final_oil_temp_c",
+          "constraint_violations",
+          "advisory_interpretation"
+        ],
+        "title": "TwinScenarioSummary",
+        "type": "object"
+      },
+      "TwinSimulationRequest": {
+        "additionalProperties": false,
+        "description": "Counterfactual digital-twin simulation scenario request (advisory only).",
+        "properties": {
+          "asset_id": {
+            "default": "metropt3-apu-1",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "demand_factor": {
+            "default": 1.0,
+            "maximum": 3.0,
+            "minimum": 0.5,
+            "title": "Demand Factor",
+            "type": "number"
+          },
+          "horizon_minutes": {
+            "default": 60.0,
+            "maximum": 240.0,
+            "minimum": 10.0,
+            "title": "Horizon Minutes",
+            "type": "number"
+          },
+          "initial_oil_temp_c": {
+            "default": 62.0,
+            "maximum": 120.0,
+            "minimum": 10.0,
+            "title": "Initial Oil Temp C",
+            "type": "number"
+          },
+          "initial_tp3_bar": {
+            "default": 9.1,
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Initial Tp3 Bar",
+            "type": "number"
+          },
+          "leak_rate_bar_per_min": {
+            "default": 0.35,
+            "maximum": 1.5,
+            "minimum": 0.0,
+            "title": "Leak Rate Bar Per Min",
+            "type": "number"
+          },
+          "repair_at_minute": {
+            "anyOf": [
+              {
+                "maximum": 239.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 30.0,
+            "title": "Repair At Minute"
+          },
+          "scenario": {
+            "default": "baseline",
+            "enum": [
+              "baseline",
+              "leak",
+              "continued_operation",
+              "maintenance_repair"
+            ],
+            "title": "Scenario",
+            "type": "string"
+          }
+        },
+        "title": "TwinSimulationRequest",
+        "type": "object"
+      },
+      "TwinSimulationResponse": {
+        "additionalProperties": false,
+        "description": "Controlled physics-informed scenario rollout clearly separated from observed telemetry.",
+        "properties": {
+          "advisory_note": {
+            "title": "Advisory Note",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "params_used": {
+            "items": {
+              "$ref": "#/components/schemas/TwinParameterEstimate"
+            },
+            "title": "Params Used",
+            "type": "array"
+          },
+          "provenance_origin": {
+            "const": "simulated_projection",
+            "default": "simulated_projection",
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "scenario": {
+            "enum": [
+              "baseline",
+              "leak",
+              "continued_operation",
+              "maintenance_repair"
+            ],
+            "title": "Scenario",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/TwinScenarioSummary"
+          },
+          "trajectory": {
+            "items": {
+              "$ref": "#/components/schemas/TwinTrajectoryPoint"
+            },
+            "title": "Trajectory",
+            "type": "array"
+          },
+          "unidentifiable_parameters": {
+            "items": {
+              "$ref": "#/components/schemas/UnidentifiableParameter"
+            },
+            "title": "Unidentifiable Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "scenario",
+          "params_used",
+          "unidentifiable_parameters",
+          "trajectory",
+          "summary",
+          "advisory_note"
+        ],
+        "title": "TwinSimulationResponse",
+        "type": "object"
+      },
+      "TwinTrajectoryPoint": {
+        "additionalProperties": false,
+        "description": "Single physics-simulated state sample explicitly marked as simulated projection.",
+        "properties": {
+          "lps_active": {
+            "title": "Lps Active",
+            "type": "boolean"
+          },
+          "minute": {
+            "minimum": 0.0,
+            "title": "Minute",
+            "type": "number"
+          },
+          "motor_loaded": {
+            "title": "Motor Loaded",
+            "type": "boolean"
+          },
+          "oil_temp_c": {
+            "title": "Oil Temp C",
+            "type": "number"
+          },
+          "provenance_origin": {
+            "const": "simulated_projection",
+            "default": "simulated_projection",
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "regime": {
+            "title": "Regime",
+            "type": "string"
+          },
+          "reservoirs_bar": {
+            "title": "Reservoirs Bar",
+            "type": "number"
+          },
+          "rolling_duty": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Rolling Duty",
+            "type": "number"
+          },
+          "tp3_bar": {
+            "title": "Tp3 Bar",
+            "type": "number"
+          }
+        },
+        "required": [
+          "minute",
+          "tp3_bar",
+          "reservoirs_bar",
+          "oil_temp_c",
+          "motor_loaded",
+          "rolling_duty",
+          "lps_active",
+          "regime"
+        ],
+        "title": "TwinTrajectoryPoint",
+        "type": "object"
+      },
+      "TwinValidationSummary": {
+        "additionalProperties": false,
+        "description": "Out-of-sample held-out trajectory accuracy, stability & constraint verification.",
+        "properties": {
+          "constraint_violations": {
+            "minimum": 0.0,
+            "title": "Constraint Violations",
+            "type": "integer"
+          },
+          "heldout_normal_segments": {
+            "minimum": 0.0,
+            "title": "Heldout Normal Segments",
+            "type": "integer"
+          },
+          "leak_vs_normal_residual_ratio": {
+            "minimum": 0.0,
+            "title": "Leak Vs Normal Residual Ratio",
+            "type": "number"
+          },
+          "mae_10min_bar": {
+            "minimum": 0.0,
+            "title": "Mae 10Min Bar",
+            "type": "number"
+          },
+          "mae_60min_bar": {
+            "minimum": 0.0,
+            "title": "Mae 60Min Bar",
+            "type": "number"
+          },
+          "provenance_origin": {
+            "default": "empirical_validation",
+            "enum": [
+              "derived",
+              "empirical_validation"
+            ],
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "rmse_60min_bar": {
+            "minimum": 0.0,
+            "title": "Rmse 60Min Bar",
+            "type": "number"
+          },
+          "split_policy": {
+            "title": "Split Policy",
+            "type": "string"
+          },
+          "step_halving_max_diff_bar": {
+            "minimum": 0.0,
+            "title": "Step Halving Max Diff Bar",
+            "type": "number"
+          },
+          "train_cal_samples": {
+            "minimum": 0.0,
+            "title": "Train Cal Samples",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "split_policy",
+          "train_cal_samples",
+          "heldout_normal_segments",
+          "mae_10min_bar",
+          "mae_60min_bar",
+          "rmse_60min_bar",
+          "constraint_violations",
+          "step_halving_max_diff_bar",
+          "leak_vs_normal_residual_ratio"
+        ],
+        "title": "TwinValidationSummary",
+        "type": "object"
+      },
       "UncertaintyEstimate": {
         "additionalProperties": false,
         "description": "Mahalanobis OOD distance and calibrated uncertainty summary for a single prediction.",
@@ -4951,6 +5395,31 @@
           "uncertainty_band"
         ],
         "title": "UncertaintyEstimate",
+        "type": "object"
+      },
+      "UnidentifiableParameter": {
+        "additionalProperties": false,
+        "description": "Explicit physical quantity that cannot be uniquely identified from MetroPT-3 telemetry.",
+        "properties": {
+          "assumption_or_proxy": {
+            "title": "Assumption Or Proxy",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "reason",
+          "assumption_or_proxy"
+        ],
+        "title": "UnidentifiableParameter",
         "type": "object"
       },
       "ValidationError": {
@@ -7010,6 +7479,91 @@
         "summary": "Predict Ai4I Sample",
         "tags": [
           "ml"
+        ]
+      }
+    },
+    "/api/v1/twin/model": {
+      "get": {
+        "operationId": "get_twin_model",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_id",
+            "required": false,
+            "schema": {
+              "default": "metropt3-apu-1",
+              "maxLength": 64,
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwinModelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Twin Model",
+        "tags": [
+          "digital_twin"
+        ]
+      }
+    },
+    "/api/v1/twin/simulate": {
+      "post": {
+        "operationId": "simulate_twin_scenario",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwinSimulationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwinSimulationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Simulate Twin Scenario",
+        "tags": [
+          "digital_twin"
         ]
       }
     }

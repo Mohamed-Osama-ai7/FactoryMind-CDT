@@ -14,6 +14,17 @@ from factorymind.contracts.assets import (
     SensorPassport,
     SourceDatasetRecord,
 )
+from factorymind.contracts.digital_twin import (
+    TwinModelResponse,
+    TwinParameterEstimate,
+    TwinScenarioKind,
+    TwinScenarioSummary,
+    TwinSimulationRequest,
+    TwinSimulationResponse,
+    TwinTrajectoryPoint,
+    TwinValidationSummary,
+    UnidentifiableParameter,
+)
 from factorymind.contracts.events import (
     ContradictionRecord,
     DerivedFeatureSummary,
@@ -123,7 +134,16 @@ __all__ = [
     "SpecialistModelEntry",
     "TimelineCategory",
     "TimelineEntry",
+    "TwinModelResponse",
+    "TwinParameterEstimate",
+    "TwinScenarioKind",
+    "TwinScenarioSummary",
+    "TwinSimulationRequest",
+    "TwinSimulationResponse",
+    "TwinTrajectoryPoint",
+    "TwinValidationSummary",
     "UncertaintyBand",
     "UncertaintyEstimate",
+    "UnidentifiableParameter",
     "VerificationStep",
 ]
