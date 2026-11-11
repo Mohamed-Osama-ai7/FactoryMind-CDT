@@ -5,14 +5,22 @@
  * Evidence-grounded, uncertainty-aware decision support. Advisory only.
  * OpenAPI spec version: 0.1.0
  */
+import type { AlarmEpisodeDominantRegime } from './alarmEpisodeDominantRegime';
+import type { AlarmEpisodeEventClass } from './alarmEpisodeEventClass';
+import type { AlarmEpisodeRegimeBreakdown } from './alarmEpisodeRegimeBreakdown';
 
 export interface AlarmEpisode {
+  dominant_regime?: AlarmEpisodeDominantRegime;
   end: string;
+  event_class?: AlarmEpisodeEventClass;
+  hypothesis?: string;
   /** Still anomalous at the end of the requested range. */
   ongoing: boolean;
   peak_score: number;
   raised_at: string;
+  regime_breakdown?: AlarmEpisodeRegimeBreakdown;
   start: string;
   /** The run may have started before the scanned range. */
   truncated: boolean;
+  uncertainty_note?: string;
 }

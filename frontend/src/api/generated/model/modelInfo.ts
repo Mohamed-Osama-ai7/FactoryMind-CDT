@@ -10,6 +10,7 @@ import type { FaultSummary } from './faultSummary';
 import type { LoeoSummary } from './loeoSummary';
 import type { OperatorReport } from './operatorReport';
 import type { ReferenceHoldoutCheck } from './referenceHoldoutCheck';
+import type { Wp2EvaluationSummary } from './wp2EvaluationSummary';
 
 export interface ModelInfo {
   data_kind: string;
@@ -37,4 +38,6 @@ export interface ModelInfo {
   threshold: number;
   training_period: string[];
   window_length: string;
+  /** WP2 operating-regime separation, consistency warnings, and gating ablations. */
+  wp2?: Wp2EvaluationSummary | null;
 }

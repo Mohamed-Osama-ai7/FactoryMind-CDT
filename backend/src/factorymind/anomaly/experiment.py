@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -41,9 +43,16 @@ from factorymind import __version__
 from factorymind.anomaly.alarm import AlarmPolicy, AlarmTracker, Episode, episodes
 from factorymind.anomaly.calibration import ExceedanceCalibrator
 from factorymind.anomaly.detectors import Detector, DetectorName, FeatureProfile, build_detector
-from factorymind.anomaly.evaluation import EvaluationResult, evaluate
+from factorymind.anomaly.evaluation import EvaluationResult, evaluate, is_outside_report_windows
+from factorymind.anomaly.events import (
+    build_warning_episodes,
+    primary_leak_scorable,
+    summarize_episode_regimes,
+    warning_scorable,
+)
 from factorymind.anomaly.faults import FAULT_TYPES, FaultCase, build_cases
 from factorymind.anomaly.features import FEATURE_NAMES, WindowSpec, window_features
+from factorymind.anomaly.regimes import OperatingRegime, RegimeAssessment, classify_sequence
 from factorymind.data import metropt3
 
 PERIODS = ("train", "calibration", "evaluation")
@@ -389,6 +398,399 @@ def _usable_masks(
     return usable, fit_ok
 
 
+_REGIME_KEYS: tuple[OperatingRegime, ...] = (
+    "loaded",
+    "unloaded",
+    "starting",
+    "stopped",
+    "insufficient_evidence",
+)
+_INSUFFICIENT_REASONS: tuple[str, ...] = (
+    "mixed_duty_cycle",
+    "hysteresis_hold",
+    "stale_telemetry",
+    "signal_inconsistency",
+    "incomplete_or_gapped",
+)
+
+
+def _evaluate_loeo_detector(
+    name: str,
+    dcfg: DetectorConfig,
+    config: ExperimentConfig,
+    ev_index: pd.DatetimeIndex,
+    reports: tuple[metropt3.FailureReport, ...],
+    window: pd.Timedelta,
+    early: pd.Timedelta,
+    post: pd.Timedelta,
+    variant_scores: list[tuple[Detector, np.ndarray, np.ndarray, np.ndarray]],
+    suppress: np.ndarray,
+) -> tuple[
+    list[Candidate],
+    dict[str, list[Candidate]],
+    dict[tuple[int, str, int], list[Episode]],
+    dict[str, Any],
+]:
+    candidates: list[Candidate] = []
+    fold_candidates: dict[str, list[Candidate]] = {r.report_id: [] for r in reports}
+    episodes_by_key: dict[tuple[int, str, int], list[Episode]] = {}
+    for v, params in enumerate(dcfg.variants):
+        _det, _tr, ref, evs = variant_scores[v]
+        if dcfg.threshold.mode == "quantile":
+            thresholds = [(f"q{q}", float(np.quantile(ref, q))) for q in dcfg.threshold.grid]
+        else:
+            thresholds = [(f"{g}", float(g)) for g in dcfg.threshold.grid]
+        for label, thr in thresholds:
+            for k in config.persistence_grid:
+                policy = AlarmPolicy(thr, k)
+                eps = episodes(ev_index, evs, window, policy, suppress)
+                episodes_by_key[(v, label, k)] = eps
+                res = evaluate(
+                    ev_index,
+                    evs,
+                    window,
+                    policy,
+                    reports,
+                    early_horizon=early,
+                    post_tolerance=post,
+                    suppress=suppress,
+                    precomputed_episodes=eps,
+                )
+                candidates.append(Candidate(name, v, params, label, thr, k, res))
+                for r in reports:
+                    other_reports = tuple(
+                        other for other in reports if other.report_id != r.report_id
+                    )
+                    sel_res = evaluate(
+                        ev_index,
+                        evs,
+                        window,
+                        policy,
+                        other_reports,
+                        early_horizon=early,
+                        post_tolerance=post,
+                        suppress=suppress,
+                        precomputed_episodes=eps,
+                    )
+                    fold_candidates[r.report_id].append(
+                        Candidate(name, v, params, label, thr, k, sel_res)
+                    )
+    loeo = _loeo_summary(
+        fold_candidates,
+        candidates,
+        reports,
+        ev_index,
+        [vs[3] for vs in variant_scores],
+        window,
+        early,
+        post,
+        suppress,
+        episodes_by_key,
+    )
+    return candidates, fold_candidates, episodes_by_key, loeo
+
+
+def _regime_split_summary(
+    raw_period: pd.DataFrame,
+    regimes: Sequence[RegimeAssessment],
+) -> dict[str, Any]:
+    counts: Counter[OperatingRegime] = Counter(r.regime for r in regimes)
+    reasons: Counter[str] = Counter(
+        r.reason for r in regimes if r.regime == "insufficient_evidence"
+    )
+    invalid_gapped = int((~raw_period["valid"]).sum())
+    return {
+        "valid_windows": len(regimes),
+        "invalid_gapped_windows": invalid_gapped,
+        "counts": {k: int(counts[k]) for k in _REGIME_KEYS},
+        "insufficient_reasons": {r: int(reasons[r]) for r in _INSUFFICIENT_REASONS if reasons[r]},
+    }
+
+
+def _episodes_overlap(start_a: pd.Timestamp, end_a: pd.Timestamp, b: Sequence[Episode]) -> bool:
+    return any(ep.start < end_a and ep.end > start_a for ep in b)
+
+
+def _evaluate_wp2(
+    *,
+    config: ExperimentConfig,
+    spec: WindowSpec,
+    window: pd.Timedelta,
+    early: pd.Timedelta,
+    post: pd.Timedelta,
+    raw_windows: pd.DataFrame,
+    splits: dict[str, pd.DataFrame],
+    regimes_by_split: dict[str, list[RegimeAssessment]],
+    default: str,
+    bundles: dict[str, ModelBundle],
+    scored: dict[str, pd.DataFrame],
+    all_variant_scores: dict[str, list[tuple[Detector, np.ndarray, np.ndarray, np.ndarray]]],
+    wp0_summary: dict[str, dict[str, Any]],
+    fault_results: dict[str, dict[str, Any]],
+    reports: tuple[metropt3.FailureReport, ...],
+) -> dict[str, Any]:
+    ev = splits["evaluation"]
+    ev_index = pd.DatetimeIndex(ev.index)
+    eval_regimes = regimes_by_split["evaluation"]
+    valid_arr = ev["valid"].to_numpy(dtype=bool)
+    stopped_arr = ev["stopped"].to_numpy(dtype=bool)
+
+    primary_bundle = bundles[default]
+    primary_scores = scored["evaluation"][default].to_numpy(dtype=float)
+    leak_scorable = np.array(
+        [
+            primary_leak_scorable(bool(v), bool(s), r)
+            for v, s, r in zip(valid_arr, stopped_arr, eval_regimes, strict=True)
+        ],
+        dtype=bool,
+    )
+    integrity_suppress = ~leak_scorable
+
+    wp0_eps = episodes(ev_index, primary_scores, window, primary_bundle.policy, stopped_arr)
+    wp0_eval = evaluate(
+        ev_index,
+        primary_scores,
+        window,
+        primary_bundle.policy,
+        reports,
+        early_horizon=early,
+        post_tolerance=post,
+        suppress=stopped_arr,
+        precomputed_episodes=wp0_eps,
+    )
+    gated_eps = episodes(
+        ev_index, primary_scores, window, primary_bundle.policy, integrity_suppress
+    )
+    gated_eval = evaluate(
+        ev_index,
+        primary_scores,
+        window,
+        primary_bundle.policy,
+        reports,
+        early_horizon=early,
+        post_tolerance=post,
+        suppress=integrity_suppress,
+        precomputed_episodes=gated_eps,
+    )
+
+    fa_leak_eps = [
+        ep
+        for ep in gated_eps
+        if is_outside_report_windows(
+            ep.start, ep.end, reports, early_horizon=early, post_tolerance=post
+        )
+    ]
+    fa_dom_regimes: list[OperatingRegime] = []
+    starting_overlap_fa = 0
+    mixed_overlap_fa = 0
+    for ep in fa_leak_eps:
+        dom, _ = summarize_episode_regimes(eval_regimes, ep.start, ep.end)
+        fa_dom_regimes.append(dom)
+        ep_regs = [r for r in eval_regimes if ep.start <= r.window_start < ep.end]
+        if any(r.regime == "starting" for r in ep_regs):
+            starting_overlap_fa += 1
+        if any(r.reason == "mixed_duty_cycle" for r in ep_regs):
+            mixed_overlap_fa += 1
+    fa_by_dom = Counter(fa_dom_regimes)
+
+    warning_bundle = bundles.get("pca_spe")
+    warn_scorable_flags = [
+        warning_scorable(bool(v), bool(s), r)
+        for v, s, r in zip(valid_arr, stopped_arr, eval_regimes, strict=True)
+    ]
+    warn_scores: list[float | None] = [None] * len(ev)
+    warn_excs: list[float | None] = [None] * len(ev)
+    if warning_bundle is not None:
+        raw_warn = scored["evaluation"]["pca_spe"].to_numpy(dtype=float)
+        raw_exc = scored["evaluation"]["p_pca_spe"].to_numpy(dtype=float)
+        for i, can in enumerate(warn_scorable_flags):
+            if can:
+                warn_scores[i] = float(raw_warn[i])
+                warn_excs[i] = float(raw_exc[i])
+
+    ev_timestamps = [pd.Timestamp(str(ts)) for ts in ev_index]
+    warn_eps = build_warning_episodes(
+        window=window,
+        timestamps=ev_timestamps,
+        regimes=eval_regimes,
+        warning_scores=warn_scores,
+        warning_exceedances=warn_excs,
+        warning_scorable_flags=warn_scorable_flags,
+        warning_policy=warning_bundle.policy if warning_bundle else None,
+        warning_detector_name=warning_bundle.detector_name if warning_bundle else None,
+        range_start=ev_timestamps[0],
+        range_end=ev_timestamps[-1] + window,
+    )
+    warn_kind_counts = Counter(w.warning_kind for w in warn_eps)
+    warn_overlap_count = sum(1 for w in warn_eps if _episodes_overlap(w.start, w.end, gated_eps))
+    warn_only_count = len(warn_eps) - warn_overlap_count
+    valid_days = len(ev_index) * window.total_seconds() / 86400.0
+    operating_days = int((~stopped_arr).sum()) * window.total_seconds() / 86400.0
+
+    per_regime: dict[str, Any] = {}
+    warn_scores_arr = np.array([s if s is not None else np.nan for s in warn_scores], dtype=float)
+    warn_scorable_arr = np.asarray(warn_scorable_flags, dtype=bool)
+    for reg_key in _REGIME_KEYS:
+        reg_mask = np.array([r.regime == reg_key for r in eval_regimes], dtype=bool)
+        p_mask = reg_mask & leak_scorable
+        p_scored = int(p_mask.sum())
+        p_exc = (
+            int((primary_scores[p_mask] > primary_bundle.policy.threshold).sum()) if p_scored else 0
+        )
+        fa_overlap = sum(
+            1
+            for ep in fa_leak_eps
+            if any(
+                r.regime == reg_key and ep.start <= r.window_start < ep.end for r in eval_regimes
+            )
+        )
+        warn_block: dict[str, Any] | None = None
+        if warning_bundle is not None:
+            w_mask = reg_mask & warn_scorable_arr
+            w_scored = int(w_mask.sum())
+            w_exc = (
+                int((warn_scores_arr[w_mask] > warning_bundle.policy.threshold).sum())
+                if w_scored
+                else 0
+            )
+            warn_block = {
+                "scored_windows": w_scored,
+                "exceedance_windows": w_exc,
+                "exceedance_rate": round(w_exc / w_scored, 4) if w_scored else None,
+                "warning_episodes": sum(1 for w in warn_eps if w.dominant_regime == reg_key),
+            }
+        per_regime[reg_key] = {
+            "windows": int(reg_mask.sum()),
+            "share": round(float(reg_mask.mean()), 4) if len(eval_regimes) else 0.0,
+            "primary": {
+                "scored_windows": p_scored,
+                "exceedance_windows": p_exc,
+                "exceedance_rate": round(p_exc / p_scored, 4) if p_scored else None,
+                "false_alarm_episodes": int(fa_by_dom[reg_key]),
+                "overlapping_false_alarm_episodes": fa_overlap,
+            },
+            "warning": warn_block,
+        }
+
+    default_cfg = config.detectors[default]  # type: ignore[index]
+    _, _, _, loeo_integrity = _evaluate_loeo_detector(
+        default,
+        default_cfg,
+        config,
+        ev_index,
+        reports,
+        window,
+        early,
+        post,
+        all_variant_scores[default],
+        integrity_suppress,
+    )
+    starting_mask = np.array([r.regime == "starting" for r in eval_regimes], dtype=bool)
+    _, _, _, loeo_starting = _evaluate_loeo_detector(
+        default,
+        default_cfg,
+        config,
+        ev_index,
+        reports,
+        window,
+        early,
+        post,
+        all_variant_scores[default],
+        integrity_suppress | starting_mask,
+    )
+
+    regime_dist: dict[str, Any] = {}
+    for split_name in splits:
+        lo, hi = (pd.Timestamp(b) for b in config.periods[split_name])
+        raw_slice = raw_windows[(raw_windows.index >= lo) & (raw_windows.index < hi)]
+        regime_dist[split_name] = _regime_split_summary(raw_slice, regimes_by_split[split_name])
+
+    sim_comparison: dict[str, Any] = {}
+    for det_name in (default, "pca_spe"):
+        if det_name in fault_results and fault_results[det_name] is not None:
+            fr = fault_results[det_name]
+            sim_comparison[det_name] = {
+                "detected": fr["detected"],
+                "cases": fr["cases"],
+                "control_detected": fr["control_detected"],
+                "clean_control_sensitivity": fr["clean_control_sensitivity"],
+                "incremental_lift": fr["incremental_lift"],
+                "per_type": fr["per_type"],
+            }
+
+    return {
+        "primary_detector": default,
+        "warning_detector": warning_bundle.detector_name if warning_bundle else None,
+        "regime_distribution": regime_dist,
+        "event_separation": {
+            "baseline_leak_episodes_wp0": wp0_eval.alarm_episodes,
+            "baseline_false_alarm_episodes_wp0": wp0_eval.false_alarm_episodes,
+            "gated_leak_episodes_wp2": gated_eval.alarm_episodes,
+            "gated_false_alarm_episodes_wp2": gated_eval.false_alarm_episodes,
+            "integrity_suppressed_leak_episodes": (
+                wp0_eval.false_alarm_episodes - gated_eval.false_alarm_episodes
+            ),
+            "events_detected_wp2": gated_eval.events_detected,
+            "events_total": gated_eval.events_total,
+            "false_alarms_per_day_wp2": gated_eval.false_alarms_per_day,
+            "operating_false_alarms_per_day_wp2": gated_eval.operating_false_alarms_per_day,
+            "sensor_consistency_warning_episodes": len(warn_eps),
+            "warnings_per_day": round(len(warn_eps) / valid_days, 3) if valid_days else 0.0,
+            "operating_warnings_per_day": (
+                round(len(warn_eps) / operating_days, 3) if operating_days else 0.0
+            ),
+            "warning_only_episodes": warn_only_count,
+            "warning_overlapping_leak_episodes": warn_overlap_count,
+            "warning_kinds": {k: int(v) for k, v in sorted(warn_kind_counts.items())},
+            "false_alarms_by_dominant_regime": {k: int(fa_by_dom[k]) for k in _REGIME_KEYS},
+            "starting_overlapping_false_alarms": starting_overlap_fa,
+            "mixed_cycle_overlapping_false_alarms": mixed_overlap_fa,
+        },
+        "per_regime_metrics": per_regime,
+        "regime_gating_ablations": {
+            "wp0_stopped_only": {
+                **wp0_summary[default],
+                "suppressed_states": ["stopped"],
+                "note": "WP0 baseline: only stopped windows suppressed.",
+            },
+            "wp2_integrity_gated": {
+                **loeo_integrity,
+                "suppressed_states": ["stopped", "stale_telemetry", "signal_inconsistency"],
+                "note": (
+                    "WP2 integrity gating: abstains primary air-leak detector on frozen or "
+                    "contradictory telemetry."
+                ),
+            },
+            "starting_suppressed_ablation": {
+                **loeo_starting,
+                "suppressed_states": [
+                    "stopped",
+                    "stale_telemetry",
+                    "signal_inconsistency",
+                    "starting",
+                ],
+                "note": (
+                    f"Starting-regime suppression changed LOEO operating FA/day from "
+                    f"{loeo_integrity['mean_operating_false_alarms_per_day']:.3f} to "
+                    f"{loeo_starting['mean_operating_false_alarms_per_day']:.3f} with "
+                    f"{loeo_starting['events_detected']}/{loeo_starting['events_total']} events; "
+                    "not enabled in default leak detection unless operating FA/day strictly "
+                    "improves."
+                ),
+            },
+        },
+        "simulated_fault_separation": {
+            "simulated": True,
+            "real_operational_data": False,
+            "note": (
+                "Simulated single-sensor faults evaluate warning-tier separation; "
+                "never count toward real air-leak failure metrics."
+            ),
+            "detectors": sim_comparison,
+        },
+    }
+
+
 def run(
     config: ExperimentConfig,
     telemetry: pd.DataFrame,
@@ -396,7 +798,8 @@ def run(
 ) -> RunOutput:
     spec = config.window.spec()
     window = pd.Timedelta(spec.length)
-    usable, fit_ok = _usable_masks(window_features(telemetry, spec), config)
+    raw_windows = window_features(telemetry, spec)
+    usable, fit_ok = _usable_masks(raw_windows, config)
 
     def period(name: str) -> pd.DataFrame:
         lo, hi = (pd.Timestamp(b) for b in config.periods[name])
@@ -426,85 +829,40 @@ def run(
     results: dict[str, Any] = {"detectors": {}}
     bundles: dict[str, ModelBundle] = {}
     all_candidates: dict[str, list[Candidate]] = {}
-    all_fold_candidates: dict[str, dict[str, list[Candidate]]] = {}
-    all_episodes: dict[str, dict[tuple[int, str, int], list[Episode]]] = {}
-    all_variant_evs: dict[str, list[np.ndarray]] = {}
+    all_variant_scores: dict[str, list[tuple[Detector, np.ndarray, np.ndarray, np.ndarray]]] = {}
     fitted: dict[str, tuple[Detector, np.ndarray, np.ndarray, np.ndarray, Candidate]] = {}
     cases: list[FaultCase] | None = None
+    summary: dict[str, dict[str, Any]] = {}
+    fault_results: dict[str, dict[str, Any]] = {}
 
     for name, dcfg in config.detectors.items():
-        candidates: list[Candidate] = []
-        fold_candidates: dict[str, list[Candidate]] = {r.report_id: [] for r in reports}
-        episodes_by_key: dict[tuple[int, str, int], list[Episode]] = {}
         variant_scores: list[tuple[Detector, np.ndarray, np.ndarray, np.ndarray]] = []
-        for v, params in enumerate(dcfg.variants):
+        for params in dcfg.variants:
             det = build_detector(name, params, config.seed).fit(x_train)
             ref = det.score(cal_fit[list(FEATURE_NAMES)])
             tr = det.score(x_train)
             evs = det.score(ev[list(FEATURE_NAMES)])
             variant_scores.append((det, tr, ref, evs))
-            if dcfg.threshold.mode == "quantile":
-                thresholds = [(f"q{q}", float(np.quantile(ref, q))) for q in dcfg.threshold.grid]
-            else:
-                thresholds = [(f"{g}", float(g)) for g in dcfg.threshold.grid]
-            for label, thr in thresholds:
-                for k in config.persistence_grid:
-                    policy = AlarmPolicy(thr, k)
-                    eps = episodes(ev_index, evs, window, policy, suppress)
-                    episodes_by_key[(v, label, k)] = eps
-                    res = evaluate(
-                        ev_index,
-                        evs,
-                        window,
-                        policy,
-                        reports,
-                        early_horizon=early,
-                        post_tolerance=post,
-                        suppress=suppress,
-                        precomputed_episodes=eps,
-                    )
-                    candidates.append(Candidate(name, v, params, label, thr, k, res))
-                    for r in reports:
-                        other_reports = tuple(
-                            other for other in reports if other.report_id != r.report_id
-                        )
-                        sel_res = evaluate(
-                            ev_index,
-                            evs,
-                            window,
-                            policy,
-                            other_reports,
-                            early_horizon=early,
-                            post_tolerance=post,
-                            suppress=suppress,
-                            precomputed_episodes=eps,
-                        )
-                        fold_candidates[r.report_id].append(
-                            Candidate(name, v, params, label, thr, k, sel_res)
-                        )
+        all_variant_scores[name] = variant_scores
+        candidates, _, _, loeo_dict = _evaluate_loeo_detector(
+            name,
+            dcfg,
+            config,
+            ev_index,
+            reports,
+            window,
+            early,
+            post,
+            variant_scores,
+            suppress,
+        )
         all_candidates[name] = candidates
-        all_fold_candidates[name] = fold_candidates
-        all_episodes[name] = episodes_by_key
-        all_variant_evs[name] = [vs[3] for vs in variant_scores]
+        summary[name] = loeo_dict
         final = select_policy(candidates)
         det, tr, ref, evs = variant_scores[final.variant]
         fitted[name] = (det, tr, ref, evs, final)
 
-    summary: dict[str, dict[str, Any]] = {}
-    fault_results: dict[str, dict[str, Any]] = {}
     for name, (det, _tr, _ref, _evs, final) in fitted.items():
-        summary[name] = _loeo_summary(
-            all_fold_candidates[name],
-            all_candidates[name],
-            reports,
-            ev_index,
-            all_variant_evs[name],
-            window,
-            early,
-            post,
-            suppress,
-            all_episodes[name],
-        )
         if name in ML_DETECTORS or name == "duty_rule":
             if cases is None:
                 cases = build_cases(
@@ -567,6 +925,8 @@ def run(
             policy=policy,
             feature_names=FEATURE_NAMES,
         )
+    splits = {"train": train, "calibration": cal, "evaluation": ev}
+    regimes_by_split = {k: classify_sequence(df, spec) for k, df in splits.items()}
     results.update(
         {
             "experiment": config.experiment,
@@ -593,6 +953,23 @@ def run(
                 "calibration": int(len(cal) - len(cal_fit)),
             },
             "reports": report_ids,
+            "wp2": _evaluate_wp2(
+                config=config,
+                spec=spec,
+                window=window,
+                early=early,
+                post=post,
+                raw_windows=raw_windows,
+                splits=splits,
+                regimes_by_split=regimes_by_split,
+                default=default,
+                bundles=bundles,
+                scored=scored,
+                all_variant_scores=all_variant_scores,
+                wp0_summary=summary,
+                fault_results=fault_results,
+                reports=reports,
+            ),
         }
     )
     for det_name, bundle in bundles.items():
@@ -687,6 +1064,7 @@ def _model_card(
             "exceedance_check": det["exceedance_check"],
             "selected_as_default": results["selected_detector"] == name,
             "selection_rationale": results["selection_rationale"],
+            "wp2": results.get("wp2"),
         },
         "intended_use": "Advisory early warning of abnormal compressor behaviour for human "
         "review. Exceedance is the share of reference-normal windows scoring at least as high; it "

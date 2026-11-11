@@ -255,3 +255,72 @@ def test_missing_model_returns_503_without_paths(kit: AuthKit, tmp_path: Path) -
     assert response.status_code == 503
     assert "No current model" in response.json()["detail"]
     assert str(tmp_path) not in response.text
+
+
+def test_model_endpoint_exposes_wp2_summary(client: TestClient) -> None:
+    body = client.get("/api/v1/anomaly/model").json()
+    wp2 = body["wp2"]
+    assert wp2 is not None
+    assert wp2["primary_detector"] == body["detector"]
+    assert set(wp2["per_regime_metrics"]) == {
+        "loaded",
+        "unloaded",
+        "starting",
+        "stopped",
+        "insufficient_evidence",
+    }
+    assert wp2["simulated_fault_separation"]["simulated"] is True
+    assert wp2["simulated_fault_separation"]["real_operational_data"] is False
+
+
+def test_score_exposes_regime_and_separates_frozen_or_inconsistent_telemetry(
+    client: TestClient,
+) -> None:
+    frozen = simulate_apu("2020-01-05 12:00", 60, seed=5).copy()
+    frozen["TP3"] = 8.9
+    frozen["TP2"] = 8.9
+    frozen["Motor_current"] = 7.0
+    frozen["COMP"] = 0.0
+    frozen["DV_eletric"] = 1.0
+    resp_frozen = client.post("/api/v1/anomaly/score", json=payload(frozen))
+    assert resp_frozen.status_code == 200
+    rf = resp_frozen.json()["result"]
+    assert rf["status"] == "insufficient_data"
+    assert rf["score"] is None
+    assert rf["event_class"] == "sensor_consistency_warning"
+    assert rf["warning_active"] is True
+    assert rf["regime"]["regime"] == "insufficient_evidence"
+    assert rf["regime"]["reason"] == "stale_telemetry"
+
+    contradictory = simulate_apu("2020-01-05 12:10", 60, seed=6).copy()
+    contradictory["COMP"] = 1.0
+    contradictory["DV_eletric"] = 1.0
+    resp_contra = client.post("/api/v1/anomaly/score", json=payload(contradictory))
+    assert resp_contra.status_code == 200
+    rc = resp_contra.json()["result"]
+    assert rc["status"] == "insufficient_data"
+    assert rc["event_class"] == "sensor_consistency_warning"
+    assert rc["regime"]["reason"] == "signal_inconsistency"
+    assert "valve_contradiction" in rc["regime"]["quality_flags"]
+
+
+def test_replay_exposes_episode_hypotheses_and_warnings_field(client: TestClient) -> None:
+    body = client.get(
+        "/api/v1/anomaly/replay",
+        params={"start": "2020-01-09T00:00:00", "end": "2020-01-09T12:00:00"},
+    ).json()
+    assert "warnings" in body
+    assert body["episodes"]
+    ep = body["episodes"][0]
+    assert ep["event_class"] == "air_leak_alarm"
+    assert ep["hypothesis"]
+    assert ep["uncertainty_note"]
+    assert ep["dominant_regime"] in {
+        "loaded",
+        "unloaded",
+        "starting",
+        "stopped",
+        "insufficient_evidence",
+    }
+    assert isinstance(ep["regime_breakdown"], dict) and ep["regime_breakdown"]
+    assert all("regime" in w and "event_class" in w for w in body["windows"])

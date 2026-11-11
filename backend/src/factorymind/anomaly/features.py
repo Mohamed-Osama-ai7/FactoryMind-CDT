@@ -39,6 +39,7 @@ from factorymind.data.metropt3 import (
 
 LOADED_CURRENT_A: Final = 5.5
 OFF_CURRENT_A: Final = 1.0
+INRUSH_CURRENT_A: Final = 8.0
 _ANALOG_STATS: Final = ("mean", "std", "min", "max")
 DERIVED_FEATURES: Final = (
     "load_duty",
@@ -94,6 +95,7 @@ def _sample_helpers(frame: pd.DataFrame, spec: WindowSpec) -> pd.DataFrame:
     dt = index.to_series().diff().dt.total_seconds().to_numpy()
     contiguous = (dt > 0) & (dt <= spec.max_gap_s)
     loading = frame["DV_eletric"].to_numpy() >= 0.5
+    comp = frame["COMP"].to_numpy() >= 0.5
     prev_loading = np.roll(loading, 1)
     tp3 = frame["TP3"].to_numpy()
     slope = np.full(len(frame), np.nan)
@@ -106,10 +108,17 @@ def _sample_helpers(frame: pd.DataFrame, spec: WindowSpec) -> pd.DataFrame:
     current = frame["Motor_current"].to_numpy()
     resume = ~((dt > 0) & (dt <= spec.resume_gap_s))
     segment_start = index.to_series().where(resume).ffill().to_numpy()
+    unloaded = (current >= OFF_CURRENT_A) & (current <= LOADED_CURRENT_A)
     return pd.DataFrame(
         {
             "loaded": (current > LOADED_CURRENT_A).astype("float64"),
+            "unloaded": unloaded.astype("float64"),
             "off": (current < OFF_CURRENT_A).astype("float64"),
+            "inrush": (current > INRUSH_CURRENT_A).astype("float64"),
+            "valve_contradiction": (loading & comp).astype("float64"),
+            "motor_valve_mismatch": (
+                ((current < OFF_CURRENT_A) & loading) | ((current > LOADED_CURRENT_A) & comp)
+            ).astype("float64"),
             "load_start": starts,
             "unloaded_slope": slope,
             "loaded_rise": rise,
@@ -174,6 +183,16 @@ def _aggregate(frame: pd.DataFrame, keys: np.ndarray, spec: WindowSpec) -> pd.Da
         & (meta["median_period_s"] <= spec.max_period_s)
     )
     meta["stopped"] = features["off_fraction"] >= spec.stopped_off_fraction
+    meta["unloaded_fraction"] = hg["unloaded"].mean().to_numpy()
+    meta["inrush_samples"] = hg["inrush"].sum().astype("int64").to_numpy()
+    meta["valve_contradiction_fraction"] = hg["valve_contradiction"].mean().to_numpy()
+    meta["motor_valve_mismatch_fraction"] = hg["motor_valve_mismatch"].mean().to_numpy()
+    meta["stale_telemetry"] = (
+        (meta["n_samples"] >= 2)
+        & (features["TP3_std"] <= 1e-12)
+        & (features["TP2_std"] <= 1e-12)
+        & (features["Motor_current_std"] <= 1e-12)
+    )
     return pd.concat([meta.drop(columns="segment_start"), features], axis=1)
 
 

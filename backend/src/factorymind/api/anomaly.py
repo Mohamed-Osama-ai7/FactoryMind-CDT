@@ -17,8 +17,11 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from factorymind.anomaly.events import EventClass
+from factorymind.anomaly.events import WarningEpisode as ServiceWarningEpisode
 from factorymind.anomaly.evidence import EvidenceItem
 from factorymind.anomaly.features import WindowSpec
+from factorymind.anomaly.regimes import OperatingRegime, RegimeConfidence
 from factorymind.anomaly.service import (
     AnomalyService,
     DataUnavailableError,
@@ -26,6 +29,7 @@ from factorymind.anomaly.service import (
     ReplayEpisode,
     WindowScore,
     load_bundle,
+    load_warning_bundle,
 )
 from factorymind.auth.deps import require_data_source
 from factorymind.auth.principal import Permission
@@ -61,9 +65,14 @@ def get_anomaly_service(request: Request) -> AnomalyService:
         settings = state.settings
         try:
             bundle, card = load_bundle(settings.models_dir, settings.anomaly_model_name)
+            warning_bundle = load_warning_bundle(
+                settings.models_dir, settings.anomaly_model_name, bundle
+            )
         except ModelUnavailableError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-        service = AnomalyService(bundle, card, settings.processed_dir)
+        service = AnomalyService(
+            bundle, card, settings.processed_dir, warning_bundle=warning_bundle
+        )
         state.anomaly_service = service
     return service
 
@@ -165,6 +174,24 @@ class Evidence(BaseModel):
     meaning: str
 
 
+class RegimeInfo(BaseModel):
+    regime: OperatingRegime
+    confidence: RegimeConfidence
+    reason: str
+    summary: str
+    quality_flags: list[str]
+    missing_signals: list[str]
+    off_fraction: float | None = None
+    unloaded_fraction: float | None = None
+    load_duty: float | None = None
+    load_starts: float | None = None
+    inrush_samples: int = 0
+    valve_contradiction_fraction: float | None = None
+    motor_valve_mismatch_fraction: float | None = None
+    minutes_since_resume: float | None = None
+    stale_telemetry: bool = False
+
+
 class WindowResult(BaseModel):
     window_start: datetime
     window_end: datetime
@@ -178,12 +205,23 @@ class WindowResult(BaseModel):
         "Not a failure probability."
     )
     evidence: list[Evidence]
+    regime: RegimeInfo
+    event_class: EventClass
+    event_meaning: str
+    warning_active: bool = False
+    warning_score: float | None = None
+    warning_exceedance: float | None = None
+    warning_detector: str | None = None
+    warning_reasons: list[str] = Field(default_factory=list)
+    warning_evidence: list[Evidence] = Field(default_factory=list)
 
 
 class ScoreResponse(BaseModel):
     model_version: str
     threshold: float
     exceedance_at_threshold: float
+    warning_detector: str | None = None
+    warning_threshold: float | None = None
     result: WindowResult
     advisory: str = "Advisory output for human review. FactoryMind never controls equipment."
 
@@ -195,6 +233,29 @@ class AlarmEpisode(BaseModel):
     peak_score: float
     truncated: bool = Field(description="The run may have started before the scanned range.")
     ongoing: bool = Field(description="Still anomalous at the end of the requested range.")
+    event_class: EventClass = "air_leak_alarm"
+    hypothesis: str = ""
+    uncertainty_note: str = ""
+    dominant_regime: OperatingRegime = "insufficient_evidence"
+    regime_breakdown: dict[str, int] = Field(default_factory=dict)
+
+
+class WarningEpisode(BaseModel):
+    start: datetime
+    end: datetime
+    raised_at: datetime
+    peak_score: float | None = None
+    peak_exceedance: float | None = None
+    detector_name: str
+    warning_kind: str
+    sources: list[str]
+    truncated: bool
+    ongoing: bool
+    event_class: EventClass = "sensor_consistency_warning"
+    hypothesis: str
+    uncertainty_note: str
+    dominant_regime: OperatingRegime
+    regime_breakdown: dict[str, int] = Field(default_factory=dict)
 
 
 class OperatorReport(BaseModel):
@@ -208,10 +269,14 @@ class ReplayResponse(BaseModel):
     model_version: str
     threshold: float
     persistence: int
+    warning_detector: str | None = None
+    warning_threshold: float | None = None
+    warning_persistence: int | None = None
     start: datetime
     end: datetime
     windows: list[WindowResult]
     episodes: list[AlarmEpisode]
+    warnings: list[WarningEpisode] = Field(default_factory=list)
     operator_reports: list[OperatorReport]
 
 
@@ -274,6 +339,87 @@ class ExceedanceCheck(BaseModel):
     windows: int
 
 
+class RegimeSplitSummary(BaseModel):
+    valid_windows: int
+    invalid_gapped_windows: int
+    counts: dict[str, int]
+    insufficient_reasons: dict[str, int]
+
+
+class Wp2EventSeparation(BaseModel):
+    baseline_leak_episodes_wp0: int
+    baseline_false_alarm_episodes_wp0: int
+    gated_leak_episodes_wp2: int
+    gated_false_alarm_episodes_wp2: int
+    integrity_suppressed_leak_episodes: int
+    events_detected_wp2: int
+    events_total: int
+    false_alarms_per_day_wp2: float
+    operating_false_alarms_per_day_wp2: float
+    sensor_consistency_warning_episodes: int
+    warnings_per_day: float
+    operating_warnings_per_day: float
+    warning_only_episodes: int
+    warning_overlapping_leak_episodes: int
+    warning_kinds: dict[str, int]
+    false_alarms_by_dominant_regime: dict[str, int]
+    starting_overlapping_false_alarms: int
+    mixed_cycle_overlapping_false_alarms: int
+
+
+class Wp2RegimePrimaryMetrics(BaseModel):
+    scored_windows: int
+    exceedance_windows: int
+    exceedance_rate: float | None = None
+    false_alarm_episodes: int
+    overlapping_false_alarm_episodes: int
+
+
+class Wp2RegimeWarningMetrics(BaseModel):
+    scored_windows: int
+    exceedance_windows: int
+    exceedance_rate: float | None = None
+    warning_episodes: int
+
+
+class Wp2PerRegimeEntry(BaseModel):
+    windows: int
+    share: float
+    primary: Wp2RegimePrimaryMetrics
+    warning: Wp2RegimeWarningMetrics | None = None
+
+
+class Wp2LoeoAblation(LoeoSummary):
+    suppressed_states: list[str]
+    note: str
+
+
+class Wp2SimulatedFaultDetector(BaseModel):
+    detected: int
+    cases: int
+    control_detected: int
+    clean_control_sensitivity: float | None = None
+    incremental_lift: float | None = None
+    per_type: dict[str, str]
+
+
+class Wp2SimulatedFaultSeparation(BaseModel):
+    simulated: bool
+    real_operational_data: bool
+    note: str
+    detectors: dict[str, Wp2SimulatedFaultDetector]
+
+
+class Wp2EvaluationSummary(BaseModel):
+    primary_detector: str
+    warning_detector: str | None = None
+    regime_distribution: dict[str, RegimeSplitSummary]
+    event_separation: Wp2EventSeparation
+    per_regime_metrics: dict[str, Wp2PerRegimeEntry]
+    regime_gating_ablations: dict[str, Wp2LoeoAblation]
+    simulated_fault_separation: Wp2SimulatedFaultSeparation
+
+
 class ModelInfo(BaseModel):
     model_version: str
     detector: str
@@ -299,6 +445,10 @@ class ModelInfo(BaseModel):
         default=None,
         description="Observed exceedance rate on far-from-report operating evaluation windows.",
     )
+    wp2: Wp2EvaluationSummary | None = Field(
+        default=None,
+        description="WP2 operating-regime separation, consistency warnings, and gating ablations.",
+    )
     intended_use: str
     limitations: list[str]
     replay_available_from: datetime | None
@@ -312,6 +462,7 @@ class ModelInfo(BaseModel):
 
 
 def _window(w: WindowScore) -> WindowResult:
+    reg = w.regime
     return WindowResult(
         window_start=w.window_start.to_pydatetime(),
         window_end=w.window_end.to_pydatetime(),
@@ -320,6 +471,31 @@ def _window(w: WindowScore) -> WindowResult:
         score=w.score,
         exceedance=w.exceedance,
         evidence=[_evidence(e) for e in w.evidence],
+        regime=RegimeInfo(
+            regime=reg.regime,
+            confidence=reg.confidence,
+            reason=reg.reason,
+            summary=reg.summary,
+            quality_flags=list(reg.quality_flags),
+            missing_signals=list(reg.missing_signals),
+            off_fraction=reg.off_fraction,
+            unloaded_fraction=reg.unloaded_fraction,
+            load_duty=reg.load_duty,
+            load_starts=reg.load_starts,
+            inrush_samples=reg.inrush_samples,
+            valve_contradiction_fraction=reg.valve_contradiction_fraction,
+            motor_valve_mismatch_fraction=reg.motor_valve_mismatch_fraction,
+            minutes_since_resume=reg.minutes_since_resume,
+            stale_telemetry=reg.stale_telemetry,
+        ),
+        event_class=w.event_class,
+        event_meaning=w.event_meaning,
+        warning_active=w.warning_active,
+        warning_score=w.warning_score,
+        warning_exceedance=w.warning_exceedance,
+        warning_detector=w.warning_detector,
+        warning_reasons=list(w.warning_reasons),
+        warning_evidence=[_evidence(e) for e in w.warning_evidence],
     )
 
 
@@ -348,6 +524,31 @@ def _episode(e: ReplayEpisode) -> AlarmEpisode:
         peak_score=e.episode.peak_score,
         truncated=e.truncated,
         ongoing=e.ongoing,
+        event_class=e.event_class,
+        hypothesis=e.hypothesis,
+        uncertainty_note=e.uncertainty_note,
+        dominant_regime=e.dominant_regime,
+        regime_breakdown=dict(e.regime_breakdown),
+    )
+
+
+def _warning_episode(w: ServiceWarningEpisode) -> WarningEpisode:
+    return WarningEpisode(
+        start=w.start.to_pydatetime(),
+        end=w.end.to_pydatetime(),
+        raised_at=w.raised_at.to_pydatetime(),
+        peak_score=w.peak_score,
+        peak_exceedance=w.peak_exceedance,
+        detector_name=w.detector_name,
+        warning_kind=w.warning_kind,
+        sources=list(w.sources),
+        truncated=w.truncated,
+        ongoing=w.ongoing,
+        event_class=w.event_class,
+        hypothesis=w.hypothesis,
+        uncertainty_note=w.uncertainty_note,
+        dominant_regime=w.dominant_regime,
+        regime_breakdown=dict(w.regime_breakdown),
     )
 
 
@@ -382,6 +583,7 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
     faults = evaluation["fault_injection"]
     holdout = evaluation.get("reference_holdout_check")
     exceedance_eval = evaluation.get("exceedance_check")
+    wp2_raw = evaluation.get("wp2")
     return ModelInfo(
         model_version=bundle.version,
         detector=bundle.detector_name,
@@ -410,6 +612,7 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
         )
         if exceedance_eval
         else None,
+        wp2=Wp2EvaluationSummary.model_validate(wp2_raw) if wp2_raw else None,
         intended_use=card["intended_use"],
         limitations=card["limitations"],
         replay_available_from=data_range[0].to_pydatetime() if data_range else None,
@@ -425,12 +628,15 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
 )
 def anomaly_score(request: ScoreRequest, service: ServiceDep) -> ScoreResponse:
     result = service.score_block(request.to_frame())
+    warn_bundle = service.warning_bundle
     return ScoreResponse(
         model_version=service.bundle.version,
         threshold=service.bundle.policy.threshold,
         exceedance_at_threshold=float(
             service.bundle.calibrator.p_value(service.bundle.policy.threshold)[0]
         ),
+        warning_detector=warn_bundle.detector_name if warn_bundle else None,
+        warning_threshold=warn_bundle.policy.threshold if warn_bundle else None,
         result=_window(result),
     )
 
@@ -453,16 +659,21 @@ def anomaly_replay(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "end must be after start and within 7 days"
         )
     try:
-        windows, episodes, reports = service.replay(lo, hi)
+        out = service.replay_details(lo, hi)
     except DataUnavailableError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    warn_bundle = service.warning_bundle
     return ReplayResponse(
         model_version=service.bundle.version,
         threshold=service.bundle.policy.threshold,
         persistence=service.bundle.policy.persistence,
+        warning_detector=warn_bundle.detector_name if warn_bundle else None,
+        warning_threshold=warn_bundle.policy.threshold if warn_bundle else None,
+        warning_persistence=warn_bundle.policy.persistence if warn_bundle else None,
         start=start,
         end=end,
-        windows=[_window(w) for w in windows],
-        episodes=[_episode(e) for e in episodes],
-        operator_reports=[_report(r) for r in reports],
+        windows=[_window(w) for w in out.windows],
+        episodes=[_episode(e) for e in out.episodes],
+        warnings=[_warning_episode(w) for w in out.warnings],
+        operator_reports=[_report(r) for r in out.reports],
     )

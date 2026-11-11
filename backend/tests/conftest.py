@@ -91,7 +91,7 @@ def kit(tmp_path: Path) -> AuthKit:
 def anomaly_service(tmp_path_factory: pytest.TempPathFactory) -> AnomalyService:
     """A real model trained on simulated telemetry plus that telemetry for replay."""
     from factorymind.anomaly import experiment
-    from factorymind.anomaly.service import AnomalyService, load_bundle
+    from factorymind.anomaly.service import AnomalyService, load_bundle, load_warning_bundle
     from factorymind.data import metropt3
     from tests.test_anomaly_experiment import REPORTS, config, telemetry
 
@@ -102,4 +102,5 @@ def anomaly_service(tmp_path_factory: pytest.TempPathFactory) -> AnomalyService:
     (processed / metropt3.DATASET_ID).mkdir(parents=True)
     telemetry().to_parquet(processed / metropt3.DATASET_ID / "telemetry.parquet")
     bundle, card = load_bundle(root / "artifacts" / "models", "unit-model")
-    return AnomalyService(bundle, card, processed, REPORTS)
+    warning_bundle = load_warning_bundle(root / "artifacts" / "models", "unit-model", bundle)
+    return AnomalyService(bundle, card, processed, REPORTS, warning_bundle=warning_bundle)

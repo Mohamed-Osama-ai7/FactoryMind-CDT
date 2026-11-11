@@ -71,10 +71,10 @@ Verified locally on Windows 11 (Python 3.12 venv, Node via npm):
 
 | Gate | Result |
 |---|---|
-| Backend tests | 374 passed |
+| Backend tests | 404 passed |
 | Backend ruff check / format / mypy | clean |
 | Frontend biome / tsc | clean |
-| Frontend vitest | 25 passed |
+| Frontend vitest | 27 passed |
 | Frontend production build | succeeds |
 | OpenAPI client regeneration | no drift after regeneration |
 

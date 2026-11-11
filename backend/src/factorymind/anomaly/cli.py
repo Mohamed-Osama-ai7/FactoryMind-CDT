@@ -49,6 +49,42 @@ def _summary(results: dict[str, Any]) -> str:
             f"{lift:>7}"
             f"{d['exceedance_check']['share_at_or_below_alpha']:>8.3f}"
         )
+    wp2 = results.get("wp2")
+    if isinstance(wp2, dict):
+        ev_reg = wp2.get("regime_distribution", {}).get("evaluation", {})
+        counts = ev_reg.get("counts", {})
+        sep = wp2.get("event_separation", {})
+        abl = wp2.get("regime_gating_ablations", {})
+        lines.append("")
+        lines.append(
+            "WP2 evaluation regimes: "
+            + ", ".join(
+                f"{k}={counts.get(k, 0)}"
+                for k in ("stopped", "unloaded", "loaded", "starting", "insufficient_evidence")
+            )
+            + f" (invalid_gapped={ev_reg.get('invalid_gapped_windows', 0)})"
+        )
+        lines.append(
+            f"WP2 event separation: air_leak_alarms={sep.get('gated_leak_episodes_wp2', 0)} "
+            f"(FA={sep.get('gated_false_alarm_episodes_wp2', 0)}, "
+            f"FA/d={sep.get('false_alarms_per_day_wp2', 0):.3f}, "
+            f"suppressed_integrity={sep.get('integrity_suppressed_leak_episodes', 0)}) | "
+            f"warnings={sep.get('sensor_consistency_warning_episodes', 0)} "
+            f"(warn/d={sep.get('warnings_per_day', 0):.3f}, "
+            f"warn_only={sep.get('warning_only_episodes', 0)}, "
+            f"starting_overlap_fa={sep.get('starting_overlapping_false_alarms', 0)})"
+        )
+        for abl_key in ("wp0_stopped_only", "wp2_integrity_gated", "starting_suppressed_ablation"):
+            row = abl.get(abl_key)
+            if isinstance(row, dict):
+                delay = row.get("median_abs_delay_minutes")
+                delay_str = f"{delay:.0f}" if isinstance(delay, (int, float)) else "-"
+                lines.append(
+                    f"  LOEO {abl_key:<28} {row['events_detected']}/{row['events_total']} "
+                    f"FA/d={row['mean_false_alarms_per_day']:.3f} "
+                    f"opFA/d={row['mean_operating_false_alarms_per_day']:.3f} "
+                    f"|delay|={delay_str}"
+                )
     return "\n".join(lines)
 
 

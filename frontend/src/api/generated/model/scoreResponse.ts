@@ -13,4 +13,6 @@ export interface ScoreResponse {
   model_version: string;
   result: WindowResult;
   threshold: number;
+  warning_detector?: string | null;
+  warning_threshold?: number | null;
 }

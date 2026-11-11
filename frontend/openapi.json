@@ -3,9 +3,37 @@
     "schemas": {
       "AlarmEpisode": {
         "properties": {
+          "dominant_regime": {
+            "default": "insufficient_evidence",
+            "enum": [
+              "stopped",
+              "unloaded",
+              "loaded",
+              "starting",
+              "insufficient_evidence"
+            ],
+            "title": "Dominant Regime",
+            "type": "string"
+          },
           "end": {
             "format": "date-time",
             "title": "End",
+            "type": "string"
+          },
+          "event_class": {
+            "default": "air_leak_alarm",
+            "enum": [
+              "informational",
+              "sensor_consistency_warning",
+              "air_leak_alarm",
+              "insufficient_evidence"
+            ],
+            "title": "Event Class",
+            "type": "string"
+          },
+          "hypothesis": {
+            "default": "",
+            "title": "Hypothesis",
             "type": "string"
           },
           "ongoing": {
@@ -22,6 +50,13 @@
             "title": "Raised At",
             "type": "string"
           },
+          "regime_breakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Regime Breakdown",
+            "type": "object"
+          },
           "start": {
             "format": "date-time",
             "title": "Start",
@@ -31,6 +66,11 @@
             "description": "The run may have started before the scanned range.",
             "title": "Truncated",
             "type": "boolean"
+          },
+          "uncertainty_note": {
+            "default": "",
+            "title": "Uncertainty Note",
+            "type": "string"
           }
         },
         "required": [
@@ -1043,6 +1083,17 @@
           "window_length": {
             "title": "Window Length",
             "type": "string"
+          },
+          "wp2": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Wp2EvaluationSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "WP2 operating-regime separation, consistency warnings, and gating ablations."
           }
         },
         "required": [
@@ -1132,6 +1183,183 @@
         "title": "ReferenceHoldoutCheck",
         "type": "object"
       },
+      "RegimeInfo": {
+        "properties": {
+          "confidence": {
+            "enum": [
+              "confirmed",
+              "transitional",
+              "insufficient_evidence"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "inrush_samples": {
+            "default": 0,
+            "title": "Inrush Samples",
+            "type": "integer"
+          },
+          "load_duty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Duty"
+          },
+          "load_starts": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Starts"
+          },
+          "minutes_since_resume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes Since Resume"
+          },
+          "missing_signals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Signals",
+            "type": "array"
+          },
+          "motor_valve_mismatch_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motor Valve Mismatch Fraction"
+          },
+          "off_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Off Fraction"
+          },
+          "quality_flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Quality Flags",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "regime": {
+            "enum": [
+              "stopped",
+              "unloaded",
+              "loaded",
+              "starting",
+              "insufficient_evidence"
+            ],
+            "title": "Regime",
+            "type": "string"
+          },
+          "stale_telemetry": {
+            "default": false,
+            "title": "Stale Telemetry",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "unloaded_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unloaded Fraction"
+          },
+          "valve_contradiction_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valve Contradiction Fraction"
+          }
+        },
+        "required": [
+          "regime",
+          "confidence",
+          "reason",
+          "summary",
+          "quality_flags",
+          "missing_signals"
+        ],
+        "title": "RegimeInfo",
+        "type": "object"
+      },
+      "RegimeSplitSummary": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "insufficient_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Insufficient Reasons",
+            "type": "object"
+          },
+          "invalid_gapped_windows": {
+            "title": "Invalid Gapped Windows",
+            "type": "integer"
+          },
+          "valid_windows": {
+            "title": "Valid Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "valid_windows",
+          "invalid_gapped_windows",
+          "counts",
+          "insufficient_reasons"
+        ],
+        "title": "RegimeSplitSummary",
+        "type": "object"
+      },
       "ReplayResponse": {
         "properties": {
           "end": {
@@ -1169,6 +1397,46 @@
           "threshold": {
             "title": "Threshold",
             "type": "number"
+          },
+          "warning_detector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Detector"
+          },
+          "warning_persistence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Persistence"
+          },
+          "warning_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Threshold"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/WarningEpisode"
+            },
+            "title": "Warnings",
+            "type": "array"
           },
           "windows": {
             "items": {
@@ -1355,6 +1623,28 @@
           "threshold": {
             "title": "Threshold",
             "type": "number"
+          },
+          "warning_detector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Detector"
+          },
+          "warning_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Threshold"
           }
         },
         "required": [
@@ -1406,8 +1696,138 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WarningEpisode": {
+        "properties": {
+          "detector_name": {
+            "title": "Detector Name",
+            "type": "string"
+          },
+          "dominant_regime": {
+            "enum": [
+              "stopped",
+              "unloaded",
+              "loaded",
+              "starting",
+              "insufficient_evidence"
+            ],
+            "title": "Dominant Regime",
+            "type": "string"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "event_class": {
+            "default": "sensor_consistency_warning",
+            "enum": [
+              "informational",
+              "sensor_consistency_warning",
+              "air_leak_alarm",
+              "insufficient_evidence"
+            ],
+            "title": "Event Class",
+            "type": "string"
+          },
+          "hypothesis": {
+            "title": "Hypothesis",
+            "type": "string"
+          },
+          "ongoing": {
+            "title": "Ongoing",
+            "type": "boolean"
+          },
+          "peak_exceedance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Exceedance"
+          },
+          "peak_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Score"
+          },
+          "raised_at": {
+            "format": "date-time",
+            "title": "Raised At",
+            "type": "string"
+          },
+          "regime_breakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Regime Breakdown",
+            "type": "object"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "uncertainty_note": {
+            "title": "Uncertainty Note",
+            "type": "string"
+          },
+          "warning_kind": {
+            "title": "Warning Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "raised_at",
+          "detector_name",
+          "warning_kind",
+          "sources",
+          "truncated",
+          "ongoing",
+          "hypothesis",
+          "uncertainty_note",
+          "dominant_regime"
+        ],
+        "title": "WarningEpisode",
+        "type": "object"
+      },
       "WindowResult": {
         "properties": {
+          "event_class": {
+            "enum": [
+              "informational",
+              "sensor_consistency_warning",
+              "air_leak_alarm",
+              "insufficient_evidence"
+            ],
+            "title": "Event Class",
+            "type": "string"
+          },
+          "event_meaning": {
+            "title": "Event Meaning",
+            "type": "string"
+          },
           "evidence": {
             "items": {
               "$ref": "#/components/schemas/Evidence"
@@ -1431,6 +1851,9 @@
             "title": "N Samples",
             "type": "integer"
           },
+          "regime": {
+            "$ref": "#/components/schemas/RegimeInfo"
+          },
           "score": {
             "anyOf": [
               {
@@ -1453,6 +1876,58 @@
             "title": "Status",
             "type": "string"
           },
+          "warning_active": {
+            "default": false,
+            "title": "Warning Active",
+            "type": "boolean"
+          },
+          "warning_detector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Detector"
+          },
+          "warning_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "title": "Warning Evidence",
+            "type": "array"
+          },
+          "warning_exceedance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Exceedance"
+          },
+          "warning_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warning Reasons",
+            "type": "array"
+          },
+          "warning_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Score"
+          },
           "window_end": {
             "format": "date-time",
             "title": "Window End",
@@ -1471,9 +1946,424 @@
           "status",
           "score",
           "exceedance",
-          "evidence"
+          "evidence",
+          "regime",
+          "event_class",
+          "event_meaning"
         ],
         "title": "WindowResult",
+        "type": "object"
+      },
+      "Wp2EvaluationSummary": {
+        "properties": {
+          "event_separation": {
+            "$ref": "#/components/schemas/Wp2EventSeparation"
+          },
+          "per_regime_metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Wp2PerRegimeEntry"
+            },
+            "title": "Per Regime Metrics",
+            "type": "object"
+          },
+          "primary_detector": {
+            "title": "Primary Detector",
+            "type": "string"
+          },
+          "regime_distribution": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegimeSplitSummary"
+            },
+            "title": "Regime Distribution",
+            "type": "object"
+          },
+          "regime_gating_ablations": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Wp2LoeoAblation"
+            },
+            "title": "Regime Gating Ablations",
+            "type": "object"
+          },
+          "simulated_fault_separation": {
+            "$ref": "#/components/schemas/Wp2SimulatedFaultSeparation"
+          },
+          "warning_detector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Detector"
+          }
+        },
+        "required": [
+          "primary_detector",
+          "regime_distribution",
+          "event_separation",
+          "per_regime_metrics",
+          "regime_gating_ablations",
+          "simulated_fault_separation"
+        ],
+        "title": "Wp2EvaluationSummary",
+        "type": "object"
+      },
+      "Wp2EventSeparation": {
+        "properties": {
+          "baseline_false_alarm_episodes_wp0": {
+            "title": "Baseline False Alarm Episodes Wp0",
+            "type": "integer"
+          },
+          "baseline_leak_episodes_wp0": {
+            "title": "Baseline Leak Episodes Wp0",
+            "type": "integer"
+          },
+          "events_detected_wp2": {
+            "title": "Events Detected Wp2",
+            "type": "integer"
+          },
+          "events_total": {
+            "title": "Events Total",
+            "type": "integer"
+          },
+          "false_alarms_by_dominant_regime": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "False Alarms By Dominant Regime",
+            "type": "object"
+          },
+          "false_alarms_per_day_wp2": {
+            "title": "False Alarms Per Day Wp2",
+            "type": "number"
+          },
+          "gated_false_alarm_episodes_wp2": {
+            "title": "Gated False Alarm Episodes Wp2",
+            "type": "integer"
+          },
+          "gated_leak_episodes_wp2": {
+            "title": "Gated Leak Episodes Wp2",
+            "type": "integer"
+          },
+          "integrity_suppressed_leak_episodes": {
+            "title": "Integrity Suppressed Leak Episodes",
+            "type": "integer"
+          },
+          "mixed_cycle_overlapping_false_alarms": {
+            "title": "Mixed Cycle Overlapping False Alarms",
+            "type": "integer"
+          },
+          "operating_false_alarms_per_day_wp2": {
+            "title": "Operating False Alarms Per Day Wp2",
+            "type": "number"
+          },
+          "operating_warnings_per_day": {
+            "title": "Operating Warnings Per Day",
+            "type": "number"
+          },
+          "sensor_consistency_warning_episodes": {
+            "title": "Sensor Consistency Warning Episodes",
+            "type": "integer"
+          },
+          "starting_overlapping_false_alarms": {
+            "title": "Starting Overlapping False Alarms",
+            "type": "integer"
+          },
+          "warning_kinds": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Warning Kinds",
+            "type": "object"
+          },
+          "warning_only_episodes": {
+            "title": "Warning Only Episodes",
+            "type": "integer"
+          },
+          "warning_overlapping_leak_episodes": {
+            "title": "Warning Overlapping Leak Episodes",
+            "type": "integer"
+          },
+          "warnings_per_day": {
+            "title": "Warnings Per Day",
+            "type": "number"
+          }
+        },
+        "required": [
+          "baseline_leak_episodes_wp0",
+          "baseline_false_alarm_episodes_wp0",
+          "gated_leak_episodes_wp2",
+          "gated_false_alarm_episodes_wp2",
+          "integrity_suppressed_leak_episodes",
+          "events_detected_wp2",
+          "events_total",
+          "false_alarms_per_day_wp2",
+          "operating_false_alarms_per_day_wp2",
+          "sensor_consistency_warning_episodes",
+          "warnings_per_day",
+          "operating_warnings_per_day",
+          "warning_only_episodes",
+          "warning_overlapping_leak_episodes",
+          "warning_kinds",
+          "false_alarms_by_dominant_regime",
+          "starting_overlapping_false_alarms",
+          "mixed_cycle_overlapping_false_alarms"
+        ],
+        "title": "Wp2EventSeparation",
+        "type": "object"
+      },
+      "Wp2LoeoAblation": {
+        "properties": {
+          "events_detected": {
+            "title": "Events Detected",
+            "type": "integer"
+          },
+          "events_total": {
+            "title": "Events Total",
+            "type": "integer"
+          },
+          "folds": {
+            "items": {
+              "$ref": "#/components/schemas/LoeoFold"
+            },
+            "title": "Folds",
+            "type": "array"
+          },
+          "mean_false_alarms_per_day": {
+            "description": "Mean false alarms per all valid evaluation days (includes stopped days).",
+            "title": "Mean False Alarms Per Day",
+            "type": "number"
+          },
+          "mean_operating_false_alarms_per_day": {
+            "description": "Mean false alarms per operating evaluation day (excludes stopped days).",
+            "title": "Mean Operating False Alarms Per Day",
+            "type": "number"
+          },
+          "median_abs_delay_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Abs Delay Minutes"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "suppressed_states": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Suppressed States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events_detected",
+          "events_total",
+          "mean_false_alarms_per_day",
+          "mean_operating_false_alarms_per_day",
+          "median_abs_delay_minutes",
+          "folds",
+          "suppressed_states",
+          "note"
+        ],
+        "title": "Wp2LoeoAblation",
+        "type": "object"
+      },
+      "Wp2PerRegimeEntry": {
+        "properties": {
+          "primary": {
+            "$ref": "#/components/schemas/Wp2RegimePrimaryMetrics"
+          },
+          "share": {
+            "title": "Share",
+            "type": "number"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Wp2RegimeWarningMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "windows": {
+            "title": "Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "windows",
+          "share",
+          "primary"
+        ],
+        "title": "Wp2PerRegimeEntry",
+        "type": "object"
+      },
+      "Wp2RegimePrimaryMetrics": {
+        "properties": {
+          "exceedance_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exceedance Rate"
+          },
+          "exceedance_windows": {
+            "title": "Exceedance Windows",
+            "type": "integer"
+          },
+          "false_alarm_episodes": {
+            "title": "False Alarm Episodes",
+            "type": "integer"
+          },
+          "overlapping_false_alarm_episodes": {
+            "title": "Overlapping False Alarm Episodes",
+            "type": "integer"
+          },
+          "scored_windows": {
+            "title": "Scored Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scored_windows",
+          "exceedance_windows",
+          "false_alarm_episodes",
+          "overlapping_false_alarm_episodes"
+        ],
+        "title": "Wp2RegimePrimaryMetrics",
+        "type": "object"
+      },
+      "Wp2RegimeWarningMetrics": {
+        "properties": {
+          "exceedance_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exceedance Rate"
+          },
+          "exceedance_windows": {
+            "title": "Exceedance Windows",
+            "type": "integer"
+          },
+          "scored_windows": {
+            "title": "Scored Windows",
+            "type": "integer"
+          },
+          "warning_episodes": {
+            "title": "Warning Episodes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scored_windows",
+          "exceedance_windows",
+          "warning_episodes"
+        ],
+        "title": "Wp2RegimeWarningMetrics",
+        "type": "object"
+      },
+      "Wp2SimulatedFaultDetector": {
+        "properties": {
+          "cases": {
+            "title": "Cases",
+            "type": "integer"
+          },
+          "clean_control_sensitivity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Control Sensitivity"
+          },
+          "control_detected": {
+            "title": "Control Detected",
+            "type": "integer"
+          },
+          "detected": {
+            "title": "Detected",
+            "type": "integer"
+          },
+          "incremental_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incremental Lift"
+          },
+          "per_type": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Per Type",
+            "type": "object"
+          }
+        },
+        "required": [
+          "detected",
+          "cases",
+          "control_detected",
+          "per_type"
+        ],
+        "title": "Wp2SimulatedFaultDetector",
+        "type": "object"
+      },
+      "Wp2SimulatedFaultSeparation": {
+        "properties": {
+          "detectors": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Wp2SimulatedFaultDetector"
+            },
+            "title": "Detectors",
+            "type": "object"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "real_operational_data": {
+            "title": "Real Operational Data",
+            "type": "boolean"
+          },
+          "simulated": {
+            "title": "Simulated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "simulated",
+          "real_operational_data",
+          "note",
+          "detectors"
+        ],
+        "title": "Wp2SimulatedFaultSeparation",
         "type": "object"
       }
     }
