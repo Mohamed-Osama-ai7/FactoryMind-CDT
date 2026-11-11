@@ -826,13 +826,14 @@ def test_copilot_defensive_edges_feature_bounds_custom_abstain_and_request_overr
     assert "dominant_hypothesis=insufficient_evidence" in opt_c.detail
 
     # 3. Missing session_factory with incident_id gives accurate unavailability message
-    missing_db_res = cp_custom.run_query(
-        CopilotQueryRequest(question="What is the capital of France?", incident_id=inc_c),
-        principal=eng,
-        session_factory=None,
-    )
-    inc_tool = next(t for t in missing_db_res.tools_executed if t.tool == "get_event_evidence")
-    assert inc_tool.summary == "Incident database session unavailable for this query."
+    for q in ("What is the capital of France?", "Summarize unloaded TP3 air leakage risk."):
+        missing_db_res = cp_custom.run_query(
+            CopilotQueryRequest(question=q, incident_id=inc_c),
+            principal=eng,
+            session_factory=None,
+        )
+        inc_tool = next(t for t in missing_db_res.tools_executed if t.tool == "get_event_evidence")
+        assert inc_tool.summary == "Incident database session unavailable for this query."
 
     # 4. api/copilot handles dependency_overrides taking Request
     client = make_client(kit)

@@ -696,7 +696,11 @@ class ControlledCopilot:
                         permitted=True,
                         status="skipped",
                         record_count=0,
-                        summary="No incident_id selected for this query.",
+                        summary=(
+                            "No incident_id selected for this query."
+                            if req.incident_id is None
+                            else "Incident database session unavailable for this query."
+                        ),
                     )
                 )
         else:

@@ -193,7 +193,7 @@ def evaluate_retrieval_modes(
         corpus_chunks=len(scoped_chunks),
         modes=results,
         notes=(
-            "Controlled retrieval ablation (8 keyword-dense + 3 natural multi-term queries) "
+            f"Controlled retrieval ablation across {len(cases)} benchmark queries "
             "evaluated strictly across chunks authorized for the caller's asset grants."
         ),
     )

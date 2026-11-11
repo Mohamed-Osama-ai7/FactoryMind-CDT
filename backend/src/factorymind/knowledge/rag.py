@@ -104,6 +104,7 @@ _STOPWORDS: Final[frozenset[str]] = frozenset(
         "very",
         "just",
         "can",
+        "cannot",
         "could",
         "may",
         "might",
@@ -146,7 +147,8 @@ def _has_alpha(token: str) -> bool:
 
 
 def _tokenize(text: str) -> list[str]:
-    norm = re.sub(r"\bwon['\u2019]t\b", "will not", text.lower())
+    norm = re.sub(r"\bcan['\u2019]t\b", "cannot", text.lower())
+    norm = re.sub(r"\bwon['\u2019]t\b", "will not", norm)
     norm = _CONTRACTION_NOT_RE.sub(r"\1 not", norm)
     norm = _CONTRACTION_SUFFIX_RE.sub("", norm)
     return _TOKEN_RE.findall(norm)

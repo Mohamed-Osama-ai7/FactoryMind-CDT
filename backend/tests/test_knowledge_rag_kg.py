@@ -352,6 +352,7 @@ def test_hybrid_rag_relevance_gate_rejects_out_of_scope_and_preserves_in_scope(
     out_of_scope_queries = (
         "What is the capital of France?",
         "What's the capital of France?",
+        "Why can't we fly to Mars today?",
         "Chocolate cake recipe",
         "How to bake sourdough bread with yeast and flour?",
         "Who won the FIFA World Cup in 2022?",
