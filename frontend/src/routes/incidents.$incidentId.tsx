@@ -1,8 +1,13 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { describeApiError } from '../api/errors'
-import { useGetIncident, useGetIncidentEvidencePackage } from '../api/generated/incidents/incidents'
+import {
+  useGetIncident,
+  useGetIncidentEvidencePackage,
+  useGetIncidentRca,
+} from '../api/generated/incidents/incidents'
 import { EventEvidencePackageView } from '../features/incidents/EventEvidencePackageView'
 import { ObservationForm } from '../features/incidents/ObservationForm'
+import { RcaPanel } from '../features/incidents/RcaPanel'
 import { formatNaive } from '../lib/naiveTime'
 
 export const Route = createFileRoute('/incidents/$incidentId')({
@@ -13,9 +18,11 @@ function IncidentInvestigationPage() {
   const { incidentId } = Route.useParams()
   const incidentQuery = useGetIncident(incidentId)
   const evidenceQuery = useGetIncidentEvidencePackage(incidentId)
+  const rcaQuery = useGetIncidentRca(incidentId)
 
   const incident = incidentQuery.data?.status === 200 ? incidentQuery.data.data : undefined
   const pkg = evidenceQuery.data?.status === 200 ? evidenceQuery.data.data : undefined
+  const rca = rcaQuery.data?.status === 200 ? rcaQuery.data.data : undefined
 
   return (
     <section aria-labelledby="investigation-title" className="flex max-w-5xl flex-col gap-6">
@@ -116,6 +123,13 @@ function IncidentInvestigationPage() {
         </p>
       )}
       {pkg && <EventEvidencePackageView key={pkg.package_id} pkg={pkg} />}
+      {rcaQuery.isPending && <p role="status">Computing explainable RCA hypotheses…</p>}
+      {rcaQuery.isError && (
+        <p role="alert" className="rounded border border-critical p-3 text-sm">
+          RCA unavailable: {describeApiError(rcaQuery.error)}
+        </p>
+      )}
+      {rca && <RcaPanel key={rca.rca_id} rca={rca} />}
     </section>
   )
 }

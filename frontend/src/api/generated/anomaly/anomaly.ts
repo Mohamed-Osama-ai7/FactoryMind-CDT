@@ -26,10 +26,12 @@ import type {
 
 import type {
   AnomalyEventEvidenceParams,
+  AnomalyRcaParams,
   AnomalyReplayParams,
   EventEvidencePackage,
   HTTPValidationError,
   ModelInfo,
+  RcaAssessment,
   ReplayResponse,
   ScoreRequest,
   ScoreResponse
@@ -284,6 +286,132 @@ export function useAnomalyModel<TData = Awaited<ReturnType<typeof anomalyModel>>
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getAnomalyModelQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type anomalyRcaResponse200 = {
+  data: RcaAssessment
+  status: 200
+}
+
+export type anomalyRcaResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type anomalyRcaResponseSuccess = (anomalyRcaResponse200) & {
+  headers: Headers;
+};
+export type anomalyRcaResponseError = (anomalyRcaResponse422) & {
+  headers: Headers;
+};
+
+export type anomalyRcaResponse = (anomalyRcaResponseSuccess | anomalyRcaResponseError)
+
+export const getAnomalyRcaUrl = (params: AnomalyRcaParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/anomaly/rca?${stringifiedParams}` : `/api/v1/anomaly/rca`
+}
+
+/**
+ * @summary Anomaly Rca
+ */
+export const anomalyRca = async (params: AnomalyRcaParams, options?: Parameters<typeof apiFetch>[1]): Promise<anomalyRcaResponse> => {
+
+  return apiFetch<anomalyRcaResponse>(getAnomalyRcaUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAnomalyRcaQueryKey = (params?: AnomalyRcaParams,) => {
+    return [
+    `/api/v1/anomaly/rca`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getAnomalyRcaQueryOptions = <TData = Awaited<ReturnType<typeof anomalyRca>>, TError = HTTPValidationError>(params: AnomalyRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof anomalyRca>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAnomalyRcaQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof anomalyRca>>> = ({ signal }) => anomalyRca(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof anomalyRca>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AnomalyRcaQueryResult = NonNullable<Awaited<ReturnType<typeof anomalyRca>>>
+export type AnomalyRcaQueryError = HTTPValidationError
+
+
+/** @summary Anomaly Rca */
+export function useAnomalyRca<TData = Awaited<ReturnType<typeof anomalyRca>>, TError = HTTPValidationError>(
+ params: AnomalyRcaParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof anomalyRca>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof anomalyRca>>,
+          TError,
+          Awaited<ReturnType<typeof anomalyRca>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Anomaly Rca */
+export function useAnomalyRca<TData = Awaited<ReturnType<typeof anomalyRca>>, TError = HTTPValidationError>(
+ params: AnomalyRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof anomalyRca>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof anomalyRca>>,
+          TError,
+          Awaited<ReturnType<typeof anomalyRca>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Anomaly Rca */
+export function useAnomalyRca<TData = Awaited<ReturnType<typeof anomalyRca>>, TError = HTTPValidationError>(
+ params: AnomalyRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof anomalyRca>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Anomaly Rca */
+export function useAnomalyRca<TData = Awaited<ReturnType<typeof anomalyRca>>, TError = HTTPValidationError>(
+ params: AnomalyRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof anomalyRca>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAnomalyRcaQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

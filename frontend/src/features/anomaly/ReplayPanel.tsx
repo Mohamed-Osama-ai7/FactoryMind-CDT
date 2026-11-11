@@ -1,6 +1,10 @@
 import { Fragment, useMemo, useState } from 'react'
 import { describeApiError } from '../../api/errors'
-import { useAnomalyEventEvidence, useAnomalyReplay } from '../../api/generated/anomaly/anomaly'
+import {
+  useAnomalyEventEvidence,
+  useAnomalyRca,
+  useAnomalyReplay,
+} from '../../api/generated/anomaly/anomaly'
 import type {
   AlarmEpisode,
   Evidence,
@@ -10,6 +14,7 @@ import type {
 } from '../../api/generated/model'
 import { addHours, formatNaive, toEpochMs } from '../../lib/naiveTime'
 import { EventEvidencePackageView } from '../incidents/EventEvidencePackageView'
+import { RcaPanel } from '../incidents/RcaPanel'
 import { CreateIncidentButton } from './CreateIncidentButton'
 import { ScoreChart } from './ScoreChart'
 
@@ -196,11 +201,15 @@ function InlineEventEvidence({
   eventEnd: string
   raisedAt?: string
 }) {
-  const pkgQuery = useAnomalyEventEvidence({
+  const [showRca, setShowRca] = useState(false)
+  const params = {
     start: eventStart,
     end: eventEnd,
     ...(raisedAt ? { raised_at: raisedAt } : {}),
-  })
+  }
+  const pkgQuery = useAnomalyEventEvidence(params)
+  const rcaQuery = useAnomalyRca(params, { query: { enabled: showRca } })
+
   if (pkgQuery.isPending) return <p role="status">Building event evidence package…</p>
   if (pkgQuery.isError) {
     return (
@@ -210,7 +219,29 @@ function InlineEventEvidence({
     )
   }
   const pkg = pkgQuery.data?.status === 200 ? pkgQuery.data.data : undefined
-  return pkg ? <EventEvidencePackageView key={pkg.package_id} pkg={pkg} headingLevel="h4" /> : null
+  const rca = rcaQuery.data?.status === 200 ? rcaQuery.data.data : undefined
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          aria-pressed={showRca}
+          onClick={() => setShowRca((v) => !v)}
+          className="rounded border border-border px-2.5 py-1 text-xs text-accent hover:bg-border"
+        >
+          {showRca ? 'Hide RCA hypotheses' : 'Explain root causes (RCA)'}
+        </button>
+      </div>
+      {showRca && rcaQuery.isPending && <p role="status">Evaluating RCA hypotheses…</p>}
+      {showRca && rcaQuery.isError && (
+        <p role="alert" className="rounded border border-critical p-2 text-xs">
+          Could not load RCA: {describeApiError(rcaQuery.error)}
+        </p>
+      )}
+      {showRca && rca && <RcaPanel key={rca.rca_id} rca={rca} headingLevel="h4" />}
+      {pkg && <EventEvidencePackageView key={pkg.package_id} pkg={pkg} headingLevel="h4" />}
+    </div>
+  )
 }
 
 /** Replays recorded telemetry through primary and warning detectors with regime context. */

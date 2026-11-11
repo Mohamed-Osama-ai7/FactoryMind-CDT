@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from factorymind.anomaly.evidence_package import build_event_evidence_package
+from factorymind.anomaly.rca import analyze_event_evidence
 from factorymind.anomaly.service import DataUnavailableError, WindowScore
 from factorymind.api.anomaly import MAX_REPLAY, ServiceDep
 from factorymind.api.security import request_id_of
@@ -28,6 +29,7 @@ from factorymind.contracts.events import (
     HumanObservationCategory,
     HumanObservationOut,
 )
+from factorymind.contracts.rca import RcaAssessment
 from factorymind.db.audit import append_audit, verify_chain
 from factorymind.db.models import AuditEvent, Decision, EvidenceRow, HumanObservation, Incident
 from factorymind.db.repository import (
@@ -427,17 +429,13 @@ def get_incident(
         return _detail(repo, incident)
 
 
-@router.get(
-    "/incidents/{incident_id}/evidence-package",
-    response_model=EventEvidencePackage,
-)
-def get_incident_evidence_package(
-    incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
+def _build_package_for_incident(
+    incident_id: str,
     request: Request,
-    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ, cost=5))],
+    principal: Principal,
     service: ServiceDep,
-    baseline_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 4.0,
-    recovery_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 2.0,
+    baseline_hours: float,
+    recovery_hours: float,
 ) -> EventEvidencePackage:
     settings = _settings(request)
     denial = principal.data_source_denial(settings)
@@ -467,6 +465,41 @@ def get_incident_evidence_package(
         )
     except DataUnavailableError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
+@router.get(
+    "/incidents/{incident_id}/evidence-package",
+    response_model=EventEvidencePackage,
+)
+def get_incident_evidence_package(
+    incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ, cost=5))],
+    service: ServiceDep,
+    baseline_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 4.0,
+    recovery_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 2.0,
+) -> EventEvidencePackage:
+    return _build_package_for_incident(
+        incident_id, request, principal, service, baseline_hours, recovery_hours
+    )
+
+
+@router.get(
+    "/incidents/{incident_id}/rca",
+    response_model=RcaAssessment,
+)
+def get_incident_rca(
+    incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ, cost=5))],
+    service: ServiceDep,
+    baseline_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 4.0,
+    recovery_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 2.0,
+) -> RcaAssessment:
+    pkg = _build_package_for_incident(
+        incident_id, request, principal, service, baseline_hours, recovery_hours
+    )
+    return analyze_event_evidence(pkg)
 
 
 @router.post(
