@@ -6,12 +6,15 @@ Simulation, and Decision Support.**
 SENSE → VALIDATE → UNDERSTAND → RETRIEVE → DIAGNOSE → ASSESS UNCERTAINTY → SIMULATE →
 ESTIMATE IMPACT → HUMAN REVIEW → VERIFY → LEARN
 
-> **Status: research prototype.** Implemented so far: the engineering foundation (M0) and a
-> real-data compressor anomaly-detection pipeline with evaluation, inference API and React monitor
-> (M1, see [docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md)). Evidence/RCA,
-> uncertainty, simulation and the full decision workflow are later milestones. Nothing here has been
-> deployed in a real factory; reported results come only from the evaluation pipeline in this
-> repository.
+> **Status: research prototype.** Implemented so far: engineering foundation (M0), real-data
+> compressor anomaly detection (M1, [docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md)),
+> LOEO detection hardening ([docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md)),
+> OIDC auth, RBAC and persistent incidents ([docs/m2-wp1-auth-persistence.md](docs/m2-wp1-auth-persistence.md)),
+> and operating-regime / consistency-warning separation
+> ([docs/m2-wp2-operating-regime-warning-separation.md](docs/m2-wp2-operating-regime-warning-separation.md)).
+> M2 evidence/RCA, simulation and the full decision workflow remain work in progress. Nothing here
+> has been deployed in a real factory; reported results come only from the evaluation pipeline in
+> this repository.
 
 ## Safety boundary
 
@@ -32,12 +35,14 @@ separately.
 ### Detection results at a glance
 
 On real MetroPT-3 data (four operator air-leak reports), a physics rule on compressor load duty
-detects 4/4 reports at 0.034 false alarms/day (0.044 operating-day FA/day) under nested
-leave-one-event-out evaluation; learned detectors (Isolation Forest, PCA SPE) did not beat it on
-leaks, though PCA SPE catches simulated sensor faults the rule cannot. The plant's own
-low-pressure switch caught 1/4. Protocol, results and limitations:
-[docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md) (M1 record:
-[docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md)).
+detects 4/4 reports at 0.034 false alarms/day (0.044 operating-day FA/day) under WP0 nested
+leave-one-event-out evaluation, and 4/4 at 0.026 FA/day (0.035 operating-day FA/day) with WP2
+telemetry-integrity gating; `pca_spe` and signal integrity checks run alongside as separated
+`sensor_consistency_warning` signals without inflating leak metrics. The plant's own low-pressure
+switch caught 1/4. Protocol, results and limitations:
+[docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md) and
+[docs/m2-wp2-operating-regime-warning-separation.md](docs/m2-wp2-operating-regime-warning-separation.md)
+(M1 record: [docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md)).
 
 ## Repository layout
 
