@@ -11,8 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnomalyRouteImport } from './routes/anomaly'
-import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
+import { Route as IncidentsIndexRouteImport } from './routes/incidents.index'
+import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents.$incidentId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -24,49 +25,74 @@ const AnomalyRoute = AnomalyRouteImport.update({
   path: '/anomaly',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IncidentsRoute = IncidentsRouteImport.update({
-  id: '/incidents',
-  path: '/incidents',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IncidentsIndexRoute = IncidentsIndexRouteImport.update({
+  id: '/incidents/',
+  path: '/incidents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
+  id: '/incidents/$incidentId',
+  path: '/incidents/$incidentId',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
-  '/incidents': typeof IncidentsRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/incidents/': typeof IncidentsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
-  '/incidents': typeof IncidentsRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/incidents': typeof IncidentsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
-  '/incidents': typeof IncidentsRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/incidents/': typeof IncidentsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/anomaly' | '/incidents' | '/auth/callback'
+  fullPaths:
+    | '/'
+    | '/anomaly'
+    | '/auth/callback'
+    | '/incidents/$incidentId'
+    | '/incidents/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/anomaly' | '/incidents' | '/auth/callback'
-  id: '__root__' | '/' | '/anomaly' | '/incidents' | '/auth/callback'
+  to:
+    | '/'
+    | '/anomaly'
+    | '/auth/callback'
+    | '/incidents/$incidentId'
+    | '/incidents'
+  id:
+    | '__root__'
+    | '/'
+    | '/anomaly'
+    | '/auth/callback'
+    | '/incidents/$incidentId'
+    | '/incidents/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnomalyRoute: typeof AnomalyRoute
-  IncidentsRoute: typeof IncidentsRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
+  IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
+  IncidentsIndexRoute: typeof IncidentsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,18 +111,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AnomalyRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/incidents': {
-      id: '/incidents'
-      path: '/incidents'
-      fullPath: '/incidents'
-      preLoaderRoute: typeof IncidentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/auth/callback': {
       id: '/auth/callback'
       path: '/auth/callback'
       fullPath: '/auth/callback'
       preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/incidents/': {
+      id: '/incidents/'
+      path: '/incidents'
+      fullPath: '/incidents/'
+      preLoaderRoute: typeof IncidentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/incidents/$incidentId': {
+      id: '/incidents/$incidentId'
+      path: '/incidents/$incidentId'
+      fullPath: '/incidents/$incidentId'
+      preLoaderRoute: typeof IncidentsIncidentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -105,8 +138,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnomalyRoute: AnomalyRoute,
-  IncidentsRoute: IncidentsRoute,
   AuthCallbackRoute: AuthCallbackRoute,
+  IncidentsIncidentIdRoute: IncidentsIncidentIdRoute,
+  IncidentsIndexRoute: IncidentsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

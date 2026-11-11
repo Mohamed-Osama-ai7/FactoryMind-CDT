@@ -7,6 +7,7 @@
  */
 import type { DecisionOut } from './decisionOut';
 import type { EvidenceOut } from './evidenceOut';
+import type { HumanObservationOut } from './humanObservationOut';
 import type { IncidentDetailStatus } from './incidentDetailStatus';
 
 export interface IncidentDetail {
@@ -20,6 +21,7 @@ export interface IncidentDetail {
   evidence: EvidenceOut[];
   id: string;
   model_version: string;
+  observations?: HumanObservationOut[];
   peak_score: number;
   raised_at: string;
   status: IncidentDetailStatus;

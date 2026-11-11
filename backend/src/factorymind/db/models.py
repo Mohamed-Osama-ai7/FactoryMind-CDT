@@ -26,8 +26,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-SCHEMA_VERSION = "1"
-APPEND_ONLY_TABLES = ("evidence", "decision", "audit_event")
+SCHEMA_VERSION = "2"
+APPEND_ONLY_TABLES = ("evidence", "decision", "audit_event", "human_observation")
 
 
 class Base(DeclarativeBase):
@@ -91,6 +91,20 @@ class Decision(Base):
     decision: Mapped[str] = mapped_column(String(16))  # confirm | dismiss | defer
     rationale: Mapped[str] = mapped_column(String(2000))
     incident_version: Mapped[int] = mapped_column(Integer)  # version the reviewer saw
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class HumanObservation(Base):
+    __tablename__ = "human_observation"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    asset_id: Mapped[str] = mapped_column(String(64))
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incident.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(128))
+    category: Mapped[str] = mapped_column(String(32))
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    note: Mapped[str] = mapped_column(String(2000))
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 

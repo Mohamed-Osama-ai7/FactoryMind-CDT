@@ -205,6 +205,67 @@
         "title": "AuditVerification",
         "type": "object"
       },
+      "ContradictionRecord": {
+        "description": "Explicit signal inconsistency or integrity conflict observed around the event.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "valve_contradiction",
+              "motor_valve_mismatch",
+              "sensor_freeze",
+              "out_of_range",
+              "model_divergence"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "default": "derived",
+            "enum": [
+              "observed",
+              "derived",
+              "statistical_inference",
+              "model_prediction",
+              "human_observation"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "warning",
+              "critical"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "signals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "timestamp",
+          "severity",
+          "signals",
+          "description"
+        ],
+        "title": "ContradictionRecord",
+        "type": "object"
+      },
       "DecisionCreate": {
         "additionalProperties": false,
         "properties": {
@@ -282,6 +343,198 @@
         "title": "DecisionOut",
         "type": "object"
       },
+      "DerivedFeatureSummary": {
+        "description": "Aggregate of computed 10-minute window features within a phase.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "observable": {
+            "title": "Observable",
+            "type": "boolean"
+          },
+          "origin": {
+            "const": "derived",
+            "default": "derived",
+            "title": "Origin",
+            "type": "string"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name",
+          "unit",
+          "observable",
+          "provenance"
+        ],
+        "title": "DerivedFeatureSummary",
+        "type": "object"
+      },
+      "EventEvidencePackage": {
+        "description": "Complete multi-phase, provenance-tagged event evidence package and timeline.",
+        "properties": {
+          "advisory": {
+            "default": "Advisory evidence package for human review. Observed sensor values, derived features, statistical exceedances, model predictions, and human notes remain separated. FactoryMind never controls equipment.",
+            "title": "Advisory",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "conflicting_measurements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conflicting Measurements",
+            "type": "array"
+          },
+          "event_end": {
+            "format": "date-time",
+            "title": "Event End",
+            "type": "string"
+          },
+          "event_start": {
+            "format": "date-time",
+            "title": "Event Start",
+            "type": "string"
+          },
+          "evidence_items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItemContract"
+            },
+            "title": "Evidence Items",
+            "type": "array"
+          },
+          "human_observations": {
+            "items": {
+              "$ref": "#/components/schemas/HumanObservationOut"
+            },
+            "title": "Human Observations",
+            "type": "array"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "lookback_start": {
+            "format": "date-time",
+            "title": "Lookback Start",
+            "type": "string"
+          },
+          "missing_measurements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Measurements",
+            "type": "array"
+          },
+          "neighboring_events": {
+            "items": {
+              "$ref": "#/components/schemas/NeighboringEventSummary"
+            },
+            "title": "Neighboring Events",
+            "type": "array"
+          },
+          "package_id": {
+            "title": "Package Id",
+            "type": "string"
+          },
+          "phases": {
+            "items": {
+              "$ref": "#/components/schemas/PhaseEvidenceSummary"
+            },
+            "title": "Phases",
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceRecord"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/EvidenceQualityAssessment"
+          },
+          "raised_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raised At"
+          },
+          "recovery_end": {
+            "format": "date-time",
+            "title": "Recovery End",
+            "type": "string"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntry"
+            },
+            "title": "Timeline",
+            "type": "array"
+          }
+        },
+        "required": [
+          "package_id",
+          "asset_id",
+          "event_start",
+          "event_end",
+          "lookback_start",
+          "recovery_end",
+          "provenance",
+          "phases",
+          "evidence_items",
+          "quality",
+          "missing_measurements",
+          "conflicting_measurements",
+          "neighboring_events",
+          "human_observations",
+          "timeline"
+        ],
+        "title": "EventEvidencePackage",
+        "type": "object"
+      },
       "Evidence": {
         "properties": {
           "feature": {
@@ -340,6 +593,92 @@
         "title": "Evidence",
         "type": "object"
       },
+      "EvidenceItemContract": {
+        "description": "Grouped feature deviation paired with explicit inferential origin and unit.",
+        "properties": {
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "group_label": {
+            "title": "Group Label",
+            "type": "string"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
+          },
+          "novel": {
+            "title": "Novel",
+            "type": "boolean"
+          },
+          "origin": {
+            "default": "statistical_inference",
+            "enum": [
+              "statistical_inference",
+              "derived"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "phase": {
+            "default": "peak",
+            "enum": [
+              "pre_event_baseline",
+              "onset",
+              "evolution",
+              "peak",
+              "recovery_or_persistence"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "robust_z": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robust Z"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "training_median": {
+            "title": "Training Median",
+            "type": "number"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "group",
+          "group_label",
+          "feature",
+          "value",
+          "unit",
+          "training_median",
+          "novel",
+          "meaning",
+          "source_id"
+        ],
+        "title": "EvidenceItemContract",
+        "type": "object"
+      },
       "EvidenceOut": {
         "properties": {
           "feature": {
@@ -393,6 +732,134 @@
           "meaning"
         ],
         "title": "EvidenceOut",
+        "type": "object"
+      },
+      "EvidenceQualityAssessment": {
+        "description": "Explicit evidence coverage, missing-data, freeze, and contradiction evaluation.",
+        "properties": {
+          "alignment_issues": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Alignment Issues",
+            "type": "array"
+          },
+          "baseline_available": {
+            "title": "Baseline Available",
+            "type": "boolean"
+          },
+          "completeness_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Completeness Score",
+            "type": "number"
+          },
+          "confidence_penalty_factor": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Penalty Factor",
+            "type": "number"
+          },
+          "contradictions": {
+            "items": {
+              "$ref": "#/components/schemas/ContradictionRecord"
+            },
+            "title": "Contradictions",
+            "type": "array"
+          },
+          "coverage_ratio": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Coverage Ratio",
+            "type": "number"
+          },
+          "expected_event_windows": {
+            "title": "Expected Event Windows",
+            "type": "integer"
+          },
+          "frozen_sensors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Frozen Sensors",
+            "type": "array"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "missing_samples_count": {
+            "title": "Missing Samples Count",
+            "type": "integer"
+          },
+          "missing_windows_count": {
+            "title": "Missing Windows Count",
+            "type": "integer"
+          },
+          "out_of_range_signals": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Out Of Range Signals",
+            "type": "array"
+          },
+          "overall_status": {
+            "enum": [
+              "sufficient",
+              "degraded",
+              "insufficient"
+            ],
+            "title": "Overall Status",
+            "type": "string"
+          },
+          "quality_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Quality Warnings",
+            "type": "array"
+          },
+          "recovery_available": {
+            "title": "Recovery Available",
+            "type": "boolean"
+          },
+          "recovery_status": {
+            "enum": [
+              "recovered",
+              "persisting",
+              "stopped",
+              "unverified"
+            ],
+            "title": "Recovery Status",
+            "type": "string"
+          },
+          "stale_windows_count": {
+            "title": "Stale Windows Count",
+            "type": "integer"
+          },
+          "valid_event_windows": {
+            "title": "Valid Event Windows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "overall_status",
+          "completeness_score",
+          "coverage_ratio",
+          "baseline_available",
+          "recovery_available",
+          "recovery_status",
+          "expected_event_windows",
+          "valid_event_windows",
+          "missing_windows_count",
+          "missing_samples_count",
+          "stale_windows_count",
+          "confidence_penalty_factor"
+        ],
+        "title": "EvidenceQualityAssessment",
         "type": "object"
       },
       "ExceedanceCheck": {
@@ -582,6 +1049,114 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HumanObservationCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "enum": [
+              "field_inspection",
+              "sensor_check",
+              "maintenance_note",
+              "process_context"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          }
+        },
+        "required": [
+          "category",
+          "note"
+        ],
+        "title": "HumanObservationCreate",
+        "type": "object"
+      },
+      "HumanObservationOut": {
+        "description": "Append-only human field observation linked to an incident.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "field_inspection",
+              "sensor_check",
+              "maintenance_note",
+              "process_context"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "incident_id": {
+            "title": "Incident Id",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "origin": {
+            "const": "human_observation",
+            "default": "human_observation",
+            "title": "Origin",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "incident_id",
+          "asset_id",
+          "actor_id",
+          "category",
+          "note",
+          "created_at"
+        ],
+        "title": "HumanObservationOut",
+        "type": "object"
+      },
       "IncidentCreate": {
         "additionalProperties": false,
         "description": "Point at an alarm episode; the server re-detects it and stores the evidence.",
@@ -666,6 +1241,13 @@
           "model_version": {
             "title": "Model Version",
             "type": "string"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/HumanObservationOut"
+            },
+            "title": "Observations",
+            "type": "array"
           },
           "peak_score": {
             "title": "Peak Score",
@@ -1121,6 +1703,208 @@
         "title": "ModelInfo",
         "type": "object"
       },
+      "NeighboringEventSummary": {
+        "description": "Alarm, warning, or weak operator report adjacent to or overlapping the target event.",
+        "properties": {
+          "detector_or_source": {
+            "title": "Detector Or Source",
+            "type": "string"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "kind": {
+            "enum": [
+              "air_leak_alarm",
+              "sensor_consistency_warning",
+              "operator_report"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "observed",
+              "derived",
+              "statistical_inference",
+              "model_prediction",
+              "human_observation"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "raised_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raised At"
+          },
+          "relationship": {
+            "enum": [
+              "concurrent",
+              "preceding",
+              "following"
+            ],
+            "title": "Relationship",
+            "type": "string"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "start",
+          "end",
+          "detector_or_source",
+          "relationship",
+          "origin"
+        ],
+        "title": "NeighboringEventSummary",
+        "type": "object"
+      },
+      "ObservedSignalSummary": {
+        "description": "Aggregate of directly observed telemetry values for one channel within a phase.",
+        "properties": {
+          "active_fraction": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Fraction"
+          },
+          "frozen": {
+            "default": false,
+            "title": "Frozen",
+            "type": "boolean"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "missing_count": {
+            "default": 0,
+            "title": "Missing Count",
+            "type": "integer"
+          },
+          "origin": {
+            "const": "observed",
+            "default": "observed",
+            "title": "Origin",
+            "type": "string"
+          },
+          "out_of_range_count": {
+            "default": 0,
+            "title": "Out Of Range Count",
+            "type": "integer"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          },
+          "std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Std"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "unit",
+          "sample_count",
+          "provenance"
+        ],
+        "title": "ObservedSignalSummary",
+        "type": "object"
+      },
       "OperatorReport": {
         "properties": {
           "end": {
@@ -1149,6 +1933,269 @@
           "failure"
         ],
         "title": "OperatorReport",
+        "type": "object"
+      },
+      "PhaseEvidenceSummary": {
+        "description": "Evidence summary for one chronological event phase.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "derived_features": {
+            "items": {
+              "$ref": "#/components/schemas/DerivedFeatureSummary"
+            },
+            "title": "Derived Features",
+            "type": "array"
+          },
+          "dominant_regime": {
+            "anyOf": [
+              {
+                "enum": [
+                  "stopped",
+                  "unloaded",
+                  "loaded",
+                  "starting",
+                  "insufficient_evidence"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dominant Regime"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "exceedance_origin": {
+            "const": "statistical_inference",
+            "default": "statistical_inference",
+            "title": "Exceedance Origin",
+            "type": "string"
+          },
+          "expected_windows": {
+            "title": "Expected Windows",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "observed_signals": {
+            "items": {
+              "$ref": "#/components/schemas/ObservedSignalSummary"
+            },
+            "title": "Observed Signals",
+            "type": "array"
+          },
+          "phase": {
+            "enum": [
+              "pre_event_baseline",
+              "onset",
+              "evolution",
+              "peak",
+              "recovery_or_persistence"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "primary_min_exceedance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Min Exceedance"
+          },
+          "primary_model_origin": {
+            "const": "model_prediction",
+            "default": "model_prediction",
+            "title": "Primary Model Origin",
+            "type": "string"
+          },
+          "primary_peak_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Peak Score"
+          },
+          "quality_flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Quality Flags",
+            "type": "array"
+          },
+          "reason_unavailable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Unavailable"
+          },
+          "regime_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Regime Counts",
+            "type": "object"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "total_windows": {
+            "title": "Total Windows",
+            "type": "integer"
+          },
+          "valid_windows": {
+            "title": "Valid Windows",
+            "type": "integer"
+          },
+          "warning_active_windows": {
+            "default": 0,
+            "title": "Warning Active Windows",
+            "type": "integer"
+          },
+          "warning_min_exceedance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Min Exceedance"
+          },
+          "warning_peak_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Peak Score"
+          }
+        },
+        "required": [
+          "phase",
+          "label",
+          "start",
+          "end",
+          "available",
+          "expected_windows",
+          "total_windows",
+          "valid_windows",
+          "sample_count"
+        ],
+        "title": "PhaseEvidenceSummary",
+        "type": "object"
+      },
+      "ProvenanceRecord": {
+        "description": "Dataset, preprocessing, and detector version lineage for one evidence package.",
+        "properties": {
+          "archive_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Sha256"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_license": {
+            "title": "Dataset License",
+            "type": "string"
+          },
+          "dataset_source": {
+            "title": "Dataset Source",
+            "type": "string"
+          },
+          "preprocessing_version": {
+            "title": "Preprocessing Version",
+            "type": "string"
+          },
+          "primary_detector": {
+            "title": "Primary Detector",
+            "type": "string"
+          },
+          "primary_model_version": {
+            "title": "Primary Model Version",
+            "type": "string"
+          },
+          "sampling_contract": {
+            "title": "Sampling Contract",
+            "type": "string"
+          },
+          "warning_detector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Detector"
+          },
+          "warning_model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Model Version"
+          },
+          "window_length": {
+            "title": "Window Length",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "dataset_source",
+          "dataset_license",
+          "preprocessing_version",
+          "sampling_contract",
+          "window_length",
+          "primary_detector",
+          "primary_model_version"
+        ],
+        "title": "ProvenanceRecord",
         "type": "object"
       },
       "ReferenceHoldoutCheck": {
@@ -1654,6 +2701,155 @@
           "result"
         ],
         "title": "ScoreResponse",
+        "type": "object"
+      },
+      "TimelineEntry": {
+        "description": "Chronological event-timeline entry preserving original timestamps and origins.",
+        "properties": {
+          "category": {
+            "enum": [
+              "telemetry_window",
+              "regime_change",
+              "alarm_episode",
+              "consistency_warning",
+              "model_output",
+              "evidence_group",
+              "human_observation",
+              "operator_report"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "detector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detector"
+          },
+          "end_timestamp": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Timestamp"
+          },
+          "event_class": {
+            "anyOf": [
+              {
+                "enum": [
+                  "informational",
+                  "sensor_consistency_warning",
+                  "air_leak_alarm",
+                  "insufficient_evidence"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Class"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "origin": {
+            "enum": [
+              "observed",
+              "derived",
+              "statistical_inference",
+              "model_prediction",
+              "human_observation"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pre_event_baseline",
+                  "onset",
+                  "evolution",
+                  "peak",
+                  "recovery_or_persistence"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "regime": {
+            "anyOf": [
+              {
+                "enum": [
+                  "stopped",
+                  "unloaded",
+                  "loaded",
+                  "starting",
+                  "insufficient_evidence"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "category",
+          "origin",
+          "title",
+          "summary",
+          "source_id"
+        ],
+        "title": "TimelineEntry",
         "type": "object"
       },
       "ValidationError": {
@@ -2375,6 +3571,106 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/anomaly/event-evidence": {
+      "get": {
+        "operationId": "anomaly_event_evidence",
+        "parameters": [
+          {
+            "description": "Event start (naive local train time)",
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "description": "Event start (naive local train time)",
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Event end, exclusive; at most 7 days after start",
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "description": "Event end, exclusive; at most 7 days after start",
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional alarm raised_at timestamp",
+            "in": "query",
+            "name": "raised_at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional alarm raised_at timestamp",
+              "title": "Raised At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "baseline_hours",
+            "required": false,
+            "schema": {
+              "default": 4.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Baseline Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recovery_hours",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Recovery Hours",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventEvidencePackage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Anomaly Event Evidence",
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
     "/api/v1/anomaly/model": {
       "get": {
         "operationId": "anomaly_model",
@@ -2819,6 +4115,126 @@
           }
         },
         "summary": "Create Decision",
+        "tags": [
+          "incidents"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/evidence-package": {
+      "get": {
+        "operationId": "get_incident_evidence_package",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{32}$",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "baseline_hours",
+            "required": false,
+            "schema": {
+              "default": 4.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Baseline Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recovery_hours",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Recovery Hours",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventEvidencePackage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Incident Evidence Package",
+        "tags": [
+          "incidents"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/observations": {
+      "post": {
+        "operationId": "create_observation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{32}$",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HumanObservationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HumanObservationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Observation",
         "tags": [
           "incidents"
         ]

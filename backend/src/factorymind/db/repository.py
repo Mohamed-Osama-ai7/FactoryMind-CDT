@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from factorymind.auth.principal import Principal
 from factorymind.db.audit import utcnow
-from factorymind.db.models import Decision, EvidenceRow, Incident
+from factorymind.db.models import Decision, EvidenceRow, HumanObservation, Incident
 
 DecisionKind = Literal["confirm", "dismiss", "defer"]
 _NEW_STATUS: dict[str, str] = {"confirm": "confirmed", "dismiss": "dismissed", "defer": "open"}
@@ -207,4 +207,43 @@ class IncidentRepo:
         self._s.add(row)
         self._s.flush()
         self._s.refresh(incident)
+        return row
+
+    def observations(self, incident: Incident) -> list[HumanObservation]:
+        return list(
+            self._s.execute(
+                select(HumanObservation)
+                .where(
+                    HumanObservation.incident_id == incident.id,
+                    HumanObservation.tenant_id == self._p.tenant_id,
+                )
+                .order_by(HumanObservation.created_at, HumanObservation.id)
+            )
+            .scalars()
+            .all()
+        )
+
+    def add_observation(
+        self,
+        incident: Incident,
+        *,
+        category: str,
+        note: str,
+        observed_at: datetime | None = None,
+    ) -> HumanObservation:
+        if not self._p.can_access_asset(incident.asset_id):
+            raise PermissionError("asset outside the principal's grants")
+        row = HumanObservation(
+            id=uuid.uuid4().hex,
+            tenant_id=self._p.tenant_id,
+            asset_id=incident.asset_id,
+            incident_id=incident.id,
+            actor_id=self._p.actor_id,
+            category=category,
+            observed_at=observed_at,
+            note=note,
+            created_at=utcnow(),
+        )
+        self._s.add(row)
+        self._s.flush()
         return row
