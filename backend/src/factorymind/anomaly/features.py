@@ -189,9 +189,9 @@ def _aggregate(frame: pd.DataFrame, keys: np.ndarray, spec: WindowSpec) -> pd.Da
     meta["motor_valve_mismatch_fraction"] = hg["motor_valve_mismatch"].mean().to_numpy()
     meta["stale_telemetry"] = (
         (meta["n_samples"] >= 2)
-        & (features["TP3_std"] == 0.0)
-        & (features["TP2_std"] == 0.0)
-        & (features["Motor_current_std"] == 0.0)
+        & (features["TP3_std"] <= 1e-12)
+        & (features["TP2_std"] <= 1e-12)
+        & (features["Motor_current_std"] <= 1e-12)
     )
     return pd.concat([meta.drop(columns="segment_start"), features], axis=1)
 

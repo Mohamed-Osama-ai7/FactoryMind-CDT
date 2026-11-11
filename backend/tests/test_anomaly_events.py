@@ -272,11 +272,15 @@ def test_service_replay_separates_warnings_and_verifies_warning_bundle(tmp_path:
     assert episodes_legacy == details.episodes
     assert reports_legacy == details.reports
 
-    # Warning bundle tampering must raise ModelUnavailableError rather than silently degrading
+    # Warning bundle tampering or malformed metadata must raise ModelUnavailableError (503)
     warn_card_path = models_dir / "wp2-model" / warning_bundle.version / "model_card.json"
     bad_card = json.loads(warn_card_path.read_text(encoding="utf-8"))
     bad_card["artifact_sha256"] = "0" * 64
     warn_card_path.write_text(json.dumps(bad_card), encoding="utf-8")
+    with pytest.raises(ModelUnavailableError):
+        load_warning_bundle(models_dir, "wp2-model", primary)
+
+    warn_card_path.write_text("{corrupt-json", encoding="utf-8")
     with pytest.raises(ModelUnavailableError):
         load_warning_bundle(models_dir, "wp2-model", primary)
 

@@ -54,6 +54,15 @@ const EVENT_CLASS_LABELS: Record<string, string> = {
   insufficient_evidence: 'Insufficient evidence',
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 /** Anomaly score per window vs threshold, separating leak alarms from consistency warnings.
  * Missing or integrity-abstained windows leave gaps on the score line (never interpolated). */
 export function ScoreChart({
@@ -114,14 +123,14 @@ export function ScoreChart({
             const eventLabel = EVENT_CLASS_LABELS[win.event_class] ?? win.event_class
             const regLine = `${win.regime.regime} (${win.regime.confidence})`
             const lines = [
-              `<strong>${formatNaive(win.window_start)}</strong>`,
-              `Duty score: ${scoreStr}`,
-              `Event class: ${eventLabel}`,
-              `Regime: ${regLine}`,
+              `<strong>${escapeHtml(formatNaive(win.window_start))}</strong>`,
+              `Duty score: ${escapeHtml(scoreStr)}`,
+              `Event class: ${escapeHtml(eventLabel)}`,
+              `Regime: ${escapeHtml(regLine)}`,
             ]
             if (win.warning_active) {
               const reasonText = win.warning_reasons?.join(', ') || win.regime.reason
-              lines.push(`Warning: ${reasonText}`)
+              lines.push(`Warning: ${escapeHtml(reasonText)}`)
             }
             return lines.join('<br/>')
           },

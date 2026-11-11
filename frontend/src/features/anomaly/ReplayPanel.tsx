@@ -321,14 +321,18 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
                       </td>
                       <td className="py-1.5 pr-4">{e.peak_score.toFixed(3)}</td>
                       <td className="py-1.5">
-                        <button
-                          type="button"
-                          className="text-accent underline"
-                          aria-pressed={selected === i}
-                          onClick={() => setSelected(selected === i ? null : i)}
-                        >
-                          {selected === i ? 'Hide evidence' : 'Show evidence'}
-                        </button>
+                        {peakWindow(replay.windows, e)?.evidence.length ? (
+                          <button
+                            type="button"
+                            className="text-accent underline"
+                            aria-pressed={selected === i}
+                            onClick={() => setSelected(selected === i ? null : i)}
+                          >
+                            {selected === i ? 'Hide evidence' : 'Show evidence'}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted">outside view</span>
+                        )}
                       </td>
                       <td className="py-1.5 pl-4">
                         <CreateIncidentButton
@@ -422,14 +426,19 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
                           : w.peak_score.toFixed(2)}
                       </td>
                       <td className="py-1.5">
-                        <button
-                          type="button"
-                          className="text-accent underline"
-                          aria-pressed={selectedWarning === i}
-                          onClick={() => setSelectedWarning(selectedWarning === i ? null : i)}
-                        >
-                          {selectedWarning === i ? 'Hide evidence' : 'Show warning evidence'}
-                        </button>
+                        {(peakWarningWindow(replay.windows, w)?.warning_evidence?.length ?? 0) >
+                        0 ? (
+                          <button
+                            type="button"
+                            className="text-accent underline"
+                            aria-pressed={selectedWarning === i}
+                            onClick={() => setSelectedWarning(selectedWarning === i ? null : i)}
+                          >
+                            {selectedWarning === i ? 'Hide evidence' : 'Show warning evidence'}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-muted">n/a</span>
+                        )}
                       </td>
                     </tr>
                     {selectedWarning === i && warningWindow && (

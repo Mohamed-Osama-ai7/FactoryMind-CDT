@@ -14,7 +14,7 @@ M2-WP2 separates physical compressor operating regimes, telemetry-integrity chec
 | `starting` | `transitional` | Startup electrical inrush (`Motor_current > 8.0 A`, `>= 1` sample) or contiguous resumption from `stopped` / `> 600 s` gap with active cycling. |
 | `insufficient_evidence` | `insufficient_evidence` | Window fails coverage/cadence (`incomplete_or_gapped`), has simultaneously zero-spread `TP3`/`TP2`/`Motor_current` (`stale_telemetry`), contradicts valve/motor physics across `> 10 %` of samples (`signal_inconsistency`), holds off a minor `< 90 %` boundary dip out of `stopped` (`hysteresis_hold`), or mixes duty phases without steady dominance (`mixed_duty_cycle`). |
 
-Why the 46 `FEATURE_NAMES` vector was left unchanged: existing `ModelBundle` artifacts (`FeatureProfile`, `IsolationForestDetector`, `PcaSpe`) expect the exact 46 feature columns. New regime/integrity features (`unloaded_fraction`, `inrush_samples`, `valve_contradiction_fraction`, `motor_valve_mismatch_fraction`, `stale_telemetry`) live strictly in non-ML metadata columns of `window_features()` in `backend/src/factorymind/anomaly/features.py`.
+Why the 42 `FEATURE_NAMES` vector was left unchanged: existing `ModelBundle` artifacts (`FeatureProfile`, `IsolationForestDetector`, `PcaSpe`) expect the exact 42 feature columns (`7 * 4 + 8 * 1 + 6 = 42`). New regime/integrity features (`unloaded_fraction`, `inrush_samples`, `valve_contradiction_fraction`, `motor_valve_mismatch_fraction`, `stale_telemetry`) live strictly in non-ML metadata columns of `window_features()` in `backend/src/factorymind/anomaly/features.py`.
 
 ### Telemetry sampling constraint (~0.1 Hz)
 

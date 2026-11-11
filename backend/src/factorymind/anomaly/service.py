@@ -99,7 +99,12 @@ def _load_verified_bundle_dir(model_dir: Path, version: str) -> tuple[ModelBundl
     artifact, card_path = model_dir / "model.joblib", model_dir / "model_card.json"
     if not artifact.exists() or not card_path.exists():
         raise ModelUnavailableError(f"Model {version} is incomplete")
-    card = json.loads(card_path.read_text(encoding="utf-8"))
+    try:
+        card = json.loads(card_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ModelUnavailableError(f"Model {version} has an unsupported format") from exc
+    if not isinstance(card, dict):
+        raise ModelUnavailableError(f"Model {version} has an unsupported format")
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     if digest != card.get("artifact_sha256"):
         raise ModelUnavailableError(f"Model {version} failed its integrity check")
