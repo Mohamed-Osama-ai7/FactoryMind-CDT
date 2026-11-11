@@ -104,25 +104,22 @@ export function EdgeConnectorsWorkspace() {
   const sourcesData = sourcesQuery.data?.status === 200 ? sourcesQuery.data.data : null
   const hardeningData = hardeningQuery.data?.status === 200 ? hardeningQuery.data.data : null
   const validationResult = validateMutation.data?.status === 200 ? validateMutation.data.data : null
-  const sourceOptions = sourcesData?.sources.length
+  const sourceOptions = sourcesData
     ? sourcesData.sources.map((src) => ({
         source_id: src.source_id,
         asset_id: src.asset_id,
       }))
-    : [
-        { source_id: 'metropt3-opcua-ro', asset_id: 'metropt3-apu-1' },
-        { source_id: 'metropt3-mqtt-ro', asset_id: 'metropt3-apu-1' },
-        { source_id: 'metropt3-historian-ro', asset_id: 'metropt3-apu-1' },
-      ]
-  const activeSource = sourceOptions.find((item) => item.source_id === sourceId) ??
-    sourceOptions[0] ?? {
-      source_id: sourceId,
-      asset_id: 'metropt3-apu-1',
-    }
+    : []
+  const activeSource =
+    sourceOptions.find((item) => item.source_id === sourceId) ?? sourceOptions[0] ?? null
   const validationId = `${idPrefix}-validation-error`
 
   function handleValidateSubmit(event: FormEvent) {
     event.preventDefault()
+    const selected = activeSource
+    if (!selected) {
+      return
+    }
     const parsedStep = parseBoundedInt(intervalSeconds, 'Nominal step (s)', 1, 300)
     if (parsedStep.error !== null) {
       setValidation({ field: 'intervalSeconds', message: parsedStep.error })
@@ -140,7 +137,7 @@ export function EdgeConnectorsWorkspace() {
     }
     setValidation(null)
 
-    const primarySensor = activeSource.source_id === 'metropt3-mqtt-ro' ? 'COMP' : 'TP2'
+    const primarySensor = selected.source_id === 'metropt3-mqtt-ro' ? 'COMP' : 'TP2'
     const baseMs = Date.UTC(2020, 3, 15, 10, 0, 0)
     let cursorMs = baseMs
     const samples = Array.from({ length: 6 }, (_, idx) => {
@@ -148,22 +145,22 @@ export function EdgeConnectorsWorkspace() {
       const gapStep = includeGap && idx === 2 ? parsedStep.value * 4 : parsedStep.value
       cursorMs += gapStep * 1000
       const sensorValues: Record<string, number> = {
-        [primarySensor]: activeSource.source_id === 'metropt3-mqtt-ro' ? 1.0 : 8.4 + idx * 0.05,
+        [primarySensor]: selected.source_id === 'metropt3-mqtt-ro' ? 1.0 : 8.4 + idx * 0.05,
       }
       if (includeUnallowlistedTag) {
         sensorValues.UNALLOWLISTED_SETPOINT_WRITE = 9.9
       }
       return {
         timestamp: ts,
-        source_id: activeSource.source_id,
+        source_id: selected.source_id,
         sensor_values: sensorValues,
       }
     })
 
     validateMutation.mutate({
       data: {
-        source_id: activeSource.source_id,
-        asset_id: activeSource.asset_id,
+        source_id: selected.source_id,
+        asset_id: selected.asset_id,
         samples,
         simulate_disconnects: parsedDisc.value,
         buffer_capacity_override: parsedCap.value,
@@ -216,7 +213,8 @@ export function EdgeConnectorsWorkspace() {
         )}
         {sourcesData && sourcesData.sources.length === 0 && (
           <p role="status" className="mt-2 text-xs text-muted">
-            No registered source descriptors available for your asset permissions.
+            No registered source descriptors available for your asset permissions; preflight
+            submission is disabled.
           </p>
         )}
         {sourcesData && sourcesData.sources.length > 0 && (
@@ -365,18 +363,23 @@ export function EdgeConnectorsWorkspace() {
             </label>
             <select
               id={`${idPrefix}-source`}
-              value={activeSource.source_id}
+              value={activeSource?.source_id ?? ''}
+              disabled={!activeSource}
               onChange={(e) => {
                 setSourceId(e.target.value)
                 setValidation(null)
               }}
-              className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
+              className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm disabled:opacity-50"
             >
-              {sourceOptions.map((item) => (
-                <option key={item.source_id} value={item.source_id}>
-                  {item.source_id}
-                </option>
-              ))}
+              {sourceOptions.length === 0 ? (
+                <option value="">No valid descriptors</option>
+              ) : (
+                sourceOptions.map((item) => (
+                  <option key={item.source_id} value={item.source_id}>
+                    {item.source_id}
+                  </option>
+                ))
+              )}
             </select>
           </div>
           <div>
@@ -467,7 +470,7 @@ export function EdgeConnectorsWorkspace() {
 
         <button
           type="submit"
-          disabled={validateMutation.isPending}
+          disabled={!activeSource || validateMutation.isPending}
           className="rounded border border-border bg-border px-4 py-1.5 text-sm font-medium hover:opacity-90 disabled:opacity-50"
         >
           {validateMutation.isPending ? 'Validating batch…' : 'Run Preflight Batch Check'}

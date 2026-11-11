@@ -489,6 +489,7 @@ def test_runtime_model_attestation_unavailable_unverified_and_failed_states(tmp_
     assert {i.format: i for i in unkeyed.attestations}["json_manifest"].status == (
         "self_consistent_unsigned"
     )
+    assert any("no HMAC key is configured" in note for note in unkeyed.limitations)
 
     keyed = build_supply_chain_report(
         models_dir=models_dir, model_name="metropt3-anomaly", hmac_key=key
@@ -498,11 +499,23 @@ def test_runtime_model_attestation_unavailable_unverified_and_failed_states(tmp_
     assert {i.format: i for i in keyed.attestations}["json_manifest"].status == (
         "signature_verified"
     )
+    assert not any("no HMAC key is configured" in note for note in keyed.limitations)
+    assert any(
+        "does not authenticate the bytes of model.joblib" in note and "model_manifest.json" in note
+        for note in keyed.limitations
+    )
 
     wrong_keyed = build_supply_chain_report(
         models_dir=models_dir, model_name="metropt3-anomaly", hmac_key=b"wrong"
     )
     assert wrong_keyed.runtime_model_attestation == "manifest_invalid"
+    assert wrong_keyed.manifest_signature_key_configured is True
+    assert not any("no HMAC key is configured" in note for note in wrong_keyed.limitations)
+    assert any(
+        "rejects invalid signatures" in note
+        and "does not authenticate the bytes of model.joblib" in note
+        for note in wrong_keyed.limitations
+    )
 
     # 5. Tampered model.joblib fails integrity even if manifest HMAC verifies!
     (vdir / "model.joblib").write_bytes(b"corrupted-bundle-bytes")
@@ -648,3 +661,62 @@ def test_edge_api_sources_validation_hardening_and_rbac(kit: AuthKit) -> None:
     assert hbody["runtime_loader_consults_manifest"] is False
     assert hbody["manifest_signature_key_configured"] is False
     assert len(hbody["limitations"]) >= 4
+    assert any("no HMAC key is configured" in note for note in hbody["limitations"])
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_runtime_status", "expected_joblib_status", "expected_manifest_status"),
+    [
+        ("manifest_missing", "manifest_missing", "sha_matches_adjacent_card", "missing"),
+        ("integrity_failed", "integrity_failed", "tamper_or_hash_mismatch", "missing"),
+        (
+            "manifest_unsigned_self_consistent",
+            "manifest_unsigned_self_consistent",
+            "sha_matches_adjacent_card",
+            "self_consistent_unsigned",
+        ),
+    ],
+)
+def test_edge_hardening_http_reports_runtime_model_states(
+    kit: AuthKit,
+    scenario: str,
+    expected_runtime_status: str,
+    expected_joblib_status: str,
+    expected_manifest_status: str,
+) -> None:
+    models_root = kit.root / "artifacts" / "models" / "metropt3-anomaly"
+    vdir = models_root / "v1"
+    vdir.mkdir(parents=True, exist_ok=True)
+    (models_root / "CURRENT").write_text("v1", encoding="utf-8")
+
+    good_bytes = b"serialized-detector-bytes"
+    (vdir / "model_card.json").write_text(
+        json.dumps({"artifact_sha256": hashlib.sha256(good_bytes).hexdigest()}),
+        encoding="utf-8",
+    )
+    (vdir / "model.joblib").write_bytes(
+        b"tampered-detector-bytes" if scenario == "integrity_failed" else good_bytes
+    )
+    if scenario == "manifest_unsigned_self_consistent":
+        manifest = build_signed_manifest(
+            model_name="metropt3-anomaly",
+            schema_version=1,
+            parameters={"threshold": 0.5},
+        )
+        (vdir / "model_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    client = make_client(kit)
+    engineer = kit.headers(roles=["engineer"])
+    resp = client.get("/api/v1/edge/hardening", headers=engineer)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["advisory_only"] is True
+    assert body["runtime_model_attestation"] == expected_runtime_status
+    assert body["runtime_model_format"] == "joblib_pickle"
+    assert body["runtime_loader_consults_manifest"] is False
+    assert body["manifest_signature_key_configured"] is False
+    assert any("no HMAC key is configured" in note for note in body["limitations"])
+
+    by_format = {entry["format"]: entry for entry in body["attestations"]}
+    assert by_format["joblib_legacy"]["status"] == expected_joblib_status
+    assert by_format["json_manifest"]["status"] == expected_manifest_status

@@ -41,19 +41,35 @@ _WORKFLOW_USES_RE: Final[re.Pattern[str]] = re.compile(r"^\s*-?\s*uses:\s*([^\s#
 _SHA_PINNED_RE: Final[re.Pattern[str]] = re.compile(r"^[^@]+@[0-9a-f]{40}$")
 _FORBIDDEN_PICKLE_FORMATS: Final[frozenset[str]] = frozenset({"pickle", "joblib", "dill"})
 
-# Static disclosures of what this report does NOT establish. They are statements about the
-# implementation, not check results.
-LIMITATIONS: Final[tuple[str, ...]] = (
-    "The runtime loads model.joblib with joblib (pickle) after comparing its SHA-256 with "
-    "model_card.json in the same directory: this detects corruption, not a writer who can change "
-    "both files.",
-    "No runtime code path reads model_manifest.json, and no shipped model has one; a manifest "
-    "would attest its own JSON parameters, not the bytes of model.joblib.",
-    "No manifest signature is verified because no HMAC key is configured in this deployment.",
-    "The CI check only parses 'uses:' lines in ci.yml; it does not verify that pinned commits "
-    "exist or are authentic, nor other workflows, lockfiles or dependency provenance.",
-    "The LICENSE check confirms MIT licence phrases are present in the file.",
-)
+
+def _build_limitations(*, hmac_key_configured: bool) -> tuple[str, ...]:
+    """Return explicit scope disclosures matching whether an HMAC key was supplied."""
+    if hmac_key_configured:
+        hmac_note = (
+            "When an HMAC key is supplied, signature verification authenticates only the "
+            "model_manifest.json metadata and parameter digest (and rejects invalid signatures); "
+            "it does not authenticate the bytes of model.joblib."
+        )
+    else:
+        hmac_note = (
+            "No manifest signature is verified because no HMAC key is configured in this "
+            "deployment."
+        )
+    return (
+        "The runtime loads model.joblib with joblib (pickle) after comparing its SHA-256 with "
+        "model_card.json in the same directory: this detects corruption, not a writer who can "
+        "change both files.",
+        "No runtime code path reads model_manifest.json, and no shipped model has one; a "
+        "manifest would attest its own JSON parameters, not the bytes of model.joblib.",
+        hmac_note,
+        "The CI check only parses 'uses:' lines in ci.yml; it does not verify that pinned commits "
+        "exist or are authentic, nor other workflows, lockfiles or dependency provenance.",
+        "The LICENSE check confirms MIT licence phrases are present in the file.",
+    )
+
+
+# Default static disclosure tuple preserved for backwards compatibility (no HMAC key configured).
+LIMITATIONS: Final[tuple[str, ...]] = _build_limitations(hmac_key_configured=False)
 
 
 def _reject_json_constant(value: str) -> Any:
@@ -470,5 +486,5 @@ def build_supply_chain_report(
         runtime_loader_consults_manifest=False,
         manifest_signature_key_configured=hmac_key is not None,
         attestations=attestations,
-        limitations=LIMITATIONS,
+        limitations=_build_limitations(hmac_key_configured=hmac_key is not None),
     )

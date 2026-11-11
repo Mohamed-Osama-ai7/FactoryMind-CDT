@@ -92,74 +92,96 @@ describe('EdgeConnectorsWorkspace', () => {
     )
 
     const client2 = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
+    const { unmount: unmountErr } = render(
       <QueryClientProvider client={client2}>
         <EdgeConnectorsWorkspace />
       </QueryClientProvider>,
     )
     expect(await screen.findByText(/Could not load edge source descriptors/)).toBeInTheDocument()
     expect(await screen.findByText(/Could not load supply-chain check report/)).toBeInTheDocument()
-  })
+    expect(screen.queryByRole('option', { name: /metropt3/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Source Descriptor' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Run Preflight Batch Check/ })).toBeDisabled()
+    unmountErr()
 
-  it('renders unavailable/empty descriptors and failed attestation states honestly', async () => {
+    // While sources are pending after /me resolves, submission stays disabled without fake defaults
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((input: RequestInfo | URL) => {
         const url = String(input)
         if (url.endsWith('/api/v1/me')) return Promise.resolve(mockMeOk())
-        if (url.endsWith('/api/v1/edge/sources')) {
-          return Promise.resolve(
-            new Response(
-              JSON.stringify({
-                advisory_only: true,
-                connector_io_status: 'not_implemented',
-                write_capabilities: 'none_no_connector_io_exists',
-                capability_note:
-                  'These are registered source descriptors. No live OPC-UA, MQTT or historian I/O exists.',
-                sources: [],
-              }),
-              { status: 200, headers: { 'Content-Type': 'application/json' } },
-            ),
-          )
-        }
+        return new Promise<Response>(() => {})
+      }),
+    )
+    const clientPendingSources = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={clientPendingSources}>
+        <EdgeConnectorsWorkspace />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText(/Loading edge source descriptors/)).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /metropt3/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Run Preflight Batch Check/ })).toBeDisabled()
+  })
+
+  it('renders unavailable/empty descriptors and failed attestation states honestly', async () => {
+    const emptyFetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/v1/me')) return Promise.resolve(mockMeOk())
+      if (url.endsWith('/api/v1/edge/sources')) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
               advisory_only: true,
-              license_present: false,
-              ci_actions_sha_pinned: false,
-              unpinned_workflow_uses: ['actions/checkout@v4'],
-              runtime_model_attestation: 'integrity_failed',
-              runtime_model_format: 'joblib_pickle',
-              runtime_loader_consults_manifest: false,
-              manifest_signature_key_configured: false,
-              attestations: [
-                {
-                  name: 'Root Repository License',
-                  relative_path: 'LICENSE',
-                  format: 'text_license',
-                  status: 'missing',
-                  sha256: null,
-                  detail: 'Root LICENSE file missing',
-                },
-                {
-                  name: 'Model v1 joblib bundle',
-                  relative_path: 'artifacts/metropt3-anomaly/v1/model.joblib',
-                  format: 'joblib_legacy',
-                  status: 'tamper_or_hash_mismatch',
-                  sha256: 'deadbeef',
-                  detail: 'SHA-256 does not match model_card.json',
-                },
-              ],
-              limitations: ['No manifest signature is verified because no HMAC key is configured.'],
+              connector_io_status: 'not_implemented',
+              write_capabilities: 'none_no_connector_io_exists',
+              capability_note:
+                'These are registered source descriptors. No live OPC-UA, MQTT or historian I/O exists.',
+              sources: [],
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           ),
         )
-      }),
-    )
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            advisory_only: true,
+            license_present: false,
+            ci_actions_sha_pinned: false,
+            unpinned_workflow_uses: ['actions/checkout@v4'],
+            runtime_model_attestation: 'integrity_failed',
+            runtime_model_format: 'joblib_pickle',
+            runtime_loader_consults_manifest: false,
+            manifest_signature_key_configured: false,
+            attestations: [
+              {
+                name: 'Root Repository License',
+                relative_path: 'LICENSE',
+                format: 'text_license',
+                status: 'missing',
+                sha256: null,
+                detail: 'Root LICENSE file missing',
+              },
+              {
+                name: 'Model v1 joblib bundle',
+                relative_path: 'artifacts/metropt3-anomaly/v1/model.joblib',
+                format: 'joblib_legacy',
+                status: 'tamper_or_hash_mismatch',
+                sha256: 'deadbeef',
+                detail: 'SHA-256 does not match model_card.json',
+              },
+            ],
+            limitations: ['No manifest signature is verified because no HMAC key is configured.'],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    })
+    vi.stubGlobal('fetch', emptyFetchMock)
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const user = userEvent.setup()
     render(
       <QueryClientProvider client={client}>
         <EdgeConnectorsWorkspace />
@@ -168,9 +190,16 @@ describe('EdgeConnectorsWorkspace', () => {
 
     expect(
       await screen.findByText(
-        /No registered source descriptors available for your asset permissions/,
+        /No registered source descriptors available for your asset permissions; preflight submission is disabled/,
       ),
     ).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /metropt3/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Source Descriptor' })).toBeDisabled()
+    const submitBtn = screen.getByRole('button', { name: /Run Preflight Batch Check/ })
+    expect(submitBtn).toBeDisabled()
+    const callsBeforeDisabledClick = emptyFetchMock.mock.calls.length
+    await user.click(submitBtn)
+    expect(emptyFetchMock).toHaveBeenCalledTimes(callsBeforeDisabledClick)
     expect(screen.getByText(/LICENSE: missing\/invalid/)).toBeInTheDocument()
     expect(screen.getByText(/CI uses syntax: unpinned/)).toBeInTheDocument()
     expect(screen.getByText(/runtime model: integrity_failed/)).toBeInTheDocument()
