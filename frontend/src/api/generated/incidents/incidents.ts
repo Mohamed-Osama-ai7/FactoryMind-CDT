@@ -31,6 +31,7 @@ import type {
   DecisionCreate,
   EventEvidencePackage,
   GetIncidentEvidencePackageParams,
+  GetIncidentRcaParams,
   HTTPValidationError,
   HumanObservationCreate,
   HumanObservationOut,
@@ -38,7 +39,8 @@ import type {
   IncidentDetail,
   IncidentList,
   ListIncidentsParams,
-  MeResponse
+  MeResponse,
+  RcaAssessment
 } from '../model';
 
 import { apiFetch } from '../../http';
@@ -994,7 +996,141 @@ export const useCreateObservation = <TError = HTTPValidationError,
       > => {
       return useMutation(getCreateObservationMutationOptions(options), queryClient);
     }
-    export type meResponse200 = {
+    export type getIncidentRcaResponse200 = {
+  data: RcaAssessment
+  status: 200
+}
+
+export type getIncidentRcaResponse422 = {
+  data: HTTPValidationError
+  status: 422
+}
+
+export type getIncidentRcaResponseSuccess = (getIncidentRcaResponse200) & {
+  headers: Headers;
+};
+export type getIncidentRcaResponseError = (getIncidentRcaResponse422) & {
+  headers: Headers;
+};
+
+export type getIncidentRcaResponse = (getIncidentRcaResponseSuccess | getIncidentRcaResponseError)
+
+export const getGetIncidentRcaUrl = (incidentId: string,
+    params?: GetIncidentRcaParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/incidents/${incidentId}/rca?${stringifiedParams}` : `/api/v1/incidents/${incidentId}/rca`
+}
+
+/**
+ * @summary Get Incident Rca
+ */
+export const getIncidentRca = async (incidentId: string,
+    params?: GetIncidentRcaParams, options?: Parameters<typeof apiFetch>[1]): Promise<getIncidentRcaResponse> => {
+
+  return apiFetch<getIncidentRcaResponse>(getGetIncidentRcaUrl(incidentId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIncidentRcaQueryKey = (incidentId: string,
+    params?: GetIncidentRcaParams,) => {
+    return [
+    `/api/v1/incidents/${incidentId}/rca`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetIncidentRcaQueryOptions = <TData = Awaited<ReturnType<typeof getIncidentRca>>, TError = HTTPValidationError>(incidentId: string,
+    params?: GetIncidentRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentRca>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIncidentRcaQueryKey(incidentId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIncidentRca>>> = ({ signal }) => getIncidentRca(incidentId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: incidentId !== null && incidentId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIncidentRca>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIncidentRcaQueryResult = NonNullable<Awaited<ReturnType<typeof getIncidentRca>>>
+export type GetIncidentRcaQueryError = HTTPValidationError
+
+
+/** @summary Get Incident Rca */
+export function useGetIncidentRca<TData = Awaited<ReturnType<typeof getIncidentRca>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params: undefined |  GetIncidentRcaParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentRca>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIncidentRca>>,
+          TError,
+          Awaited<ReturnType<typeof getIncidentRca>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get Incident Rca */
+export function useGetIncidentRca<TData = Awaited<ReturnType<typeof getIncidentRca>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params?: GetIncidentRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentRca>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIncidentRca>>,
+          TError,
+          Awaited<ReturnType<typeof getIncidentRca>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get Incident Rca */
+export function useGetIncidentRca<TData = Awaited<ReturnType<typeof getIncidentRca>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params?: GetIncidentRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentRca>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/** @summary Get Incident Rca */
+export function useGetIncidentRca<TData = Awaited<ReturnType<typeof getIncidentRca>>, TError = HTTPValidationError>(
+ incidentId: string,
+    params?: GetIncidentRcaParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIncidentRca>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetIncidentRcaQueryOptions(incidentId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type meResponse200 = {
   data: MeResponse
   status: 200
 }

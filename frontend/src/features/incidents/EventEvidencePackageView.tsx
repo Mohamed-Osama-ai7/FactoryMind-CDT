@@ -158,7 +158,8 @@ export function EventEvidencePackageView({
 
         {((pkg.missing_measurements?.length ?? 0) > 0 ||
           (pkg.conflicting_measurements?.length ?? 0) > 0 ||
-          (pkg.quality.quality_warnings?.length ?? 0) > 0) && (
+          (pkg.quality.quality_warnings?.length ?? 0) > 0 ||
+          (pkg.quality.limitations?.length ?? 0) > 0) && (
           <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 text-xs">
             {(pkg.quality.frozen_sensors?.length ?? 0) > 0 && (
               <p className="text-warn">

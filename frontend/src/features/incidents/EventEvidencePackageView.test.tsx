@@ -290,6 +290,7 @@ describe('EventEvidencePackageView', () => {
     )
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invSpy = vi.spyOn(client, 'invalidateQueries')
     render(
       <QueryClientProvider client={client}>
         <ObservationForm incidentId={'a'.repeat(32)} defaultTimestamp="2020-04-18T00:00:00" />
@@ -300,5 +301,8 @@ describe('EventEvidencePackageView', () => {
     await userEvent.type(noteField, 'Inspected valve manifold.')
     await userEvent.click(screen.getByRole('button', { name: 'Record observation' }))
     expect(await screen.findByText(/Observation recorded and audited/)).toBeInTheDocument()
+    expect(invSpy).toHaveBeenCalledWith({
+      queryKey: [`/api/v1/incidents/${'a'.repeat(32)}/rca`],
+    })
   })
 })

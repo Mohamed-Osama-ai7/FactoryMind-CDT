@@ -18,6 +18,15 @@ from factorymind.contracts.events import (
     TimelineCategory,
     TimelineEntry,
 )
+from factorymind.contracts.rca import (
+    EvidenceReference,
+    RankedHypothesis,
+    RcaAssessment,
+    RcaConfidenceBand,
+    RcaHypothesisCategory,
+    RelativeSupport,
+    VerificationStep,
+)
 
 __all__ = [
     "ContradictionRecord",
@@ -28,12 +37,19 @@ __all__ = [
     "EvidenceOrigin",
     "EvidenceQualityAssessment",
     "EvidenceQualityStatus",
+    "EvidenceReference",
     "HumanObservationCategory",
     "HumanObservationOut",
     "NeighboringEventSummary",
     "ObservedSignalSummary",
     "PhaseEvidenceSummary",
     "ProvenanceRecord",
+    "RankedHypothesis",
+    "RcaAssessment",
+    "RcaConfidenceBand",
+    "RcaHypothesisCategory",
+    "RelativeSupport",
     "TimelineCategory",
     "TimelineEntry",
+    "VerificationStep",
 ]

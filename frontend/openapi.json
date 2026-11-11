@@ -862,6 +862,93 @@
         "title": "EvidenceQualityAssessment",
         "type": "object"
       },
+      "EvidenceReference": {
+        "description": "Explicit origin-tagged citation linking RCA claims back to the evidence package.",
+        "properties": {
+          "baseline_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Value"
+          },
+          "observed_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Value"
+          },
+          "origin": {
+            "enum": [
+              "observed",
+              "derived",
+              "statistical_inference",
+              "model_prediction",
+              "human_observation"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pre_event_baseline",
+                  "onset",
+                  "evolution",
+                  "peak",
+                  "recovery_or_persistence"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "ref_id": {
+            "title": "Ref Id",
+            "type": "string"
+          },
+          "signal_or_feature": {
+            "title": "Signal Or Feature",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "ref_id",
+          "origin",
+          "signal_or_feature",
+          "statement"
+        ],
+        "title": "EvidenceReference",
+        "type": "object"
+      },
       "ExceedanceCheck": {
         "properties": {
           "alpha": {
@@ -2198,6 +2285,249 @@
         "title": "ProvenanceRecord",
         "type": "object"
       },
+      "RankedHypothesis": {
+        "description": "Candidate physical or data-integrity explanation ranked by structured evidence.",
+        "properties": {
+          "category": {
+            "enum": [
+              "air_leakage",
+              "sensor_malfunction",
+              "telemetry_inconsistency",
+              "abnormal_high_demand",
+              "concurrent_conditions",
+              "insufficient_evidence"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "confidence_band": {
+            "enum": [
+              "high",
+              "moderate",
+              "low",
+              "abstained"
+            ],
+            "title": "Confidence Band",
+            "type": "string"
+          },
+          "contradicting_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "title": "Contradicting Evidence",
+            "type": "array"
+          },
+          "correlation_vs_causation_note": {
+            "title": "Correlation Vs Causation Note",
+            "type": "string"
+          },
+          "hypothesis_id": {
+            "title": "Hypothesis Id",
+            "type": "string"
+          },
+          "missing_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "title": "Missing Evidence",
+            "type": "array"
+          },
+          "physical_mechanism": {
+            "title": "Physical Mechanism",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 1.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "relative_support": {
+            "enum": [
+              "primary",
+              "plausible_alternative",
+              "weak",
+              "ruled_out"
+            ],
+            "title": "Relative Support",
+            "type": "string"
+          },
+          "support_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Support Score",
+            "type": "number"
+          },
+          "supporting_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "title": "Supporting Evidence",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "verification_steps": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationStep"
+            },
+            "title": "Verification Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hypothesis_id",
+          "category",
+          "title",
+          "rank",
+          "relative_support",
+          "support_score",
+          "confidence_band",
+          "physical_mechanism",
+          "correlation_vs_causation_note"
+        ],
+        "title": "RankedHypothesis",
+        "type": "object"
+      },
+      "RcaAssessment": {
+        "description": "Complete explainable multi-hypothesis RCA report grounded in one evidence package.",
+        "properties": {
+          "abstained": {
+            "title": "Abstained",
+            "type": "boolean"
+          },
+          "abstention_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstention Reason"
+          },
+          "advisory": {
+            "default": "Advisory root-cause hypotheses for human engineering review. Grounded strictly in the associated EventEvidencePackage; FactoryMind never actuates or controls equipment.",
+            "title": "Advisory",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "confidence_penalty_factor": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Penalty Factor",
+            "type": "number"
+          },
+          "correlation_vs_causation_boundary": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Correlation Vs Causation Boundary",
+            "type": "array"
+          },
+          "event_end": {
+            "format": "date-time",
+            "title": "Event End",
+            "type": "string"
+          },
+          "event_start": {
+            "format": "date-time",
+            "title": "Event Start",
+            "type": "string"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "package_id": {
+            "title": "Package Id",
+            "type": "string"
+          },
+          "primary_category": {
+            "enum": [
+              "air_leakage",
+              "sensor_malfunction",
+              "telemetry_inconsistency",
+              "abnormal_high_demand",
+              "concurrent_conditions",
+              "insufficient_evidence"
+            ],
+            "title": "Primary Category",
+            "type": "string"
+          },
+          "primary_title": {
+            "title": "Primary Title",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ProvenanceRecord"
+          },
+          "quality_status": {
+            "enum": [
+              "sufficient",
+              "degraded",
+              "insufficient"
+            ],
+            "title": "Quality Status",
+            "type": "string"
+          },
+          "ranked_hypotheses": {
+            "items": {
+              "$ref": "#/components/schemas/RankedHypothesis"
+            },
+            "title": "Ranked Hypotheses",
+            "type": "array"
+          },
+          "rca_id": {
+            "title": "Rca Id",
+            "type": "string"
+          },
+          "score_meaning_note": {
+            "default": "support_score is a deterministic physical-evidence consistency index (0..1), NOT a calibrated failure probability.",
+            "title": "Score Meaning Note",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "uncertainty_note": {
+            "title": "Uncertainty Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rca_id",
+          "package_id",
+          "asset_id",
+          "event_start",
+          "event_end",
+          "abstained",
+          "primary_category",
+          "primary_title",
+          "summary",
+          "uncertainty_note",
+          "quality_status",
+          "confidence_penalty_factor",
+          "ranked_hypotheses",
+          "correlation_vs_causation_boundary",
+          "provenance"
+        ],
+        "title": "RcaAssessment",
+        "type": "object"
+      },
       "ReferenceHoldoutCheck": {
         "properties": {
           "alpha": {
@@ -2890,6 +3220,50 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificationStep": {
+        "description": "Non-actuating advisory field/diagnostic inspection to confirm or refute a hypothesis.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "expected_if_confirmed": {
+            "title": "Expected If Confirmed",
+            "type": "string"
+          },
+          "expected_if_refuted": {
+            "title": "Expected If Refuted",
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              "immediate",
+              "high",
+              "standard"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "safety_note": {
+            "default": "Advisory field verification only; never actuate equipment or modify PLC setpoints.",
+            "title": "Safety Note",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "priority",
+          "action",
+          "expected_if_confirmed",
+          "expected_if_refuted"
+        ],
+        "title": "VerificationStep",
         "type": "object"
       },
       "WarningEpisode": {
@@ -3692,6 +4066,106 @@
         ]
       }
     },
+    "/api/v1/anomaly/rca": {
+      "get": {
+        "operationId": "anomaly_rca",
+        "parameters": [
+          {
+            "description": "Event start (naive local train time)",
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "description": "Event start (naive local train time)",
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Event end, exclusive; at most 7 days after start",
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "description": "Event end, exclusive; at most 7 days after start",
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional alarm raised_at timestamp",
+            "in": "query",
+            "name": "raised_at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional alarm raised_at timestamp",
+              "title": "Raised At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "baseline_hours",
+            "required": false,
+            "schema": {
+              "default": 4.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Baseline Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recovery_hours",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Recovery Hours",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RcaAssessment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Anomaly Rca",
+        "tags": [
+          "anomaly"
+        ]
+      }
+    },
     "/api/v1/anomaly/replay": {
       "get": {
         "operationId": "anomaly_replay",
@@ -4235,6 +4709,73 @@
           }
         },
         "summary": "Create Observation",
+        "tags": [
+          "incidents"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/rca": {
+      "get": {
+        "operationId": "get_incident_rca",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{32}$",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "baseline_hours",
+            "required": false,
+            "schema": {
+              "default": 4.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Baseline Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recovery_hours",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 24.0,
+              "minimum": 0.0,
+              "title": "Recovery Hours",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RcaAssessment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Incident Rca",
         "tags": [
           "incidents"
         ]

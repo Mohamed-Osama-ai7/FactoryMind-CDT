@@ -43,7 +43,10 @@ def _make_wp_a_service(
     f2_mask = (base.index >= pd.Timestamp("2020-01-09 06:00")) & (
         base.index < pd.Timestamp("2020-01-09 08:00")
     )
-    base.loc[f2_mask, "Motor_current"] = 7.1
+    f2_n = int(f2_mask.sum())
+    base.loc[f2_mask, "Motor_current"] = [
+        7.1 + (0.08 if i % 2 == 0 else -0.08) for i in range(f2_n)
+    ]
     base.loc[f2_mask, "COMP"] = 0.0
     base.loc[f2_mask, "DV_eletric"] = 1.0
 
