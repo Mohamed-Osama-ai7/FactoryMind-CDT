@@ -99,7 +99,7 @@ def test_data_foundation_detects_missing_corrupt_artifacts_non_destructively(
     assert ok_rec.quality.gap_policy == "preserve_gaps_uninterpolated"
 
 
-def test_malformed_manifest_degrades_gracefully(tmp_path: Path) -> None:
+def test_malformed_manifest_and_corrupt_parquet_degrade_gracefully(tmp_path: Path) -> None:
     out_dir = tmp_path / "processed" / "metropt3"
     out_dir.mkdir(parents=True)
     (out_dir / "manifest.json").write_text("{broken json", encoding="utf-8")
@@ -108,8 +108,42 @@ def test_malformed_manifest_degrades_gracefully(tmp_path: Path) -> None:
     checks = {c.check_id: c for c in rec.quality_checks}
     assert checks["manifest_provenance"].status == "warn"
 
+    # Negative counts in manifest.json must NOT crash DatasetQualitySummary with 500
+    (out_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "dataset_id": "metropt3",
+                "archive_sha256": ARCHIVE_SHA256,
+                "rows_after_cleaning": 10,
+                "raw_quality": {
+                    "rows": -5,
+                    "start": "2020-01-01 00:00:00",
+                    "end": "2020-01-01 00:05:00",
+                    "duplicate_timestamps": -1,
+                    "null_values": 0,
+                    "gaps_over_60s": 0,
+                    "gap_hours": -1.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    neg_rec = inspect_metropt3_dataset(tmp_path / "raw", tmp_path / "processed")
+    assert neg_rec.quality is None
+    assert {c.check_id: c for c in neg_rec.quality_checks}["manifest_provenance"].status == "warn"
 
-def test_read_active_model_version_blocks_path_traversal(tmp_path: Path) -> None:
+    # 0-row Parquet flags "0 rows" and never claims telemetry_available=True
+    data_zero = _write_processed_metropt3(tmp_path / "zero", rows=36)
+    empty_frame = clean(simulate_apu("2020-01-01T00:00:00", periods=5)).iloc[0:0]
+    empty_frame.to_parquet(data_zero / "processed" / "metropt3" / "telemetry.parquet")
+    zero_rec = inspect_metropt3_dataset(data_zero / "raw", data_zero / "processed")
+    assert zero_rec.artifact_status == "partial"
+    zero_pq = {c.check_id: c for c in zero_rec.quality_checks}["parquet_schema_and_rows"]
+    assert zero_pq.status == "warn"
+    assert "0 rows" in zero_pq.summary
+
+
+def test_read_active_model_version_blocks_traversal_and_bad_bytes(tmp_path: Path) -> None:
     models_dir = tmp_path / "models"
     model_root = models_dir / "metropt3-anomaly"
     ver_dir = model_root / "20261111-v1"
@@ -118,6 +152,12 @@ def test_read_active_model_version_blocks_path_traversal(tmp_path: Path) -> None
         json.dumps({"model_version": "20261111-v1"}), encoding="utf-8"
     )
     (model_root / "CURRENT").write_text("../escape", encoding="utf-8")
+    assert read_active_model_version(models_dir, "metropt3-anomaly") is None
+
+    # Embedded NUL byte or invalid UTF-8 bytes fail closed to None rather than raising 500
+    (model_root / "CURRENT").write_text("v1\x00bad", encoding="utf-8")
+    assert read_active_model_version(models_dir, "metropt3-anomaly") is None
+    (model_root / "CURRENT").write_bytes(b"\xff\xfe\xfd")
     assert read_active_model_version(models_dir, "metropt3-anomaly") is None
 
     (model_root / "CURRENT").write_text("20261111-v1", encoding="utf-8")
@@ -133,7 +173,7 @@ def test_assets_and_datasets_api_scoping_and_passport_response(kit: AuthKit) -> 
     )
     (ver_dir.parent / "CURRENT").write_text("20261111-abc", encoding="utf-8")
 
-    client = make_client(kit)
+    client = make_client(kit, asset_ids=[ASSET, "pump-7"])
     headers = kit.headers(roles=["viewer"], assets=[ASSET])
 
     listed = client.get("/api/v1/assets", headers=headers)
@@ -150,6 +190,7 @@ def test_assets_and_datasets_api_scoping_and_passport_response(kit: AuthKit) -> 
     body = detail.json()
     assert body["passport"]["asset_id"] == ASSET
     assert len(body["passport"]["sensors"]) == 15
+    assert "42 window features" in body["passport"]["model_applicability"][1]["scope_note"]
     assert body["datasets"][0]["dataset_id"] == "metropt3"
     assert body["datasets"][0]["artifact_status"] == "verified"
 
@@ -157,9 +198,17 @@ def test_assets_and_datasets_api_scoping_and_passport_response(kit: AuthKit) -> 
     assert datasets.status_code == 200
     assert datasets.json()["items"][0]["archive_sha256"] == ARCHIVE_SHA256
 
-    # Unknown asset or cross-asset query fails with 404 (not probing existence)
+    # Configured-but-ungranted or unknown asset fails with 404 (not probing existence)
+    assert client.get("/api/v1/assets/pump-7", headers=headers).status_code == 404
     assert client.get("/api/v1/assets/pump-99", headers=headers).status_code == 404
-    assert client.get("/api/v1/datasets?asset_id=pump-99", headers=headers).status_code == 404
+    assert client.get("/api/v1/datasets?asset_id=pump-7", headers=headers).status_code == 404
+    assert client.get(f"/api/v1/datasets?asset_id={'a' * 80}", headers=headers).status_code == 404
+
+    # Caller lacking data_source_asset_id grant fails with 403
+    assert (
+        client.get("/api/v1/assets", headers=kit.headers(roles=["viewer"], assets=[])).status_code
+        == 403
+    )
 
     # Cross-tenant and auditor roles fail with 403
     assert (
@@ -169,3 +218,14 @@ def test_assets_and_datasets_api_scoping_and_passport_response(kit: AuthKit) -> 
         == 403
     )
     assert client.get("/api/v1/assets", headers=kit.headers(roles=["auditor"])).status_code == 403
+
+
+def test_corrupt_parquet_reports_telemetry_available_false_in_summary(kit: AuthKit) -> None:
+    _write_processed_metropt3(kit.root, rows=36)
+    empty_frame = clean(simulate_apu("2020-01-01T00:00:00", periods=5)).iloc[0:0]
+    empty_frame.to_parquet(kit.root / "data" / "processed" / "metropt3" / "telemetry.parquet")
+
+    client = make_client(kit)
+    resp = client.get("/api/v1/assets", headers=kit.headers(roles=["viewer"], assets=[ASSET]))
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["telemetry_available"] is False

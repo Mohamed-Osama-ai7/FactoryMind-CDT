@@ -142,6 +142,9 @@ export function AssetsOverview({ renderOpenLink }: AssetsOverviewProps) {
             Could not load datasets: {describeApiError(datasetsQuery.error)}
           </p>
         )}
+        {!datasetsQuery.isPending && !datasetsQuery.isError && datasets.length === 0 && (
+          <p className="text-sm text-muted">No connected datasets registered for this scope.</p>
+        )}
         {datasets.map((ds) => (
           <SourceDatasetCard key={ds.dataset_id} dataset={ds} />
         ))}

@@ -253,6 +253,11 @@ describe('AssetsOverview and AssetPassportDetail', () => {
     expect(screen.getByText('not_calibrated')).toBeInTheDocument()
     expect(screen.getByText('TP3')).toBeInTheDocument()
     expect(screen.getByText('LPS')).toBeInTheDocument()
+    expect(screen.getByText('Inspect fittings')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'UCI source' })).toHaveAttribute(
+      'href',
+      sampleDataset.source_page,
+    )
 
     await userEvent.click(screen.getByRole('button', { name: 'digital' }))
     expect(screen.queryByText('TP3')).toBeNull()
@@ -260,6 +265,69 @@ describe('AssetsOverview and AssetPassportDetail', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /Could not load asset passport: Asset not found/,
+    )
+  })
+
+  it('shows error alerts on /me, /assets, or /datasets failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        const s = String(url)
+        if (s.startsWith('/api/v1/me')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                actor_id: 'eng-1',
+                tenant_id: 'acme',
+                roles: ['engineer'],
+                permissions: ['asset:read'],
+                asset_ids: ['metropt3-apu-1'],
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ detail: 'Storage backend offline' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AssetsOverview />
+      </QueryClientProvider>,
+    )
+
+    const alerts = await screen.findAllByRole('alert')
+    expect(alerts.length).toBeGreaterThanOrEqual(2)
+    expect(alerts.map((a) => a.textContent).join(' ')).toContain('Storage backend offline')
+  })
+
+  it('shows permission check alert when /me fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: 'OIDC unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AssetsOverview />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Could not verify asset permissions: OIDC unavailable/,
     )
   })
 })

@@ -135,7 +135,10 @@ export function AssetPassportDetail({ assetId, backLink }: AssetPassportDetailPr
               <h2 id={`${idPrefix}-sensors`} className="text-lg font-medium">
                 Sensor catalog ({passport.sensors.length})
               </h2>
-              <div className="flex items-center gap-2 text-xs">
+              <fieldset
+                aria-label="Filter sensors by type"
+                className="flex items-center gap-2 border-0 p-0 text-xs"
+              >
                 {(['all', 'analog', 'digital'] as const).map((kind) => (
                   <button
                     key={kind}
@@ -151,7 +154,7 @@ export function AssetPassportDetail({ assetId, backLink }: AssetPassportDetailPr
                     {kind}
                   </button>
                 ))}
-              </div>
+              </fieldset>
             </div>
             <div className="overflow-x-auto rounded-lg border border-border bg-panel p-3">
               <table className="w-full text-xs">
@@ -174,10 +177,10 @@ export function AssetPassportDetail({ assetId, backLink }: AssetPassportDetailPr
                     .filter((s) => sensorFilter === 'all' || s.kind === sensorFilter)
                     .map((s) => (
                       <tr key={s.sensor_id} className="border-t border-border align-top">
-                        <td className="py-1.5 pr-3">
+                        <th scope="row" className="py-1.5 pr-3 text-left font-normal">
                           <span className="font-mono font-medium text-ink">{s.sensor_id}</span>
                           <span className="block text-muted">{s.display_name}</span>
-                        </td>
+                        </th>
                         <td className="py-1.5 pr-3 font-mono">{s.kind}</td>
                         <td className="py-1.5 pr-3 font-mono">{s.unit}</td>
                         <td className="py-1.5 pr-3 font-mono">
@@ -224,6 +227,16 @@ export function AssetPassportDetail({ assetId, backLink }: AssetPassportDetailPr
                     <strong className="text-ink">Competing modes:</strong>{' '}
                     {fm.competing_explanations.join(', ')}
                   </p>
+                  {fm.recommended_checks.length > 0 && (
+                    <div>
+                      <p className="font-medium text-ink">Recommended advisory checks</p>
+                      <ul className="list-disc pl-4 text-muted">
+                        {fm.recommended_checks.map((chk) => (
+                          <li key={chk}>{chk}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </article>
               ))}
             </div>

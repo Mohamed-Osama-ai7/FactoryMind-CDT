@@ -20,6 +20,19 @@ export function SourceDatasetCard({ dataset }: { dataset: SourceDatasetRecord })
             Dataset <span className="font-mono text-ink">{dataset.dataset_id}</span> · License:{' '}
             {dataset.license} · Origin:{' '}
             <span className="font-mono">{dataset.provenance_origin}</span>
+            {dataset.source_page.startsWith('https://') && (
+              <>
+                {' · '}
+                <a
+                  href={dataset.source_page}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent underline"
+                >
+                  UCI source
+                </a>
+              </>
+            )}
           </p>
         </div>
         <span
@@ -77,6 +90,13 @@ export function SourceDatasetCard({ dataset }: { dataset: SourceDatasetRecord })
           <div>
             <dt className="text-muted">Gap policy</dt>
             <dd className="font-mono text-ink">{dataset.quality.gap_policy}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">Median cadence / dupes / nulls</dt>
+            <dd className="font-mono text-ink">
+              {dataset.quality.median_period_s ?? 'n/a'}s · {dataset.quality.duplicate_timestamps}{' '}
+              dupes · {dataset.quality.null_values} nulls
+            </dd>
           </div>
         </dl>
       )}

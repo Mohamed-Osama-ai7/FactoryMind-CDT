@@ -40,8 +40,10 @@ _ANALOG_DETAILS: Final[dict[str, tuple[str, str, str, str | None]]] = {
     "H1": (
         "Cyclonic separator filter drop (H1)",
         "Pressure drop across cyclonic filter discharge separator.",
-        "Near 0 bar during compressor operation; spikes on purge/discharge cycling",
-        "H1 sits flat at ~0 outside intermittent purge transitions and is excluded from PCA.",
+        "Near 0 bar during active compression (loaded); tracks panel pressure (TP3) when "
+        "unloaded or stopped",
+        "Flat near 0 during continuous compression or purge holds; excluded from univariate "
+        "RCA sensor-freeze heuristics (pca_spe still includes all 42 window features).",
     ),
     "DV_pressure": (
         "Air-dryer tower discharge drop (DV_pressure)",
@@ -170,15 +172,26 @@ def _build_metropt3_passport() -> AssetPassport:
             "insufficient_evidence",
         ],
         operating_envelopes={
-            "stopped": "Motor_current <= 1.5 A, COMP == 1, DV_eletric == 0 (no active compression)",
-            "unloaded": "1.5 < Motor_current <= 5.5 A, COMP == 1, DV_eletric == 0 (idle running)",
-            "loaded": (
-                "5.5 < Motor_current <= 8.0 A, COMP == 0, DV_eletric == 1 (active compression)"
+            "stopped": (
+                "Motor_current < 1.0 A (OFF_CURRENT_A) for >= 0.9 of the 10-min window, "
+                "COMP == 1, DV_eletric == 0 (no active compression)"
             ),
-            "starting": "Motor_current > 8.0 A inrush transition into loaded state",
+            "unloaded": (
+                "1.0 <= Motor_current <= 5.5 A for >= 0.9 of window, COMP == 1, "
+                "DV_eletric == 0 (idle running)"
+            ),
+            "loaded": (
+                "Motor_current > 5.5 A (LOADED_CURRENT_A) for >= 0.9 of window, COMP == 0, "
+                "DV_eletric == 1 (active compression)"
+            ),
+            "starting": (
+                "Contiguous resumption out of stopped or a >600 s gap with active startup cycling, "
+                "or observed Motor_current > 8.0 A inrush (~0.1 Hz often misses sub-10 s inrush)"
+            ),
             "insufficient_evidence": (
-                "Stale channels, out-of-range readings, valve contradiction, or insufficient "
-                "valid samples preventing safe physical regime attribution"
+                "Mixed operating duty transitions (mixed_duty_cycle), hysteresis holds "
+                "(hysteresis_hold), stale channels, valve/motor contradictions, or insufficient "
+                "valid samples preventing single-regime attribution"
             ),
         },
         sensors=_metropt3_sensors(),
@@ -257,26 +270,29 @@ def _build_metropt3_passport() -> AssetPassport:
                 model_id="duty_rule",
                 status="active",
                 scope_note=(
-                    "Primary calibrated air-leak detector combining loaded duty exceedance with "
-                    "unloaded pressure decay and stateful persistence (LOEO 4/4 on F1..F4)."
+                    "Primary calibrated air-leak detector scoring 10-min loaded duty (load_duty) "
+                    "with binomial exceedance calibration and stateful persistence (LOEO 4/4)."
                 ),
                 limitations=[
+                    "Scores load_duty only; unloaded_tp3_slope pressure decay is evaluated "
+                    "downstream by the WP4 RCA engine rather than duty_rule.",
                     "Calibrated specifically on MetroPT-3 2020 telemetry windows; requires "
                     "re-calibration before deployment on any different compressor unit.",
-                    "Distinguishing true internal leaks from extreme unobserved train demand "
-                    "requires unloaded hold slope or human inspection.",
                 ],
             ),
             ModelApplicabilityEntry(
                 model_id="pca_spe",
                 status="active",
                 scope_note=(
-                    "5-sensor standardized PCA SPE (TP2, TP3, Reservoirs, Oil_temperature, "
-                    "Motor_current) routed exclusively to the non-leak warning tier."
+                    "Standardized PCA squared prediction error fitted across all 42 window "
+                    "features (7 analog stats, 8 digital means, 6 derived) routed exclusively to "
+                    "the non-leak warning tier."
                 ),
                 limitations=[
-                    "Excludes intermittent purge sensors H1 and DV_pressure.",
-                    "Measures correlation/residual departure only; does not diagnose leak cause.",
+                    "Measures statistical projection residual across all 42 window features; "
+                    "univariate WP4 sensor-freeze checks still exclude flat/purge channels "
+                    "H1 and DV_pressure.",
+                    "Indicates statistical departure only; does not diagnose leak root cause.",
                 ],
             ),
             ModelApplicabilityEntry(
@@ -314,6 +330,8 @@ def _build_metropt3_passport() -> AssetPassport:
         ],
         unobserved_quantities=[
             "Downstream air-demand flowmeter (mass flow to train brakes, suspension, and doors)",
+            "High-rate (>1 Hz) electrical motor current inrush waveforms (source is ~0.1 Hz)",
+            "Direct PLC start/stop command and operating-mode control tags",
             "Exact depot maintenance repair and parts-replacement timestamps",
             "Compressor oil pressure gauge and oil moisture telemetry",
             "Ambient air temperature and train passenger occupancy logs",
@@ -334,19 +352,19 @@ def read_active_model_version(models_dir: Path, model_name: str) -> str | None:
         return None
     try:
         version = pointer.read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError, ValueError):
         return None
-    if not version or Path(version).name != version:
-        return None
-    target_dir = (root / version).resolve()
-    if not target_dir.is_relative_to(root):
-        return None
-    card_path = target_dir / "model_card.json"
-    if not card_path.is_file():
+    if not version or "\x00" in version or Path(version).name != version:
         return None
     try:
+        target_dir = (root / version).resolve()
+        if not target_dir.is_relative_to(root):
+            return None
+        card_path = (target_dir / "model_card.json").resolve()
+        if not card_path.is_relative_to(root) or not card_path.is_file():
+            return None
         card = json.loads(card_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, ValueError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return None
     if not isinstance(card, dict):
         return None
@@ -383,7 +401,12 @@ def list_asset_passports(
         if passport is None:
             continue
         telemetry_ok = any(
-            (ds := datasets.get(did)) is not None and ds.telemetry_present
+            (ds := datasets.get(did)) is not None
+            and ds.telemetry_present
+            and any(
+                c.check_id == "parquet_schema_and_rows" and c.status == "pass"
+                for c in ds.quality_checks
+            )
             for did in passport.connected_dataset_ids
         )
         summaries.append(

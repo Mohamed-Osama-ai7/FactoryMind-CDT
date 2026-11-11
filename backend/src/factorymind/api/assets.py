@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from factorymind.assets.passport import (
     get_asset_passport,
@@ -64,7 +64,7 @@ def get_asset(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Asset not found")
     passport = get_asset_passport(asset_id)
     if passport is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Asset passport not registered")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Asset not found")
     datasets = inspect_connected_datasets(
         settings.raw_dir,
         settings.processed_dir,
@@ -83,7 +83,7 @@ def get_asset(
 def list_datasets(
     request: Request,
     principal: Annotated[Principal, Depends(require_data_source(Permission.ASSET_READ))],
-    asset_id: Annotated[str | None, Query(max_length=64)] = None,
+    asset_id: str | None = None,
 ) -> DatasetListResponse:
     settings: Settings = request.app.state.settings
     accessible = _accessible_asset_ids(principal, settings)

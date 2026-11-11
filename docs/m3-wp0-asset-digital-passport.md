@@ -7,7 +7,7 @@ M3-WP0 establishes the physical **Asset Digital Passport** registry and **non-de
 ## 1. Domain Contracts (`factorymind.contracts.assets`)
 
 - **`AssetPassport` & `AssetPassportSummary`:** Physical identity (`asset_id`, `asset_type`, `system_context`, `site_or_domain`), nominal sampling cadence (`10.0s`), `operating_regimes` (`stopped`, `unloaded`, `loaded`, `starting`, `insufficient_evidence`), regime physical envelopes, `sensors`, `failure_modes`, `connected_dataset_ids`, `model_applicability`, and explicit `unobserved_quantities` (such as downstream air-demand flowmeter and maintenance timestamps).
-- **`SensorPassport`:** Links every canonical MetroPT-3 channel (`7` analog sensors with `ANALOG_SENSORS` units and `VALID_RANGES`, `8` digital binary signals with `[0.0, 1.0]` ranges) to its physical role, nominal operating envelope, and channel-specific unobservability notes (`H1`, `DV_pressure`).
+- **`SensorPassport`:** Links every canonical MetroPT-3 channel (`7` analog sensors with `ANALOG_SENSORS` units and `VALID_RANGES`, `8` digital binary signals with `[0.0, 1.0]` ranges) to its physical role, nominal operating envelope, and channel-specific unobservability notes (`H1`, `DV_pressure` excluded from univariate WP4 RCA sensor-freeze heuristics while `pca_spe` still uses all `42` window features).
 - **`FailureModeSpec` & `ModelApplicabilityEntry`:** Explicitly pairs failure modes (`air_leakage`, `abnormal_high_demand`, `sensor_malfunction`, `telemetry_inconsistency`) with competing explanations and marks `cross_asset_transfer` as `not_calibrated`.
 - **`SourceDatasetRecord`, `DatasetQualitySummary`, `QualityCheckItem`, `DataLineageStep`:** Track license (`CC BY 4.0`), expected archive SHA-256 (`aab991a9...`), non-destructive raw source preservation, uninterpolated gap policy (`preserve_gaps_uninterpolated`), automated checks, and 4-step preparation lineage.
 
@@ -34,3 +34,4 @@ M3-WP0 establishes the physical **Asset Digital Passport** registry and **non-de
   - All three endpoints enforce `require_data_source(Permission.ASSET_READ)` and add zero mutating routes (`test_safety_boundary.py` unchanged).
 - **Frontend UI (`AssetsOverview.tsx`, `AssetPassportDetail.tsx`, `SourceDatasetCard.tsx`, `/assets/`, `/assets/$assetId`):**
   - Displays asset passports, sensor filterable catalog (`all` / `analog` / `digital`), unobserved-quantity disclosures, model applicability matrix, and non-destructive dataset provenance & lineage cards.
+

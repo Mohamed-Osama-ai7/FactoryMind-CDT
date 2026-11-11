@@ -91,7 +91,7 @@ def _as_count_map(value: Any) -> dict[str, int]:
     return {
         str(k): v
         for k, v in value.items()
-        if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)
+        if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool) and v >= 0
     }
 
 
@@ -99,25 +99,39 @@ def _parse_manifest_quality(manifest: dict[str, Any]) -> DatasetQualitySummary |
     raw = manifest.get("raw_quality")
     if not isinstance(raw, dict):
         return None
+    rows_raw = _as_int(raw.get("rows"), -1)
     rows_cleaned = _as_int(manifest.get("rows_after_cleaning"), -1)
-    if rows_cleaned < 0:
+    duplicate_timestamps = _as_int(raw.get("duplicate_timestamps"), -1)
+    null_values = _as_int(raw.get("null_values"), -1)
+    gaps_over_60s = _as_int(raw.get("gaps_over_60s"), -1)
+    gap_hours = _as_float(raw.get("gap_hours"), 0.0)
+    median_period_s = _as_float(raw.get("median_period_s"))
+    if (
+        rows_raw < 0
+        or rows_cleaned < 0
+        or duplicate_timestamps < 0
+        or null_values < 0
+        or gaps_over_60s < 0
+        or gap_hours is None
+        or gap_hours < 0.0
+    ):
         return None
     start = raw.get("start")
     end = raw.get("end")
     if not isinstance(start, str) or not isinstance(end, str):
         return None
     return DatasetQualitySummary(
-        rows_raw=_as_int(raw.get("rows")),
+        rows_raw=rows_raw,
         rows_cleaned=rows_cleaned,
         start=start,
         end=end,
-        duplicate_timestamps=_as_int(raw.get("duplicate_timestamps")),
-        null_values=_as_int(raw.get("null_values")),
+        duplicate_timestamps=duplicate_timestamps,
+        null_values=null_values,
         out_of_range=_as_count_map(raw.get("out_of_range")),
         non_binary_digital=_as_count_map(raw.get("non_binary_digital")),
-        median_period_s=_as_float(raw.get("median_period_s")),
-        gaps_over_60s=_as_int(raw.get("gaps_over_60s")),
-        gap_hours=_as_float(raw.get("gap_hours"), 0.0) or 0.0,
+        median_period_s=median_period_s,
+        gaps_over_60s=gaps_over_60s,
+        gap_hours=gap_hours,
         gap_policy="preserve_gaps_uninterpolated",
     )
 
@@ -148,23 +162,33 @@ def inspect_metropt3_dataset(
             )
         )
     elif verify_raw_hash:
-        actual = sha256_file(raw_zip)
-        if actual == ARCHIVE_SHA256:
-            checks.append(
-                QualityCheckItem(
-                    check_id="raw_source_preserved",
-                    status="pass",
-                    summary=f"Raw zip SHA-256 verified against {ARCHIVE_SHA256[:12]}...",
-                )
-            )
-        else:
+        try:
+            actual = sha256_file(raw_zip)
+        except OSError:
             checks.append(
                 QualityCheckItem(
                     check_id="raw_source_preserved",
                     status="warn",
-                    summary=f"Raw zip SHA-256 mismatch (got {actual[:12]}...).",
+                    summary=f"Raw zip could not be read for hashing at {raw_zip}.",
                 )
             )
+        else:
+            if actual == ARCHIVE_SHA256:
+                checks.append(
+                    QualityCheckItem(
+                        check_id="raw_source_preserved",
+                        status="pass",
+                        summary=f"Raw zip SHA-256 verified against {ARCHIVE_SHA256[:12]}...",
+                    )
+                )
+            else:
+                checks.append(
+                    QualityCheckItem(
+                        check_id="raw_source_preserved",
+                        status="warn",
+                        summary=f"Raw zip SHA-256 mismatch (got {actual[:12]}...).",
+                    )
+                )
     else:
         checks.append(
             QualityCheckItem(
@@ -251,11 +275,12 @@ def inspect_metropt3_dataset(
                     )
                 )
             else:
-                detail = (
-                    f"missing columns {missing_cols}"
-                    if missing_cols
-                    else f"row count {meta.num_rows} differs from manifest"
-                )
+                if missing_cols:
+                    detail = f"missing columns {missing_cols}"
+                elif meta.num_rows == 0:
+                    detail = "Parquet file contains 0 rows"
+                else:
+                    detail = f"row count {meta.num_rows} differs from manifest"
                 checks.append(
                     QualityCheckItem(
                         check_id="parquet_schema_and_rows",
