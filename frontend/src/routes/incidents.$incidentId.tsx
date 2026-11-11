@@ -5,6 +5,7 @@ import {
   useGetIncidentEvidencePackage,
   useGetIncidentRca,
 } from '../api/generated/incidents/incidents'
+import { DecisionComparisonPanel } from '../features/incidents/DecisionComparisonPanel'
 import { DecisionPanel } from '../features/incidents/DecisionPanel'
 import { EventEvidencePackageView } from '../features/incidents/EventEvidencePackageView'
 import { ObservationForm } from '../features/incidents/ObservationForm'
@@ -120,6 +121,13 @@ function IncidentInvestigationPage() {
 
       {incident && (
         <>
+          <DecisionComparisonPanel
+            key={`${incident.id}-comparison`}
+            incidentId={incident.id}
+            dominantHypothesis={rca?.primary_category}
+            rcaPending={rcaQuery.isPending}
+            rcaUnavailable={rcaQuery.isError}
+          />
           <DecisionPanel key={`${incident.id}-decisions`} incident={incident} />
           <OutcomeVerificationPanel key={`${incident.id}-outcomes`} incident={incident} />
         </>

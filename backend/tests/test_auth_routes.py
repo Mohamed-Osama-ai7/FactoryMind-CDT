@@ -116,6 +116,7 @@ MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
     ("GET", "/api/v1/knowledge/eval", None, VIEW_ROLES),
     ("GET", "/api/v1/twin/model", None, VIEW_ROLES),
     ("POST", "/api/v1/twin/simulate", {}, VIEW_ROLES),
+    ("POST", "/api/v1/optimization/compare", {}, VIEW_ROLES),
     ("GET", "/api/v1/ml/catalog", None, VIEW_ROLES),
     ("GET", "/api/v1/ml/benchmarks/ai4i2020", None, VIEW_ROLES),
     ("POST", "/api/v1/ml/predict", {}, VIEW_ROLES),
@@ -142,6 +143,7 @@ MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
     ("GET", f"/api/v1/incidents/{ZERO_ID}", None, INCIDENT_READERS),
     ("GET", f"/api/v1/incidents/{ZERO_ID}/evidence-package", None, INCIDENT_READERS),
     ("GET", f"/api/v1/incidents/{ZERO_ID}/rca", None, INCIDENT_READERS),
+    ("GET", f"/api/v1/incidents/{ZERO_ID}/decision-comparison", None, INCIDENT_READERS),
     ("POST", "/api/v1/incidents", RANGE, {"engineer", "admin"}),
     (
         "POST",

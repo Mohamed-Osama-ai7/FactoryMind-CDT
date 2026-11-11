@@ -7,9 +7,12 @@ access token and an explicit permission (deny by default); ``tests/test_auth_rou
 """
 
 import logging
-from typing import Literal
+import math
+from typing import Any, Literal
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
@@ -20,6 +23,7 @@ from factorymind.api.assets import router as assets_router
 from factorymind.api.incidents import router as incidents_router
 from factorymind.api.knowledge import router as knowledge_router
 from factorymind.api.ml_models import router as ml_router
+from factorymind.api.optimization import router as optimization_router
 from factorymind.api.security import SecurityMiddleware, SlidingWindowLimiter
 from factorymind.api.twin import router as twin_router
 from factorymind.auth.tokens import TokenVerifier
@@ -54,6 +58,19 @@ def _build_verifier(settings: Settings) -> TokenVerifier | None:
         return None
 
 
+def _sanitize_json(value: Any) -> Any:
+    """Replace non-finite floats so validation errors serialize to 422 cleanly instead of 500."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, dict):
+        return {k: _sanitize_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_json(v) for v in value]
+    if isinstance(value, tuple):
+        return [_sanitize_json(v) for v in value]
+    return value
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     production = settings.environment == "production"
@@ -72,6 +89,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = Database(settings.sqlalchemy_url)
     app.state.limiter = SlidingWindowLimiter()
     app.add_middleware(SecurityMiddleware, max_body_bytes=settings.max_body_bytes)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        safe_errors = _sanitize_json(
+            jsonable_encoder(exc.errors(), custom_encoder={Exception: str})
+        )
+        return JSONResponse(status_code=422, content={"detail": safe_errors})
 
     @app.exception_handler(AuditUnavailableError)
     async def audit_unavailable(_: Request, exc: AuditUnavailableError) -> JSONResponse:
@@ -99,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(incidents_router)
     app.include_router(knowledge_router)
     app.include_router(ml_router)
+    app.include_router(optimization_router)
     app.include_router(twin_router)
     return app
 
