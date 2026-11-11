@@ -123,6 +123,7 @@ class TwinCalibratedParams:
     train_mean_load_duty: float
     fit_source: str = "live_pre_eval_fit"
     train_cal_samples: int = 0
+    overshoot_from_samples: bool = True
 
     def to_contracts(self) -> list[TwinParameterEstimate]:
         return [
@@ -168,6 +169,11 @@ class TwinCalibratedParams:
                 fit_source=self.fit_source,
                 uncertainty_note=(
                     "99th-percentile pre-eval loaded pressure overshoot above cut_out."
+                    if self.overshoot_from_samples
+                    else (
+                        "Nominal hysteresis band margin 0.1 * (cut_out - cut_in) "
+                        "(<5 overshoot samples)."
+                    )
                 ),
             ),
             TwinParameterEstimate(
@@ -219,6 +225,80 @@ def _compute_skill(model_err: float, baseline_err: float) -> float:
     if baseline_err > 1e-9:
         return 1.0 - (model_err / baseline_err)
     return 0.0 if model_err <= 1e-9 else -1.0
+
+
+def _integrate_twin_steps(
+    params: TwinCalibratedParams,
+    req: TwinSimulationRequest,
+    *,
+    dt_s: float,
+) -> list[tuple[float, float, float, float, bool, float, bool]]:
+    dt_min = dt_s / 60.0
+    n_steps = round(req.horizon_minutes / dt_min) + 1
+    win_steps = max(1, round(10.0 / dt_min))  # 10-min rolling duty window
+    p = float(req.initial_tp3_bar)
+    t_oil = float(req.initial_oil_temp_c)
+    loaded = p <= params.cut_in_bar
+    repair_min = req.repair_at_minute if req.repair_at_minute is not None else 30.0
+    load_hist: list[float] = []
+    rows: list[tuple[float, float, float, float, bool, float, bool]] = []
+
+    for step_idx in range(n_steps):
+        minute = step_idx * dt_min
+        if req.scenario == "baseline":
+            leak = 0.0
+            demand_mult = 1.0
+        elif req.scenario == "leak":
+            leak = req.leak_rate_bar_per_min
+            demand_mult = req.demand_factor
+        elif req.scenario == "continued_operation":
+            # Progressive leak degradation (~+25% escalation per hour if left unrepaired)
+            leak = req.leak_rate_bar_per_min * (1.0 + 0.25 * (minute / 60.0))
+            demand_mult = req.demand_factor
+        else:  # maintenance_repair
+            repaired = minute >= repair_min
+            leak = 0.0 if repaired else req.leak_rate_bar_per_min
+            demand_mult = 1.0 if repaired else req.demand_factor
+
+        # Governor hysteresis transitions
+        if loaded and p >= params.cut_out_bar:
+            loaded = False
+        elif not loaded and p <= params.cut_in_bar:
+            loaded = True
+
+        load_hist.append(1.0 if loaded else 0.0)
+        recent = load_hist[-win_steps:]
+        rolling_duty = sum(recent) / len(recent)
+        res_p, _ = _clamp(p - params.coupling_bias_bar, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
+        eff = _charge_efficiency(p, params.cut_out_bar, params.charge_overshoot_bar)
+        dp = (
+            params.k_charge_bar_per_min * (1.0 if loaded else 0.0) * eff
+            - params.k_drain_bar_per_min * demand_mult
+            - leak
+        )
+        dt_oil = params.alpha_heat_c_per_min * (
+            1.0 if loaded else 0.0
+        ) - params.alpha_cool_per_min * (t_oil - params.t_ambient_ref_c)
+        p_raw_next = p + dp * dt_min
+        p_next, p_viol = _clamp(p_raw_next, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
+        t_oil_next, _ = _clamp(t_oil + dt_oil * dt_min, -20.0, 150.0)
+        rows.append((minute, p, res_p, t_oil, loaded, rolling_duty, p_viol))
+        p = p_next
+        t_oil = t_oil_next
+    return rows
+
+
+def _step_halving_stability_diff(params: TwinCalibratedParams) -> float:
+    req = TwinSimulationRequest(scenario="leak", horizon_minutes=60.0)
+    coarse = _integrate_twin_steps(params, req, dt_s=SIM_DT_S)
+    fine = _integrate_twin_steps(params, req, dt_s=SIM_DT_S / 2.0)
+    stride_c = 6
+    stride_f = 12
+    diffs = [
+        abs(coarse[idx * stride_c][1] - fine[idx * stride_f][1])
+        for idx in range(min(len(coarse) // stride_c, len(fine) // stride_f))
+    ]
+    return max(diffs) if diffs else 0.0
 
 
 def _contiguous_supported_limit(
@@ -594,7 +674,8 @@ def _fit_pre_eval_params(
         )
 
     over = tp3[contiguous & loaded & (tp3 > cut_out)] - cut_out
-    if len(over) >= 5:
+    overshoot_from_samples = len(over) >= 5
+    if overshoot_from_samples:
         overshoot = max(0.05, float(np.quantile(over, 0.99)))
     else:
         overshoot = max(0.05, 0.1 * (cut_out - cut_in))
@@ -641,6 +722,7 @@ def _fit_pre_eval_params(
         train_mean_load_duty=float(np.mean(loaded)),
         fit_source=fit_source,
         train_cal_samples=int(np.sum(active)),
+        overshoot_from_samples=overshoot_from_samples,
     )
 
 
@@ -803,42 +885,20 @@ class CompressorReservoirTwin:
         else:
             leak_ratio = float(np.mean(f_maes)) / max(ev60.teacher_forced_tp3_mae_bar, 1e-6)
 
-        dummy_twin = cls(
-            params=params,
-            validation=TwinValidationSummary(
-                split_policy="pending",
-                train_cal_samples=params.train_cal_samples,
-                heldout_normal_segments=len(blocks_60),
-                mae_10min_bar=0.0,
-                mae_60min_bar=0.0,
-                rmse_60min_bar=0.0,
-                closed_loop_mae_10min_bar=0.0,
-                closed_loop_mae_60min_bar=0.0,
-                closed_loop_rmse_60min_bar=0.0,
-                max_supported_closed_loop_horizon_minutes=0.0,
-                max_supported_teacher_forced_horizon_minutes=0.0,
-                max_supported_duty_horizon_minutes=0.0,
-                unsupported_horizons=[],
-                horizon_evaluations=[],
-                sensitivity_checks=[],
-                calibration_notes=[],
-                constraint_violations=0,
-                step_halving_max_diff_bar=0.0,
-                leak_vs_normal_residual_ratio=0.0,
-            ),
-        )
-        step_diff = dummy_twin._step_halving_stability_diff()
+        step_diff = _step_halving_stability_diff(params)
         notes = list(calibration_notes or [])
-        if unsupported:
-            notes.append(
-                f"Unsupported horizons failing Persistence/Train-Mean baselines: "
-                f"{', '.join(unsupported)}."
-            )
-        if len(blocks_10) != len(blocks_60):
-            notes.append(
-                f"Contiguous segments vary by horizon ({len(blocks_10)} at 10m vs "
-                f"{len(blocks_60)} at 60m)."
-            )
+        for extra_note in (
+            f"Unsupported horizons failing Persistence/Train-Mean baselines: "
+            f"{', '.join(unsupported)}."
+            if unsupported
+            else None,
+            f"Contiguous segments vary by horizon ({len(blocks_10)} at 10m vs "
+            f"{len(blocks_60)} at 60m)."
+            if len(blocks_10) != len(blocks_60)
+            else None,
+        ):
+            if extra_note is not None and extra_note not in notes:
+                notes.append(extra_note)
 
         return TwinValidationSummary(
             split_policy=(
@@ -885,71 +945,10 @@ class CompressorReservoirTwin:
         *,
         dt_s: float,
     ) -> list[tuple[float, float, float, float, bool, float, bool]]:
-        dt_min = dt_s / 60.0
-        n_steps = round(req.horizon_minutes / dt_min) + 1
-        win_steps = max(1, round(10.0 / dt_min))  # 10-min rolling duty window
-        p = float(req.initial_tp3_bar)
-        t_oil = float(req.initial_oil_temp_c)
-        loaded = p <= self.params.cut_in_bar
-        repair_min = req.repair_at_minute if req.repair_at_minute is not None else 30.0
-        load_hist: list[float] = []
-        rows: list[tuple[float, float, float, float, bool, float, bool]] = []
-
-        for step_idx in range(n_steps):
-            minute = step_idx * dt_min
-            if req.scenario == "baseline":
-                leak = 0.0
-                demand_mult = 1.0
-            elif req.scenario == "leak":
-                leak = req.leak_rate_bar_per_min
-                demand_mult = req.demand_factor
-            elif req.scenario == "continued_operation":
-                # Progressive leak degradation (~+25% escalation per hour if left unrepaired)
-                leak = req.leak_rate_bar_per_min * (1.0 + 0.25 * (minute / 60.0))
-                demand_mult = req.demand_factor
-            else:  # maintenance_repair
-                repaired = minute >= repair_min
-                leak = 0.0 if repaired else req.leak_rate_bar_per_min
-                demand_mult = 1.0 if repaired else req.demand_factor
-
-            # Governor hysteresis transitions
-            if loaded and p >= self.params.cut_out_bar:
-                loaded = False
-            elif not loaded and p <= self.params.cut_in_bar:
-                loaded = True
-
-            load_hist.append(1.0 if loaded else 0.0)
-            recent = load_hist[-win_steps:]
-            rolling_duty = sum(recent) / len(recent)
-            res_p, _ = _clamp(p - self.params.coupling_bias_bar, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
-            eff = _charge_efficiency(p, self.params.cut_out_bar, self.params.charge_overshoot_bar)
-            dp = (
-                self.params.k_charge_bar_per_min * (1.0 if loaded else 0.0) * eff
-                - self.params.k_drain_bar_per_min * demand_mult
-                - leak
-            )
-            dt_oil = self.params.alpha_heat_c_per_min * (
-                1.0 if loaded else 0.0
-            ) - self.params.alpha_cool_per_min * (t_oil - self.params.t_ambient_ref_c)
-            p_raw_next = p + dp * dt_min
-            p_next, p_viol = _clamp(p_raw_next, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
-            t_oil_next, _ = _clamp(t_oil + dt_oil * dt_min, -20.0, 150.0)
-            rows.append((minute, p, res_p, t_oil, loaded, rolling_duty, p_viol))
-            p = p_next
-            t_oil = t_oil_next
-        return rows
+        return _integrate_twin_steps(self.params, req, dt_s=dt_s)
 
     def _step_halving_stability_diff(self) -> float:
-        req = TwinSimulationRequest(scenario="leak", horizon_minutes=60.0)
-        coarse = self._integrate_steps(req, dt_s=SIM_DT_S)
-        fine = self._integrate_steps(req, dt_s=SIM_DT_S / 2.0)
-        stride_c = 6
-        stride_f = 12
-        diffs = [
-            abs(coarse[idx * stride_c][1] - fine[idx * stride_f][1])
-            for idx in range(min(len(coarse) // stride_c, len(fine) // stride_f))
-        ]
-        return max(diffs) if diffs else 0.0
+        return _step_halving_stability_diff(self.params)
 
     def model_overview(self, asset_id: str = "metropt3-apu-1") -> TwinModelResponse:
         return TwinModelResponse(

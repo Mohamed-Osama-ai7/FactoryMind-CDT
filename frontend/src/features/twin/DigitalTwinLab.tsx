@@ -469,7 +469,7 @@ export function DigitalTwinLab() {
                         'Persist MAE',
                         'Mean MAE',
                         'CL Skill (Mean)',
-                        'Duty MAE (Obs/Mean)',
+                        'Duty MAE (CL/Mean)',
                         'Cycles (Obs->Sim)',
                         'Status',
                       ].map((h) => (

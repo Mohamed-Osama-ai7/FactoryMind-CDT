@@ -295,6 +295,9 @@ def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(
     assert "not proven causal inference" in rca_cit["detail"].lower()
     opt_cit = next(c for c in q_body["citations"] if c["source_type"] == "maintenance_optimizer")
     assert "dominant_hypothesis=air_leakage" in opt_cit["detail"]
+    twin_cit = next(c for c in q_body["citations"] if c["source_type"] == "digital_twin")
+    assert "[UNSUPPORTED FORECAST HORIZON" in twin_cit["detail"]
+    assert "validated only up to" in opt_cit["detail"]
     for c in q_body["citations"]:
         assert f"[{c['citation_id']}]" in q_body["answer"]
 

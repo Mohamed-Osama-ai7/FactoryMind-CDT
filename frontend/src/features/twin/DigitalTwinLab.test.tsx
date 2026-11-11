@@ -70,6 +70,38 @@ describe('DigitalTwinLab', () => {
     expect(screen.getByText(/Could not load digital twin specification/)).toBeInTheDocument()
   })
 
+  it('surfaces explicit HTTP 503 unavailability when calibration telemetry is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (String(url).startsWith('/api/v1/me')) return Promise.resolve(mockMeOk())
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              detail:
+                'Digital twin calibration telemetry not found. Cannot initialize calibrated model without pre-evaluation telemetry.',
+            }),
+            {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+        )
+      }),
+    )
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <DigitalTwinLab />
+      </QueryClientProvider>,
+    )
+
+    const alerts = await screen.findAllByText(/calibration telemetry not found/i)
+    expect(alerts).toHaveLength(2)
+    expect(screen.getByText(/Could not load digital twin specification/)).toBeInTheDocument()
+  })
+
   it('validates numeric bounds cleanly and simulates non-step-aligned continuous scenarios', async () => {
     const seenBodies: string[] = []
     vi.stubGlobal(

@@ -12,6 +12,7 @@ from typing import Annotated
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pyarrow.lib import ArrowException  # type: ignore[import-untyped]
 
 from factorymind.auth.deps import require_data_source
 from factorymind.auth.principal import Permission, Principal
@@ -50,7 +51,14 @@ def get_digital_twin(request: Request) -> CompressorReservoirTwin:
                 try:
                     frame = pd.read_parquet(parquet)
                     twin = CompressorReservoirTwin.fit_from_telemetry(frame)
-                except (TwinCalibrationError, OSError, ValueError, RuntimeError) as exc:
+                except (
+                    TwinCalibrationError,
+                    OSError,
+                    ValueError,
+                    RuntimeError,
+                    EOFError,
+                    ArrowException,
+                ) as exc:
                     log.warning("Digital twin calibration failed: %s", exc, exc_info=True)
                     raise HTTPException(
                         status.HTTP_503_SERVICE_UNAVAILABLE,

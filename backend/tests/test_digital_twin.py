@@ -238,6 +238,8 @@ def test_four_counterfactual_scenarios_and_physical_invariants() -> None:
     df_nan.iloc[5:10, 0:3] = float("nan")
     nan_fit = CompressorReservoirTwin.fit_from_telemetry(df_nan)
     assert all(np.isfinite(p.value) for p in nan_fit.params.to_contracts())
+    reval = nan_fit.validate_held_out(df_nan)
+    assert reval.calibration_notes == nan_fit.validation.calibration_notes
 
 
 def test_twin_api_fail_closed_auth_isolation_and_validation(kit: AuthKit) -> None:
@@ -263,6 +265,15 @@ def test_twin_api_fail_closed_auth_isolation_and_validation(kit: AuthKit) -> Non
     bad_model = bad_client.get("/api/v1/twin/model", headers=viewer)
     assert bad_model.status_code == 503
     assert "calibration failed" in bad_model.json()["detail"].lower()
+
+    # 2b. Truncated/corrupted parquet file MUST ALSO return 503 instead of HTTP 500
+    corrupt_dir = kit.root / "corrupt_data" / "processed" / metropt3.DATASET_ID
+    corrupt_dir.mkdir(parents=True)
+    (corrupt_dir / "telemetry.parquet").write_bytes(b"not-a-valid-parquet-stream")
+    corrupt_client = make_client(kit, data_dir=kit.root / "corrupt_data")
+    corrupt_model = corrupt_client.get("/api/v1/twin/model", headers=viewer)
+    assert corrupt_model.status_code == 503
+    assert "calibration failed" in corrupt_model.json()["detail"].lower()
 
     # 3. Valid calibrated telemetry.parquet succeeds with live fit_source & horizon validation
     good_dir = kit.root / "data" / "processed" / metropt3.DATASET_ID
