@@ -49,6 +49,11 @@ function Shell() {
               Copilot
             </Link>
           )}
+          {permissions.has('asset:read') && (
+            <Link to="/edge" className={LINK} activeProps={ACTIVE}>
+              OT &amp; Edge Health
+            </Link>
+          )}
           {permissions.has('anomaly:read') && (
             <Link to="/anomaly" className={LINK} activeProps={ACTIVE}>
               Anomaly monitor
