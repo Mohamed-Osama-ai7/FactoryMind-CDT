@@ -2,12 +2,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useId, useState } from 'react'
 import { describeApiError } from '../../api/errors'
 import {
+  getAuditEventsQueryKey,
   getGetIncidentQueryKey,
   getListIncidentsQueryKey,
   useCreateDecision,
   useMe,
 } from '../../api/generated/incidents/incidents'
 import type { DecisionCreateDecision, IncidentDetail } from '../../api/generated/model'
+import { ApiError } from '../../api/http'
 import { formatNaive } from '../../lib/naiveTime'
 
 export interface DecisionPanelProps {
@@ -39,13 +41,22 @@ export function DecisionPanel({ incident }: DecisionPanelProps) {
   const queryClient = useQueryClient()
   const [decision, setDecision] = useState<DecisionCreateDecision>('confirm')
   const [rationale, setRationale] = useState('')
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   const mutation = useCreateDecision({
     mutation: {
       onSuccess: () => {
         setRationale('')
+        setValidationError(null)
         void queryClient.invalidateQueries({ queryKey: getGetIncidentQueryKey(incident.id) })
         void queryClient.invalidateQueries({ queryKey: getListIncidentsQueryKey() })
+        void queryClient.invalidateQueries({ queryKey: getAuditEventsQueryKey() })
+      },
+      onError: (error) => {
+        if (error instanceof ApiError && error.status === 409) {
+          void queryClient.invalidateQueries({ queryKey: getGetIncidentQueryKey(incident.id) })
+          void queryClient.invalidateQueries({ queryKey: getListIncidentsQueryKey() })
+        }
       },
     },
   })
@@ -57,8 +68,13 @@ export function DecisionPanel({ incident }: DecisionPanelProps) {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
+    if (!canSubmit) return
     const trimmed = rationale.trim()
-    if (!trimmed || !canSubmit) return
+    if (!trimmed) {
+      setValidationError('Please enter a non-empty engineering rationale.')
+      return
+    }
+    setValidationError(null)
     mutation.mutate({
       incidentId: incident.id,
       data: {
@@ -125,7 +141,10 @@ export function DecisionPanel({ incident }: DecisionPanelProps) {
                   name={`${idPrefix}-decision`}
                   value={opt.value}
                   checked={decision === opt.value}
-                  onChange={() => setDecision(opt.value)}
+                  onChange={() => {
+                    setDecision(opt.value)
+                    if (mutation.isSuccess || mutation.isError) mutation.reset()
+                  }}
                   className="mt-0.5"
                 />
                 <span>
@@ -143,7 +162,11 @@ export function DecisionPanel({ incident }: DecisionPanelProps) {
               rows={3}
               maxLength={2000}
               value={rationale}
-              onChange={(e) => setRationale(e.target.value)}
+              onChange={(e) => {
+                setRationale(e.target.value)
+                if (validationError) setValidationError(null)
+                if (mutation.isSuccess || mutation.isError) mutation.reset()
+              }}
               placeholder="Document supporting physical evidence, sensor checks, or defer reason..."
               className="rounded border border-border bg-surface p-2 text-ink"
             />
@@ -156,6 +179,11 @@ export function DecisionPanel({ incident }: DecisionPanelProps) {
             >
               {mutation.isPending ? 'Recording…' : 'Submit review decision'}
             </button>
+            {validationError && (
+              <span role="alert" className="text-critical">
+                {validationError}
+              </span>
+            )}
             {mutation.isSuccess && (
               <span role="status" className="text-ok">
                 Decision recorded and audited.

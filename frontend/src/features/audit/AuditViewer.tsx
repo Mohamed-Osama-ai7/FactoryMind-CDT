@@ -2,6 +2,8 @@ import { useId, useState } from 'react'
 import { describeApiError } from '../../api/errors'
 import { useAuditEvents, useAuditVerify, useMe } from '../../api/generated/incidents/incidents'
 
+const MAX_OFFSET = 10_000
+
 const ACTIONS = [
   'all',
   'incident.create',
@@ -9,7 +11,6 @@ const ACTIONS = [
   'observation.create',
   'outcome.create',
   'authz.denied',
-  'authn.failure',
 ] as const
 
 /** Tenant-scoped tamper-evident audit trail viewer and SHA-256 chain verifier. */
@@ -32,6 +33,18 @@ export function AuditViewer() {
   const verifyQuery = useAuditVerify({ query: { enabled: false } })
 
   if (me.isPending) return <p role="status">Checking audit permissions…</p>
+  if (me.isError) {
+    return (
+      <section aria-labelledby={`${idPrefix}-title`} className="max-w-4xl">
+        <h1 id={`${idPrefix}-title`} className="text-2xl font-semibold">
+          Audit trail
+        </h1>
+        <p role="alert" className="mt-2 rounded border border-critical p-3 text-sm text-critical">
+          Could not verify audit permissions: {describeApiError(me.error)}
+        </p>
+      </section>
+    )
+  }
   if (!canRead) {
     return (
       <section aria-labelledby={`${idPrefix}-title`} className="max-w-4xl">
@@ -129,6 +142,7 @@ export function AuditViewer() {
       {events.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-border bg-panel p-3">
           <table className="w-full text-xs">
+            <caption className="sr-only">Per-tenant SHA-256 hash-chained audit events</caption>
             <thead>
               <tr className="text-left text-muted">
                 <th scope="col" className="pr-3 font-normal">
@@ -191,7 +205,7 @@ export function AuditViewer() {
         <span className="text-muted">Offset: {offset}</span>
         <button
           type="button"
-          disabled={events.length < limit}
+          disabled={events.length < limit || offset + limit > MAX_OFFSET}
           onClick={() => setOffset((o) => o + limit)}
           className="rounded border border-border px-2.5 py-1 disabled:opacity-40"
         >

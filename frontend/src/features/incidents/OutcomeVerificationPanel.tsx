@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useId, useState } from 'react'
 import { describeApiError } from '../../api/errors'
 import {
+  getAuditEventsQueryKey,
   getGetIncidentQueryKey,
   useCreateOutcomeVerification,
   useMe,
@@ -21,6 +22,8 @@ const OUTCOMES: { value: OutcomeVerificationOutOutcome; label: string }[] = [
   { value: 'inconclusive', label: 'Inconclusive field check' },
 ]
 
+const OUTCOME_LABELS = new Map(OUTCOMES.map((o) => [o.value, o.label]))
+
 /** Append-only post-review maintenance and physical outcome verification workspace. */
 export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelProps) {
   const idPrefix = useId()
@@ -30,13 +33,16 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
   const [action, setAction] = useState('')
   const [verifiedAt, setVerifiedAt] = useState(incident.episode_end.slice(0, 16))
   const [notes, setNotes] = useState('')
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   const mutation = useCreateOutcomeVerification({
     mutation: {
       onSuccess: () => {
         setAction('')
         setNotes('')
+        setValidationError(null)
         void queryClient.invalidateQueries({ queryKey: getGetIncidentQueryKey(incident.id) })
+        void queryClient.invalidateQueries({ queryKey: getAuditEventsQueryKey() })
       },
     },
   })
@@ -48,7 +54,11 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
     event.preventDefault()
     const cleanAction = action.trim()
     const cleanNotes = notes.trim()
-    if (!cleanAction || !cleanNotes) return
+    if (!cleanAction || !cleanNotes) {
+      setValidationError('Please enter both a maintenance summary and verification notes.')
+      return
+    }
+    setValidationError(null)
     mutation.mutate({
       incidentId: incident.id,
       data: {
@@ -81,10 +91,13 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
             <li key={o.id} className="rounded border border-border p-2.5">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="font-medium text-ink">
-                  {o.outcome} · {o.actor_id}
+                  {OUTCOME_LABELS.get(o.outcome) ?? o.outcome} · {o.actor_id}
                 </span>
                 <span className="text-muted">
-                  {formatNaive(o.verified_at ?? o.created_at)} · Human observation
+                  {o.verified_at
+                    ? `${formatNaive(o.verified_at)} (train local)`
+                    : `${formatNaive(o.created_at)} (recorded UTC)`}{' '}
+                  · Human observation
                 </span>
               </div>
               <p className="mt-1 font-medium text-ink">{o.maintenance_action}</p>
@@ -106,7 +119,10 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
               <select
                 id={`${idPrefix}-outcome`}
                 value={outcome}
-                onChange={(e) => setOutcome(e.target.value as OutcomeVerificationOutOutcome)}
+                onChange={(e) => {
+                  setOutcome(e.target.value as OutcomeVerificationOutOutcome)
+                  if (mutation.isSuccess || mutation.isError) mutation.reset()
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 text-ink"
               >
                 {OUTCOMES.map((o) => (
@@ -122,7 +138,10 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
                 id={`${idPrefix}-ts`}
                 type="datetime-local"
                 value={verifiedAt}
-                onChange={(e) => setVerifiedAt(e.target.value)}
+                onChange={(e) => {
+                  setVerifiedAt(e.target.value)
+                  if (mutation.isSuccess || mutation.isError) mutation.reset()
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 text-ink"
               />
             </label>
@@ -135,7 +154,11 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
               required
               maxLength={256}
               value={action}
-              onChange={(e) => setAction(e.target.value)}
+              onChange={(e) => {
+                setAction(e.target.value)
+                if (validationError) setValidationError(null)
+                if (mutation.isSuccess || mutation.isError) mutation.reset()
+              }}
               placeholder="e.g., Inspected purge hose fitting and verified stationary pressure hold"
               className="rounded border border-border bg-surface px-2 py-1 text-ink"
             />
@@ -148,7 +171,11 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
               rows={2}
               maxLength={2000}
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => {
+                setNotes(e.target.value)
+                if (validationError) setValidationError(null)
+                if (mutation.isSuccess || mutation.isError) mutation.reset()
+              }}
               placeholder="Record physical evidence found, parts replaced, or why alert differed..."
               className="rounded border border-border bg-surface p-2 text-ink"
             />
@@ -161,6 +188,11 @@ export function OutcomeVerificationPanel({ incident }: OutcomeVerificationPanelP
             >
               {mutation.isPending ? 'Saving…' : 'Record outcome'}
             </button>
+            {validationError && (
+              <span role="alert" className="text-critical">
+                {validationError}
+              </span>
+            )}
             {mutation.isSuccess && (
               <span role="status" className="text-ok">
                 Outcome recorded and audited.

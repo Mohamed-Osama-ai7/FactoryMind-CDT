@@ -130,6 +130,23 @@ def test_decision_outcome_verification_sod_triggers_and_audit(
         == 404
     )
 
+    # Same-tenant caller without asset authorization receives 404 on outcomes
+    for denied_assets in (["pump-7"], []):
+        assert (
+            client.post(
+                f"/api/v1/incidents/{inc_id}/outcomes",
+                json={
+                    "outcome": "false_positive",
+                    "maintenance_action": "Ungrounded asset probe",
+                    "notes": "Should return 404.",
+                },
+                headers=kit.headers(
+                    roles=["engineer"], sub="eng-other-asset", assets=denied_assets
+                ),
+            ).status_code
+            == 404
+        )
+
     # IncidentDetail now carries both recorded decisions and append-only outcomes
     detail = client.get(
         f"/api/v1/incidents/{inc_id}",
