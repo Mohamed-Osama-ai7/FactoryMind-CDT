@@ -14,6 +14,16 @@ from factorymind.contracts.assets import (
     SensorPassport,
     SourceDatasetRecord,
 )
+from factorymind.contracts.copilot import (
+    CopilotCitation,
+    CopilotQueryRequest,
+    CopilotQueryResponse,
+    CopilotToolInvocation,
+    CopilotToolName,
+    CopilotToolSpec,
+    CopilotToolsResponse,
+    CopilotToolStatus,
+)
 from factorymind.contracts.digital_twin import (
     TwinModelResponse,
     TwinParameterEstimate,
@@ -97,6 +107,14 @@ __all__ = [
     "AssetPassport",
     "AssetPassportSummary",
     "ContradictionRecord",
+    "CopilotCitation",
+    "CopilotQueryRequest",
+    "CopilotQueryResponse",
+    "CopilotToolInvocation",
+    "CopilotToolName",
+    "CopilotToolSpec",
+    "CopilotToolStatus",
+    "CopilotToolsResponse",
     "DataLineageStep",
     "DatasetListResponse",
     "DatasetQualitySummary",
