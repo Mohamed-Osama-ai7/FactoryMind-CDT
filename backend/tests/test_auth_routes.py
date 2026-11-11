@@ -33,7 +33,7 @@ def audit_rows(client: TestClient, tenant: str) -> list[AuditEvent]:
 def test_every_route_except_health_requires_authentication(
     kit: AuthKit, anomaly_service: AnomalyService
 ) -> None:
-    client = make_client(kit, anomaly_service)
+    client = make_client(kit, anomaly_service, rate_limit_auth_failures_per_min=100)
     checked = 0
     for method, path in all_operations(client.app):  # type: ignore[arg-type]
         if path == HEALTH:
@@ -111,6 +111,9 @@ MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
     ("GET", "/api/v1/assets", None, VIEW_ROLES),
     ("GET", f"/api/v1/assets/{ASSET}", None, VIEW_ROLES),
     ("GET", "/api/v1/datasets", None, VIEW_ROLES),
+    ("GET", "/api/v1/ml/catalog", None, VIEW_ROLES),
+    ("GET", "/api/v1/ml/benchmarks/ai4i2020", None, VIEW_ROLES),
+    ("POST", "/api/v1/ml/predict", {}, VIEW_ROLES),
     (
         "GET",
         "/api/v1/anomaly/replay?start=2020-01-09T00:00:00&end=2020-01-09T01:00:00",

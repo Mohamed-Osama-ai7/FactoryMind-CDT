@@ -1,6 +1,77 @@
 {
   "components": {
     "schemas": {
+      "Ai4iPredictRequest": {
+        "additionalProperties": false,
+        "description": "Input vector for specialized AI4I 2020 milling failure & OOD uncertainty assessment.",
+        "properties": {
+          "air_temperature_k": {
+            "title": "Air Temperature K",
+            "type": "number"
+          },
+          "asset_id": {
+            "default": "ai4i-milling-bench",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "process_temperature_k": {
+            "title": "Process Temperature K",
+            "type": "number"
+          },
+          "product_type": {
+            "maxLength": 8,
+            "minLength": 1,
+            "title": "Product Type",
+            "type": "string"
+          },
+          "quality_status": {
+            "default": "healthy",
+            "enum": [
+              "healthy",
+              "degraded",
+              "insufficient"
+            ],
+            "title": "Quality Status",
+            "type": "string"
+          },
+          "rotational_speed_rpm": {
+            "title": "Rotational Speed Rpm",
+            "type": "number"
+          },
+          "tool_wear_min": {
+            "title": "Tool Wear Min",
+            "type": "number"
+          },
+          "torque_nm": {
+            "title": "Torque Nm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "product_type",
+          "air_temperature_k",
+          "process_temperature_k",
+          "rotational_speed_rpm",
+          "torque_nm",
+          "tool_wear_min"
+        ],
+        "title": "Ai4iPredictRequest",
+        "type": "object"
+      },
       "AlarmEpisode": {
         "properties": {
           "dominant_regime": {
@@ -2078,6 +2149,131 @@
         "title": "ModelApplicabilityEntry",
         "type": "object"
       },
+      "ModelCalibrationMetrics": {
+        "additionalProperties": false,
+        "description": "Held-out discrimination, probability calibration, and selective-abstention metrics.",
+        "properties": {
+          "brier_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Brier Score",
+            "type": "number"
+          },
+          "ece_10_bins": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ece 10 Bins",
+            "type": "number"
+          },
+          "f1_at_threshold": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "F1 At Threshold",
+            "type": "number"
+          },
+          "pr_auc": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pr Auc",
+            "type": "number"
+          },
+          "precision_at_threshold": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Precision At Threshold",
+            "type": "number"
+          },
+          "recall_at_threshold": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Recall At Threshold",
+            "type": "number"
+          },
+          "roc_auc": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Roc Auc",
+            "type": "number"
+          },
+          "selective_accuracy_at_margin": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selective Accuracy At Margin"
+          },
+          "selective_coverage_at_margin": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Selective Coverage At Margin",
+            "type": "number"
+          },
+          "threshold": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "roc_auc",
+          "pr_auc",
+          "brier_score",
+          "ece_10_bins",
+          "f1_at_threshold",
+          "precision_at_threshold",
+          "recall_at_threshold",
+          "threshold",
+          "selective_coverage_at_margin"
+        ],
+        "title": "ModelCalibrationMetrics",
+        "type": "object"
+      },
+      "ModelComparisonRow": {
+        "additionalProperties": false,
+        "description": "One model family entry on the AI4I 2020 controlled benchmark.",
+        "properties": {
+          "cal_metrics": {
+            "$ref": "#/components/schemas/ModelCalibrationMetrics"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "model_family": {
+            "title": "Model Family",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "ood_threshold": {
+            "exclusiveMinimum": 0.0,
+            "title": "Ood Threshold",
+            "type": "number"
+          },
+          "test_metrics": {
+            "$ref": "#/components/schemas/ModelCalibrationMetrics"
+          }
+        },
+        "required": [
+          "model_id",
+          "model_family",
+          "dataset_id",
+          "cal_metrics",
+          "test_metrics",
+          "ood_threshold"
+        ],
+        "title": "ModelComparisonRow",
+        "type": "object"
+      },
       "ModelInfo": {
         "properties": {
           "data_kind": {
@@ -2248,6 +2444,304 @@
           "operator_reports"
         ],
         "title": "ModelInfo",
+        "type": "object"
+      },
+      "ModelPromotionContract": {
+        "additionalProperties": false,
+        "description": "Governance decision verifying leakage checks, calibration, discrimination, and OOD gate.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "candidate_model_id": {
+            "title": "Candidate Model Id",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/ModelPromotionGate"
+            },
+            "title": "Gates",
+            "type": "array"
+          },
+          "promoted": {
+            "title": "Promoted",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_id",
+          "dataset_id",
+          "candidate_model_id",
+          "promoted",
+          "gates",
+          "summary"
+        ],
+        "title": "ModelPromotionContract",
+        "type": "object"
+      },
+      "ModelPromotionGate": {
+        "additionalProperties": false,
+        "description": "Single objective promotion readiness check against held-out criteria.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "gate_id": {
+            "title": "Gate Id",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "gate_id",
+          "passed",
+          "detail"
+        ],
+        "title": "ModelPromotionGate",
+        "type": "object"
+      },
+      "ModelRoutingDecision": {
+        "additionalProperties": false,
+        "description": "Structured multi-model prediction or explicit conservative abstention.",
+        "properties": {
+          "abstained": {
+            "title": "Abstained",
+            "type": "boolean"
+          },
+          "abstention_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstention Message"
+          },
+          "abstention_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Abstention Reasons",
+            "type": "array"
+          },
+          "advisory_only": {
+            "default": true,
+            "title": "Advisory Only",
+            "type": "boolean"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "calibrated_failure_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibrated Failure Probability"
+          },
+          "model_family": {
+            "title": "Model Family",
+            "type": "string"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "predicted_failure_modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Predicted Failure Modes",
+            "type": "array"
+          },
+          "prediction_label": {
+            "anyOf": [
+              {
+                "enum": [
+                  "nominal",
+                  "failure_risk"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction Label"
+          },
+          "provenance_origin": {
+            "const": "model_prediction",
+            "default": "model_prediction",
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "selected_model_id": {
+            "title": "Selected Model Id",
+            "type": "string"
+          },
+          "uncertainty": {
+            "$ref": "#/components/schemas/UncertaintyEstimate"
+          }
+        },
+        "required": [
+          "asset_id",
+          "selected_model_id",
+          "model_family",
+          "model_version",
+          "abstained",
+          "uncertainty"
+        ],
+        "title": "ModelRoutingDecision",
+        "type": "object"
+      },
+      "MultiModelBenchmarkReport": {
+        "additionalProperties": false,
+        "description": "Complete controlled benchmark report (kept strictly separate from MetroPT-3 telemetry).",
+        "properties": {
+          "archive_sha256": {
+            "title": "Archive Sha256",
+            "type": "string"
+          },
+          "dataset_id": {
+            "default": "ai4i2020",
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "dataset_scope_note": {
+            "title": "Dataset Scope Note",
+            "type": "string"
+          },
+          "excluded_target_and_id_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Target And Id Columns",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "leakage_free_features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Leakage Free Features",
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelComparisonRow"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "promotion_contract": {
+            "$ref": "#/components/schemas/ModelPromotionContract"
+          },
+          "rows_total": {
+            "minimum": 1.0,
+            "title": "Rows Total",
+            "type": "integer"
+          },
+          "selected_model_id": {
+            "title": "Selected Model Id",
+            "type": "string"
+          },
+          "split_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Split Counts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "dataset_scope_note",
+          "archive_sha256",
+          "rows_total",
+          "split_counts",
+          "leakage_free_features",
+          "excluded_target_and_id_columns",
+          "models",
+          "selected_model_id",
+          "promotion_contract",
+          "generated_at"
+        ],
+        "title": "MultiModelBenchmarkReport",
+        "type": "object"
+      },
+      "MultiModelCatalogResponse": {
+        "additionalProperties": false,
+        "description": "Separated catalog of specialized models across operational and benchmark domains.",
+        "properties": {
+          "ai4i_benchmark_available": {
+            "title": "Ai4I Benchmark Available",
+            "type": "boolean"
+          },
+          "ai4i_promoted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai4I Promoted"
+          },
+          "ai4i_selected_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai4I Selected Model Id"
+          },
+          "separation_disclaimer": {
+            "title": "Separation Disclaimer",
+            "type": "string"
+          },
+          "specialists": {
+            "items": {
+              "$ref": "#/components/schemas/SpecialistModelEntry"
+            },
+            "title": "Specialists",
+            "type": "array"
+          }
+        },
+        "required": [
+          "separation_disclaimer",
+          "specialists",
+          "ai4i_benchmark_available"
+        ],
+        "title": "MultiModelCatalogResponse",
         "type": "object"
       },
       "NeighboringEventSummary": {
@@ -3829,6 +4323,65 @@
         "title": "SourceDatasetRecord",
         "type": "object"
       },
+      "SpecialistModelEntry": {
+        "additionalProperties": false,
+        "description": "Catalog summary describing one registered ML/anomaly model specialist.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "domain_kind": {
+            "enum": [
+              "real_operational_telemetry",
+              "controlled_synthetic_benchmark"
+            ],
+            "title": "Domain Kind",
+            "type": "string"
+          },
+          "governance_status": {
+            "enum": [
+              "active",
+              "candidate",
+              "not_calibrated"
+            ],
+            "title": "Governance Status",
+            "type": "string"
+          },
+          "model_family": {
+            "title": "Model Family",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "scope_note": {
+            "title": "Scope Note",
+            "type": "string"
+          },
+          "uncertainty_mechanism": {
+            "title": "Uncertainty Mechanism",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "asset_id",
+          "dataset_id",
+          "domain_kind",
+          "model_family",
+          "governance_status",
+          "uncertainty_mechanism",
+          "scope_note"
+        ],
+        "title": "SpecialistModelEntry",
+        "type": "object"
+      },
       "TimelineEntry": {
         "description": "Chronological event-timeline entry preserving original timestamps and origins.",
         "properties": {
@@ -3976,6 +4529,74 @@
           "source_id"
         ],
         "title": "TimelineEntry",
+        "type": "object"
+      },
+      "UncertaintyEstimate": {
+        "additionalProperties": false,
+        "description": "Mahalanobis OOD distance and calibrated uncertainty summary for a single prediction.",
+        "properties": {
+          "calibrated_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calibrated Probability"
+          },
+          "decision_margin": {
+            "anyOf": [
+              {
+                "maximum": 0.5,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Margin"
+          },
+          "is_ood": {
+            "title": "Is Ood",
+            "type": "boolean"
+          },
+          "mahalanobis_distance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mahalanobis Distance"
+          },
+          "ood_threshold": {
+            "title": "Ood Threshold",
+            "type": "number"
+          },
+          "uncertainty_band": {
+            "enum": [
+              "low",
+              "moderate",
+              "high",
+              "abstained"
+            ],
+            "title": "Uncertainty Band",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ood_threshold",
+          "is_ood",
+          "uncertainty_band"
+        ],
+        "title": "UncertaintyEstimate",
         "type": "object"
       },
       "ValidationError": {
@@ -5760,6 +6381,89 @@
         "summary": "Me",
         "tags": [
           "incidents"
+        ]
+      }
+    },
+    "/api/v1/ml/benchmarks/ai4i2020": {
+      "get": {
+        "operationId": "get_ai4i_benchmark",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultiModelBenchmarkReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ai4I Benchmark",
+        "tags": [
+          "ml"
+        ]
+      }
+    },
+    "/api/v1/ml/catalog": {
+      "get": {
+        "operationId": "list_ml_catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultiModelCatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Ml Catalog",
+        "tags": [
+          "ml"
+        ]
+      }
+    },
+    "/api/v1/ml/predict": {
+      "post": {
+        "operationId": "predict_ai4i_sample",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Ai4iPredictRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRoutingDecision"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Predict Ai4I Sample",
+        "tags": [
+          "ml"
         ]
       }
     }

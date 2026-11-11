@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './ai4iPredictRequest';
+export * from './ai4iPredictRequestQualityStatus';
 export * from './alarmEpisode';
 export * from './alarmEpisodeDominantRegime';
 export * from './alarmEpisodeEventClass';
@@ -77,7 +79,16 @@ export * from './loeoSummary';
 export * from './meResponse';
 export * from './modelApplicabilityEntry';
 export * from './modelApplicabilityEntryStatus';
+export * from './modelCalibrationMetrics';
+export * from './modelComparisonRow';
 export * from './modelInfo';
+export * from './modelPromotionContract';
+export * from './modelPromotionGate';
+export * from './modelRoutingDecision';
+export * from './modelRoutingDecisionPredictionLabel';
+export * from './multiModelBenchmarkReport';
+export * from './multiModelBenchmarkReportSplitCounts';
+export * from './multiModelCatalogResponse';
 export * from './neighboringEventSummary';
 export * from './neighboringEventSummaryKind';
 export * from './neighboringEventSummaryOrigin';
@@ -126,6 +137,9 @@ export * from './sensorPassportKind';
 export * from './sourceDatasetRecord';
 export * from './sourceDatasetRecordArtifactStatus';
 export * from './sourceDatasetRecordProvenanceOrigin';
+export * from './specialistModelEntry';
+export * from './specialistModelEntryDomainKind';
+export * from './specialistModelEntryGovernanceStatus';
 export * from './timelineEntry';
 export * from './timelineEntryCategory';
 export * from './timelineEntryDetails';
@@ -133,6 +147,8 @@ export * from './timelineEntryEventClass';
 export * from './timelineEntryOrigin';
 export * from './timelineEntryPhase';
 export * from './timelineEntryRegime';
+export * from './uncertaintyEstimate';
+export * from './uncertaintyEstimateUncertaintyBand';
 export * from './validationError';
 export * from './validationErrorCtx';
 export * from './verificationStep';

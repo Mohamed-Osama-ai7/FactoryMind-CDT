@@ -39,6 +39,11 @@ function Shell() {
               Anomaly monitor
             </Link>
           )}
+          {permissions.has('anomaly:read') && (
+            <Link to="/models" className={LINK} activeProps={ACTIVE}>
+              ML Models &amp; OOD
+            </Link>
+          )}
           {permissions.has('incident:read') && (
             <Link to="/incidents" className={LINK} activeProps={ACTIVE}>
               Incidents
