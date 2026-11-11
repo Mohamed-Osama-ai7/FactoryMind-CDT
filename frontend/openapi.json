@@ -837,6 +837,77 @@
         "title": "DerivedFeatureSummary",
         "type": "object"
       },
+      "EconomicAssumptions": {
+        "additionalProperties": false,
+        "description": "Explicitly configurable economic & power-rating assumptions (never hidden).",
+        "properties": {
+          "electricity_eur_per_kwh": {
+            "default": 0.18,
+            "maximum": 2.0,
+            "minimum": 0.01,
+            "title": "Electricity Eur Per Kwh",
+            "type": "number"
+          },
+          "leak_rate_bar_per_min": {
+            "default": 0.35,
+            "maximum": 1.5,
+            "minimum": 0.0,
+            "title": "Leak Rate Bar Per Min",
+            "type": "number"
+          },
+          "monitoring_check_eur": {
+            "default": 120.0,
+            "maximum": 10000.0,
+            "minimum": 10.0,
+            "title": "Monitoring Check Eur",
+            "type": "number"
+          },
+          "nominal_baseline_duty": {
+            "default": 0.15,
+            "maximum": 0.5,
+            "minimum": 0.05,
+            "title": "Nominal Baseline Duty",
+            "type": "number"
+          },
+          "planned_depot_maintenance_eur": {
+            "default": 650.0,
+            "maximum": 50000.0,
+            "minimum": 50.0,
+            "title": "Planned Depot Maintenance Eur",
+            "type": "number"
+          },
+          "planning_horizon_hours": {
+            "default": 8.0,
+            "maximum": 72.0,
+            "minimum": 1.0,
+            "title": "Planning Horizon Hours",
+            "type": "number"
+          },
+          "rated_apu_power_kw": {
+            "default": 4.5,
+            "maximum": 15.0,
+            "minimum": 1.0,
+            "title": "Rated Apu Power Kw",
+            "type": "number"
+          },
+          "unloaded_power_fraction": {
+            "default": 0.45,
+            "maximum": 0.8,
+            "minimum": 0.1,
+            "title": "Unloaded Power Fraction",
+            "type": "number"
+          },
+          "unplanned_service_disruption_eur_per_hr": {
+            "default": 1800.0,
+            "maximum": 100000.0,
+            "minimum": 100.0,
+            "title": "Unplanned Service Disruption Eur Per Hr",
+            "type": "number"
+          }
+        },
+        "title": "EconomicAssumptions",
+        "type": "object"
+      },
       "EventEvidencePackage": {
         "description": "Complete multi-phase, provenance-tagged event evidence package and timeline.",
         "properties": {
@@ -1864,6 +1935,52 @@
         "title": "HybridSearchResponse",
         "type": "object"
       },
+      "ImpactQuantity": {
+        "additionalProperties": false,
+        "description": "Single quantified metric tagged cleanly by its epistemic/provenance tier.",
+        "properties": {
+          "basis_note": {
+            "title": "Basis Note",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "measured",
+              "engineering_estimate",
+              "configurable_economic_assumption",
+              "simulated_projection"
+            ],
+            "title": "Tier",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value",
+          "unit",
+          "tier",
+          "basis_note"
+        ],
+        "title": "ImpactQuantity",
+        "type": "object"
+      },
       "IncidentCreate": {
         "additionalProperties": false,
         "description": "Point at an alarm episode; the server re-detects it and stores the evidence.",
@@ -2345,6 +2462,226 @@
           "folds"
         ],
         "title": "LoeoSummary",
+        "type": "object"
+      },
+      "MaintenanceDecisionComparisonResponse": {
+        "additionalProperties": false,
+        "description": "Stratified impact report + constrained repair_now vs schedule vs monitor comparison.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "impact_quantities": {
+            "items": {
+              "$ref": "#/components/schemas/ImpactQuantity"
+            },
+            "title": "Impact Quantities",
+            "type": "array"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/MaintenanceOptionEvaluation"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "provenance_origin": {
+            "const": "advisory_decision_comparison",
+            "default": "advisory_decision_comparison",
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "recommendation_note": {
+            "title": "Recommendation Note",
+            "type": "string"
+          },
+          "recommended_option": {
+            "enum": [
+              "repair_now",
+              "schedule",
+              "monitor"
+            ],
+            "title": "Recommended Option",
+            "type": "string"
+          },
+          "uncertainty_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Uncertainty Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "impact_quantities",
+          "options",
+          "recommended_option",
+          "recommendation_note",
+          "uncertainty_warnings"
+        ],
+        "title": "MaintenanceDecisionComparisonResponse",
+        "type": "object"
+      },
+      "MaintenanceDecisionRequest": {
+        "additionalProperties": false,
+        "description": "Input bundle combining measured incident features with bounded assumptions.",
+        "properties": {
+          "asset_id": {
+            "default": "metropt3-apu-1",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "assumptions": {
+            "$ref": "#/components/schemas/EconomicAssumptions"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/OptimizationConstraints"
+          },
+          "dominant_hypothesis": {
+            "anyOf": [
+              {
+                "enum": [
+                  "air_leakage",
+                  "sensor_malfunction",
+                  "telemetry_inconsistency",
+                  "abnormal_high_demand",
+                  "concurrent_conditions",
+                  "insufficient_evidence"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dominant Hypothesis"
+          },
+          "measured_load_duty": {
+            "default": 0.72,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Measured Load Duty",
+            "type": "number"
+          },
+          "measured_motor_current_a": {
+            "default": 6.4,
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Measured Motor Current A",
+            "type": "number"
+          },
+          "measured_oil_temp_c": {
+            "default": 72.0,
+            "maximum": 150.0,
+            "minimum": -20.0,
+            "title": "Measured Oil Temp C",
+            "type": "number"
+          },
+          "weights": {
+            "$ref": "#/components/schemas/OptimizationWeights"
+          }
+        },
+        "title": "MaintenanceDecisionRequest",
+        "type": "object"
+      },
+      "MaintenanceOptionEvaluation": {
+        "additionalProperties": false,
+        "description": "Constrained multi-criteria trade-off assessment for one maintenance candidate.",
+        "properties": {
+          "bounded_utility_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Bounded Utility Score",
+            "type": "number"
+          },
+          "constraint_violations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Constraint Violations",
+            "type": "array"
+          },
+          "expected_total_cost_eur": {
+            "minimum": 0.0,
+            "title": "Expected Total Cost Eur",
+            "type": "number"
+          },
+          "feasible": {
+            "title": "Feasible",
+            "type": "boolean"
+          },
+          "option": {
+            "enum": [
+              "repair_now",
+              "schedule",
+              "monitor"
+            ],
+            "title": "Option",
+            "type": "string"
+          },
+          "pareto_dominated": {
+            "title": "Pareto Dominated",
+            "type": "boolean"
+          },
+          "projected_energy_kwh": {
+            "minimum": 0.0,
+            "title": "Projected Energy Kwh",
+            "type": "number"
+          },
+          "projected_excess_energy_kwh": {
+            "title": "Projected Excess Energy Kwh",
+            "type": "number"
+          },
+          "projected_lps_risk_minutes": {
+            "minimum": 0.0,
+            "title": "Projected Lps Risk Minutes",
+            "type": "number"
+          },
+          "projected_unplanned_disruption_hours": {
+            "minimum": 0.0,
+            "title": "Projected Unplanned Disruption Hours",
+            "type": "number"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "option",
+          "title",
+          "feasible",
+          "constraint_violations",
+          "pareto_dominated",
+          "projected_energy_kwh",
+          "projected_excess_energy_kwh",
+          "projected_lps_risk_minutes",
+          "projected_unplanned_disruption_hours",
+          "expected_total_cost_eur",
+          "bounded_utility_score",
+          "rationale"
+        ],
+        "title": "MaintenanceOptionEvaluation",
         "type": "object"
       },
       "MeResponse": {
@@ -3252,6 +3589,62 @@
           "failure"
         ],
         "title": "OperatorReport",
+        "type": "object"
+      },
+      "OptimizationConstraints": {
+        "additionalProperties": false,
+        "description": "Hard operational safety & duty boundaries used to gate option feasibility.",
+        "properties": {
+          "max_allowable_duty": {
+            "default": 0.85,
+            "maximum": 1.0,
+            "minimum": 0.5,
+            "title": "Max Allowable Duty",
+            "type": "number"
+          },
+          "max_allowable_oil_temp_c": {
+            "default": 95.0,
+            "maximum": 130.0,
+            "minimum": 60.0,
+            "title": "Max Allowable Oil Temp C",
+            "type": "number"
+          },
+          "require_zero_lps_violation": {
+            "default": true,
+            "title": "Require Zero Lps Violation",
+            "type": "boolean"
+          }
+        },
+        "title": "OptimizationConstraints",
+        "type": "object"
+      },
+      "OptimizationWeights": {
+        "additionalProperties": false,
+        "description": "Normalized relative importance weights across cost, safety margin & downtime.",
+        "properties": {
+          "cost_weight": {
+            "default": 0.35,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Cost Weight",
+            "type": "number"
+          },
+          "downtime_weight": {
+            "default": 0.25,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Downtime Weight",
+            "type": "number"
+          },
+          "reliability_weight": {
+            "default": 0.4,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Reliability Weight",
+            "type": "number"
+          }
+        },
+        "title": "OptimizationWeights",
         "type": "object"
       },
       "OutcomeVerificationCreate": {
@@ -6893,6 +7286,133 @@
         ]
       }
     },
+    "/api/v1/incidents/{incident_id}/decision-comparison": {
+      "get": {
+        "operationId": "get_incident_decision_comparison",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{32}$",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "electricity_eur_per_kwh",
+            "required": false,
+            "schema": {
+              "default": 0.18,
+              "maximum": 2.0,
+              "minimum": 0.01,
+              "title": "Electricity Eur Per Kwh",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "planned_depot_maintenance_eur",
+            "required": false,
+            "schema": {
+              "default": 650.0,
+              "maximum": 50000.0,
+              "minimum": 50.0,
+              "title": "Planned Depot Maintenance Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unplanned_service_disruption_eur_per_hr",
+            "required": false,
+            "schema": {
+              "default": 1800.0,
+              "maximum": 100000.0,
+              "minimum": 100.0,
+              "title": "Unplanned Service Disruption Eur Per Hr",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "leak_rate_bar_per_min",
+            "required": false,
+            "schema": {
+              "default": 0.35,
+              "maximum": 1.5,
+              "minimum": 0.0,
+              "title": "Leak Rate Bar Per Min",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "planning_horizon_hours",
+            "required": false,
+            "schema": {
+              "default": 8.0,
+              "maximum": 72.0,
+              "minimum": 1.0,
+              "title": "Planning Horizon Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dominant_hypothesis",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "air_leakage",
+                    "sensor_malfunction",
+                    "telemetry_inconsistency",
+                    "abnormal_high_demand",
+                    "concurrent_conditions",
+                    "insufficient_evidence"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dominant Hypothesis"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceDecisionComparisonResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Incident Decision Comparison",
+        "tags": [
+          "optimization"
+        ]
+      }
+    },
     "/api/v1/incidents/{incident_id}/decisions": {
       "post": {
         "operationId": "create_decision",
@@ -7479,6 +7999,47 @@
         "summary": "Predict Ai4I Sample",
         "tags": [
           "ml"
+        ]
+      }
+    },
+    "/api/v1/optimization/compare": {
+      "post": {
+        "operationId": "compare_optimization_options",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaintenanceDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceDecisionComparisonResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare Optimization Options",
+        "tags": [
+          "optimization"
         ]
       }
     },

@@ -20,6 +20,7 @@ from factorymind.api.assets import router as assets_router
 from factorymind.api.incidents import router as incidents_router
 from factorymind.api.knowledge import router as knowledge_router
 from factorymind.api.ml_models import router as ml_router
+from factorymind.api.optimization import router as optimization_router
 from factorymind.api.security import SecurityMiddleware, SlidingWindowLimiter
 from factorymind.api.twin import router as twin_router
 from factorymind.auth.tokens import TokenVerifier
@@ -99,6 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(incidents_router)
     app.include_router(knowledge_router)
     app.include_router(ml_router)
+    app.include_router(optimization_router)
     app.include_router(twin_router)
     return app
 
