@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useState } from 'react'
+import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import { describeApiError } from '../../api/errors'
 import {
   useGetTwinModel,
@@ -16,6 +16,30 @@ const SCENARIO_LABELS: Record<TwinScenarioKind, string> = {
   maintenance_repair: 'Counterfactual maintenance repair intervention',
 }
 
+interface TwinFormState {
+  horizonMinutes: string
+  leakRate: string
+  demandFactor: string
+  repairAtMinute: string
+}
+
+function parseFiniteBounded(
+  raw: string,
+  label: string,
+  lo: number,
+  hi: number,
+): { value: number; error: null } | { value: null; error: string } {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return { value: null, error: `${label} is required.` }
+  }
+  const n = Number(trimmed)
+  if (!Number.isFinite(n) || n < lo || n > hi) {
+    return { value: null, error: `${label} must be a finite number between ${lo} and ${hi}.` }
+  }
+  return { value: n, error: null }
+}
+
 /** Physics-Informed Digital Twin calibration, held-out validation & counterfactual simulator. */
 export function DigitalTwinLab() {
   const idPrefix = useId()
@@ -23,10 +47,14 @@ export function DigitalTwinLab() {
   const canRead = me.data?.data.permissions.includes('asset:read') ?? false
 
   const [scenario, setScenario] = useState<TwinScenarioKind>('leak')
-  const [horizonMinutes, setHorizonMinutes] = useState<number>(60)
-  const [leakRate, setLeakRate] = useState<number>(0.45)
-  const [demandFactor, setDemandFactor] = useState<number>(1.0)
-  const [repairAtMinute, setRepairAtMinute] = useState<number>(30)
+  const [form, setForm] = useState<TwinFormState>({
+    horizonMinutes: '60',
+    leakRate: '0.45',
+    demandFactor: '1.0',
+    repairAtMinute: '30',
+  })
+  const [validationError, setValidationError] = useState<string | null>(null)
+  const didAutoRunRef = useRef(false)
 
   const modelQuery = useGetTwinModel(
     { asset_id: 'metropt3-apu-1' },
@@ -34,22 +62,10 @@ export function DigitalTwinLab() {
   )
   const simMutation = useSimulateTwinScenario()
 
-  const runSimulation = (targetScenario: TwinScenarioKind) => {
-    simMutation.mutate({
-      data: {
-        asset_id: 'metropt3-apu-1',
-        scenario: targetScenario,
-        horizon_minutes: horizonMinutes,
-        leak_rate_bar_per_min: leakRate,
-        demand_factor: demandFactor,
-        repair_at_minute: repairAtMinute,
-      },
-    })
-  }
-
-  // Trigger an initial baseline/leak comparison simulation cleanly once authorized
+  // Trigger an initial default 'leak' rollout once authorized (StrictMode-safe via ref guard)
   useEffect(() => {
-    if (canRead && !simMutation.data && !simMutation.isPending && !simMutation.isError) {
+    if (canRead && !didAutoRunRef.current) {
+      didAutoRunRef.current = true
       simMutation.mutate({
         data: {
           asset_id: 'metropt3-apu-1',
@@ -57,11 +73,10 @@ export function DigitalTwinLab() {
           horizon_minutes: 60,
           leak_rate_bar_per_min: 0.45,
           demand_factor: 1.0,
-          repair_at_minute: 30,
         },
       })
     }
-  }, [canRead, simMutation.data, simMutation.isPending, simMutation.isError, simMutation.mutate])
+  }, [canRead, simMutation.mutate])
 
   if (me.isPending) return <p role="status">Checking digital twin permissions…</p>
   if (me.isError) {
@@ -98,8 +113,52 @@ export function DigitalTwinLab() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
-    runSimulation(scenario)
+    const horizon = parseFiniteBounded(form.horizonMinutes, 'Horizon (minutes)', 10, 240)
+    if (horizon.value === null) {
+      setValidationError(horizon.error)
+      return
+    }
+    const leak = parseFiniteBounded(form.leakRate, 'Leak loss rate (bar/min)', 0, 1.5)
+    if (leak.value === null) {
+      setValidationError(leak.error)
+      return
+    }
+    const demand = parseFiniteBounded(form.demandFactor, 'Downstream demand multiplier', 0.5, 3.0)
+    if (demand.value === null) {
+      setValidationError(demand.error)
+      return
+    }
+
+    let repairMinute: number | undefined
+    if (scenario === 'maintenance_repair') {
+      const repair = parseFiniteBounded(form.repairAtMinute, 'Repair intervention minute', 1, 239)
+      if (repair.value === null) {
+        setValidationError(repair.error)
+        return
+      }
+      if (repair.value >= horizon.value) {
+        setValidationError(
+          `Repair intervention minute (${repair.value}) must be strictly less than horizon (${horizon.value} min).`,
+        )
+        return
+      }
+      repairMinute = repair.value
+    }
+
+    setValidationError(null)
+    simMutation.mutate({
+      data: {
+        asset_id: 'metropt3-apu-1',
+        scenario,
+        horizon_minutes: horizon.value,
+        leak_rate_bar_per_min: leak.value,
+        demand_factor: demand.value,
+        ...(repairMinute !== undefined ? { repair_at_minute: repairMinute } : {}),
+      },
+    })
   }
+
+  const validationAlertId = `${idPrefix}-form-error`
 
   return (
     <section aria-labelledby={`${idPrefix}-title`} className="flex max-w-5xl flex-col gap-6">
@@ -119,7 +178,9 @@ export function DigitalTwinLab() {
           Controlled scenario simulator
         </h2>
         <form
+          noValidate
           onSubmit={onSubmit}
+          aria-describedby={validationError ? validationAlertId : undefined}
           className="grid grid-cols-1 gap-3 rounded-lg border border-border bg-panel p-4 text-xs sm:grid-cols-2 lg:grid-cols-3"
         >
           <label htmlFor={`${idPrefix}-scenario`} className="flex flex-col gap-1">
@@ -127,7 +188,10 @@ export function DigitalTwinLab() {
             <select
               id={`${idPrefix}-scenario`}
               value={scenario}
-              onChange={(e) => setScenario(e.target.value as TwinScenarioKind)}
+              onChange={(e) => {
+                setScenario(e.target.value as TwinScenarioKind)
+                if (validationError) setValidationError(null)
+              }}
               className="rounded border border-border bg-surface px-2 py-1.5 text-ink"
             >
               {(Object.keys(SCENARIO_LABELS) as TwinScenarioKind[]).map((key) => (
@@ -144,9 +208,12 @@ export function DigitalTwinLab() {
               type="number"
               min={10}
               max={240}
-              step={10}
-              value={horizonMinutes}
-              onChange={(e) => setHorizonMinutes(Number(e.target.value))}
+              step="any"
+              value={form.horizonMinutes}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, horizonMinutes: e.target.value }))
+                if (validationError) setValidationError(null)
+              }}
               className="rounded border border-border bg-surface px-2 py-1.5 text-ink"
             />
           </label>
@@ -157,9 +224,12 @@ export function DigitalTwinLab() {
               type="number"
               min={0}
               max={1.5}
-              step={0.05}
-              value={leakRate}
-              onChange={(e) => setLeakRate(Number(e.target.value))}
+              step="any"
+              value={form.leakRate}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, leakRate: e.target.value }))
+                if (validationError) setValidationError(null)
+              }}
               className="rounded border border-border bg-surface px-2 py-1.5 text-ink"
             />
           </label>
@@ -170,9 +240,12 @@ export function DigitalTwinLab() {
               type="number"
               min={0.5}
               max={3.0}
-              step={0.1}
-              value={demandFactor}
-              onChange={(e) => setDemandFactor(Number(e.target.value))}
+              step="any"
+              value={form.demandFactor}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, demandFactor: e.target.value }))
+                if (validationError) setValidationError(null)
+              }}
               className="rounded border border-border bg-surface px-2 py-1.5 text-ink"
             />
           </label>
@@ -183,10 +256,14 @@ export function DigitalTwinLab() {
               type="number"
               min={1}
               max={239}
-              step={1}
-              value={repairAtMinute}
-              onChange={(e) => setRepairAtMinute(Number(e.target.value))}
-              className="rounded border border-border bg-surface px-2 py-1.5 text-ink"
+              step="any"
+              value={form.repairAtMinute}
+              disabled={scenario !== 'maintenance_repair'}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, repairAtMinute: e.target.value }))
+                if (validationError) setValidationError(null)
+              }}
+              className="rounded border border-border bg-surface px-2 py-1.5 text-ink disabled:opacity-50"
             />
           </label>
           <div className="flex items-end">
@@ -198,6 +275,11 @@ export function DigitalTwinLab() {
               {simMutation.isPending ? 'Simulating…' : 'Run scenario simulation'}
             </button>
           </div>
+          {validationError && (
+            <p id={validationAlertId} role="alert" className="col-span-full text-critical">
+              {validationError}
+            </p>
+          )}
         </form>
 
         {simMutation.isError && (
@@ -306,10 +388,16 @@ export function DigitalTwinLab() {
         )}
         {modelData && (
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 text-xs">
-            <p className="text-muted">
-              Model: <span className="font-mono text-ink">{modelData.model_version}</span> · Split:{' '}
-              {modelData.validation.split_policy}
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-muted">
+                Model: <span className="font-mono text-ink">{modelData.model_version}</span> ·
+                Provenance:{' '}
+                <span className="font-mono text-ink">{modelData.provenance_origin}</span> · Split:{' '}
+                {modelData.validation.split_policy}
+              </p>
+              <span className="text-muted">{modelData.advisory_note}</span>
+            </div>
+
             <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded border border-border p-2">
                 <dt className="text-muted">Held-out Segments</dt>
@@ -339,6 +427,37 @@ export function DigitalTwinLab() {
                 </dd>
               </div>
             </dl>
+
+            {modelData.governing_equations.length > 0 && (
+              <div>
+                <h3 className="mb-1.5 font-medium text-muted">Governing equations</h3>
+                <ul className="flex flex-col gap-1 font-mono text-[11px] text-ink">
+                  {modelData.governing_equations.map((eq) => (
+                    <li key={eq} className="rounded border border-border px-2 py-1">
+                      {eq}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {modelData.parameters.length > 0 && (
+              <div>
+                <h3 className="mb-1.5 font-medium text-muted">
+                  Calibrated physical parameters ({modelData.parameters.length})
+                </h3>
+                <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                  {modelData.parameters.map((param) => (
+                    <div key={param.name} className="rounded border border-border p-2">
+                      <span className="font-mono font-medium text-ink">
+                        {param.name}: {param.value} {param.unit}
+                      </span>
+                      <p className="mt-0.5 text-muted">{param.uncertainty_note}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <h3 className="mb-1.5 font-medium text-muted">

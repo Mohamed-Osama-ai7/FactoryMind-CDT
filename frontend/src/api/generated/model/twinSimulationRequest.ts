@@ -14,6 +14,7 @@ export interface TwinSimulationRequest {
   /**
      * @minLength 1
      * @maxLength 64
+     * @pattern ^[a-z0-9][a-z0-9_.-]{0,63}$
      */
   asset_id?: string;
   /**

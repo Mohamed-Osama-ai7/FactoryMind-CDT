@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from factorymind.config import IDENTIFIER
 
 TwinScenarioKind = Literal[
     "baseline",
@@ -74,7 +76,12 @@ class TwinSimulationRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    asset_id: str = Field(default="metropt3-apu-1", min_length=1, max_length=64)
+    asset_id: str = Field(
+        default="metropt3-apu-1",
+        min_length=1,
+        max_length=64,
+        pattern=IDENTIFIER.pattern,
+    )
     scenario: TwinScenarioKind = "baseline"
     horizon_minutes: float = Field(default=60.0, ge=10.0, le=240.0)
     initial_tp3_bar: float = Field(default=9.1, ge=1.0, le=12.0)
@@ -82,6 +89,17 @@ class TwinSimulationRequest(BaseModel):
     leak_rate_bar_per_min: float = Field(default=0.35, ge=0.0, le=1.5)
     demand_factor: float = Field(default=1.0, ge=0.5, le=3.0)
     repair_at_minute: float | None = Field(default=30.0, ge=1.0, le=239.0)
+
+    @model_validator(mode="after")
+    def _validate_repair_horizon(self) -> TwinSimulationRequest:
+        if self.scenario == "maintenance_repair":
+            repair_min = self.repair_at_minute if self.repair_at_minute is not None else 30.0
+            if repair_min >= self.horizon_minutes:
+                raise ValueError(
+                    "repair_at_minute must be strictly less than horizon_minutes for "
+                    "maintenance_repair scenarios"
+                )
+        return self
 
 
 class TwinTrajectoryPoint(BaseModel):

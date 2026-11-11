@@ -5065,6 +5065,7 @@
             "default": "metropt3-apu-1",
             "maxLength": 64,
             "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
             "title": "Asset Id",
             "type": "string"
           },

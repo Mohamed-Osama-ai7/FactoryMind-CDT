@@ -96,7 +96,7 @@ class TwinCalibratedParams:
     k_charge_bar_per_min: float = 0.948
     k_drain_bar_per_min: float = 0.084
     cut_in_bar: float = 8.09
-    cut_out_bar: float = 10.08
+    cut_out_bar: float = 10.078
     coupling_bias_bar: float = 0.0
     alpha_heat_c_per_min: float = 2.30353
     alpha_cool_per_min: float = 0.01734
@@ -141,6 +141,14 @@ class TwinCalibratedParams:
                 uncertainty_note=(
                     "Median cut-out pressure at 1->0 unloading transitions (~10.1 bar)."
                 ),
+            ),
+            TwinParameterEstimate(
+                name="coupling_bias_bar",
+                value=round(self.coupling_bias_bar, 4),
+                unit="bar",
+                identifiable=True,
+                fit_source=self.fit_source,
+                uncertainty_note="Median panel TP3 minus downstream reservoir differential.",
             ),
             TwinParameterEstimate(
                 name="alpha_heat_c_per_min",
@@ -215,6 +223,9 @@ class CompressorReservoirTwin:
     ) -> CompressorReservoirTwin:
         """Fit ODE constants strictly on pre-evaluation telemetry (zero evaluation leakage)."""
         pre_eval = frame[(frame.index >= TRAIN_START) & (frame.index < eval_start)].sort_index()
+        cols = ["TP3", "Reservoirs", "Oil_temperature", "Motor_current", "DV_eletric"]
+        finite_mask = np.isfinite(pre_eval[cols].to_numpy(dtype="float64")).all(axis=1)
+        pre_eval = pre_eval[finite_mask]
         if len(pre_eval) < 120:
             raise ValueError("Insufficient pre-evaluation telemetry to calibrate digital twin")
 
@@ -230,7 +241,7 @@ class CompressorReservoirTwin:
         active = contiguous & (curr >= 1.0)
         steady_l = contiguous & loaded & prev_loaded & (curr >= 5.5)
         steady_u = contiguous & (~loaded) & (~prev_loaded) & (curr >= 1.0) & (curr <= 5.5)
-        if not np.any(steady_l) or not np.any(steady_u):
+        if not np.any(steady_l) or not np.any(steady_u) or np.sum(active) < 60:
             raise ValueError("Missing steady loaded/unloaded samples in pre-evaluation segment")
 
         dp_dt = np.diff(tp3, prepend=np.nan) / dt_min
@@ -238,19 +249,24 @@ class CompressorReservoirTwin:
         net_loaded = max(0.05, float(np.median(dp_dt[steady_l])))
         k_charge = net_loaded + k_drain
 
-        on_trans = np.where((loaded[1:]) & (~loaded[:-1]) & (curr[1:] >= 1.0))[0]
-        off_trans = np.where((~loaded[1:]) & (loaded[:-1]) & (curr[1:] >= 1.0))[0]
+        on_trans = np.where(contiguous[1:] & loaded[1:] & (~loaded[:-1]) & (curr[1:] >= 1.0))[0]
+        off_trans = np.where(contiguous[1:] & (~loaded[1:]) & loaded[:-1] & (curr[1:] >= 1.0))[0]
         cut_in = float(np.median(tp3[on_trans])) if len(on_trans) > 0 else 8.09
-        cut_out = float(np.median(tp3[off_trans])) if len(off_trans) > 0 else 10.08
-        if cut_out <= cut_in + 0.2:
-            cut_in, cut_out = 8.09, 10.08
+        cut_out = float(np.median(tp3[off_trans])) if len(off_trans) > 0 else 10.078
+        if not (math.isfinite(cut_in) and math.isfinite(cut_out)) or cut_out <= cut_in + 0.2:
+            cut_in, cut_out = 8.09, 10.078
 
         coupling_bias = float(np.median(tp3[active] - res[active]))
+        if not math.isfinite(coupling_bias):
+            coupling_bias = 0.0
         dt_oil = np.diff(oil, prepend=np.nan) / dt_min
         x_t = np.column_stack([loaded[active].astype("float64"), -(oil[active] - 50.0)])
-        beta_t, *_ = np.linalg.lstsq(x_t, dt_oil[active], rcond=None)
-        alpha_heat = max(0.05, float(beta_t[0]))
-        alpha_cool = max(0.001, float(beta_t[1]))
+        try:
+            beta_t, *_ = np.linalg.lstsq(x_t, dt_oil[active], rcond=None)
+            alpha_heat = max(0.05, float(beta_t[0])) if math.isfinite(beta_t[0]) else 2.30353
+            alpha_cool = max(0.001, float(beta_t[1])) if math.isfinite(beta_t[1]) else 0.01734
+        except np.linalg.LinAlgError:
+            alpha_heat, alpha_cool = 2.30353, 0.01734
 
         params = TwinCalibratedParams(
             k_charge_bar_per_min=k_charge,
@@ -318,11 +334,9 @@ class CompressorReservoirTwin:
             maes_60.append(float(np.mean(np.abs(p_sim - p_obs))))
             rmses_60.append(float(np.sqrt(np.mean((p_sim - p_obs) ** 2))))
 
-        mae10 = float(np.median(maes_10)) if maes_10 else DEFAULT_VALIDATION_SUMMARY.mae_10min_bar
-        mae60 = float(np.median(maes_60)) if maes_60 else DEFAULT_VALIDATION_SUMMARY.mae_60min_bar
-        rmse60 = (
-            float(np.median(rmses_60)) if rmses_60 else DEFAULT_VALIDATION_SUMMARY.rmse_60min_bar
-        )
+        mae10 = float(np.median(maes_10)) if maes_10 else 0.0
+        mae60 = float(np.median(maes_60)) if maes_60 else 0.0
+        rmse60 = float(np.median(rmses_60)) if rmses_60 else 0.0
 
         # Check failure residual magnification when failure windows exist
         f_maes: list[float] = []
@@ -355,11 +369,7 @@ class CompressorReservoirTwin:
                 p_sim[i], _ = _clamp(raw, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
             f_maes.append(float(np.mean(np.abs(p_sim - p_obs))))
 
-        leak_ratio = (
-            float(np.mean(f_maes)) / max(mae60, 1e-6)
-            if f_maes
-            else DEFAULT_VALIDATION_SUMMARY.leak_vs_normal_residual_ratio
-        )
+        leak_ratio = float(np.mean(f_maes)) / max(mae60, 1e-6) if (f_maes and maes_60) else 0.0
         step_diff = self._step_halving_stability_diff()
         return TwinValidationSummary(
             split_policy=(
@@ -417,13 +427,7 @@ class CompressorReservoirTwin:
             load_hist.append(1.0 if loaded else 0.0)
             recent = load_hist[-win_steps:]
             rolling_duty = sum(recent) / len(recent)
-            res_p, res_viol = _clamp(
-                p - self.params.coupling_bias_bar, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR
-            )
-            violated = res_viol or (p < MIN_PHYSICAL_BAR) or (p > MAX_PHYSICAL_BAR)
-            rows.append((minute, p, res_p, t_oil, loaded, rolling_duty, violated))
-
-            # Forward explicit step
+            res_p, _ = _clamp(p - self.params.coupling_bias_bar, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
             eff = _charge_efficiency(p, self.params.cut_out_bar)
             dp = (
                 self.params.k_charge_bar_per_min * (1.0 if loaded else 0.0) * eff
@@ -433,8 +437,10 @@ class CompressorReservoirTwin:
             dt_oil = self.params.alpha_heat_c_per_min * (
                 1.0 if loaded else 0.0
             ) - self.params.alpha_cool_per_min * (t_oil - self.params.t_ambient_ref_c)
-            p_next, _ = _clamp(p + dp * dt_min, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
+            p_raw_next = p + dp * dt_min
+            p_next, p_viol = _clamp(p_raw_next, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
             t_oil_next, _ = _clamp(t_oil + dt_oil * dt_min, -20.0, 150.0)
+            rows.append((minute, p, res_p, t_oil, loaded, rolling_duty, p_viol))
             p = p_next
             t_oil = t_oil_next
         return rows
@@ -489,13 +495,14 @@ class CompressorReservoirTwin:
                     )
                 )
 
+        intervals = rows[:-1] or rows
         mean_duty = sum(r[4] for r in rows) / len(rows)
         peak_duty = max(r[5] for r in rows)
         min_tp3 = min(r[1] for r in rows)
         max_tp3 = max(r[1] for r in rows)
-        lps_mins = sum(dt_min for r in rows if r[1] < LPS_SWITCH_BAR)
-        duty_breach_mins = sum(dt_min for r in rows if r[5] >= DUTY_ALARM_THRESHOLD)
-        violations = sum(1 for r in rows if r[6])
+        lps_mins = sum(dt_min for r in intervals if r[1] < LPS_SWITCH_BAR)
+        duty_breach_mins = sum(dt_min for r in intervals if r[5] >= DUTY_ALARM_THRESHOLD)
+        violations = sum(1 for r in intervals if r[6])
         final_temp = rows[-1][3]
 
         if not (math.isfinite(mean_duty) and math.isfinite(final_temp)):

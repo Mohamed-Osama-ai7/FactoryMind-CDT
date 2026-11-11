@@ -109,9 +109,16 @@ def test_four_counterfactual_scenarios_and_physical_invariants() -> None:
     assert base.summary.lps_excursion_minutes == 0.0
     assert base.summary.mean_load_duty < 0.25
     assert leak.summary.mean_load_duty > base.summary.mean_load_duty + 0.5
+    assert leak.summary.lps_excursion_minutes <= 120.0
     assert cont.summary.min_tp3_bar <= leak.summary.min_tp3_bar
     assert repair.summary.mean_load_duty < cont.summary.mean_load_duty
     assert repair.trajectory[-1].tp3_bar >= 8.0
+
+    # Non-finite rows in calibration telemetry are excluded cleanly without NaN propagation
+    df_nan = _synthetic_apu_telemetry()
+    df_nan.iloc[5:10, 0:3] = float("nan")
+    nan_fit = CompressorReservoirTwin.fit_from_telemetry(df_nan)
+    assert all(np.isfinite(p.value) for p in nan_fit.params.to_contracts())
 
 
 def test_twin_api_auth_isolation_and_validation(kit: AuthKit) -> None:
@@ -124,7 +131,7 @@ def test_twin_api_auth_isolation_and_validation(kit: AuthKit) -> None:
     assert m_body["provenance_origin"] == "advisory_physics_twin"
     assert len(m_body["unidentifiable_parameters"]) >= 4
 
-    # Non-APU asset cleanly rejected with 404
+    # Non-APU asset cleanly rejected with 404 on both GET /model and POST /simulate
     assert (
         client.get(
             "/api/v1/twin/model",
@@ -132,6 +139,34 @@ def test_twin_api_auth_isolation_and_validation(kit: AuthKit) -> None:
             headers=viewer,
         ).status_code
         == 404
+    )
+    assert (
+        client.post(
+            "/api/v1/twin/simulate",
+            json={"asset_id": "ai4i-milling-bench", "scenario": "baseline"},
+            headers=viewer,
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/api/v1/twin/simulate",
+            json={"asset_id": "../etc", "scenario": "baseline"},
+            headers=viewer,
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/v1/twin/simulate",
+            json={
+                "scenario": "maintenance_repair",
+                "horizon_minutes": 20.0,
+                "repair_at_minute": 30.0,
+            },
+            headers=viewer,
+        ).status_code
+        == 422
     )
 
     sim_resp = client.post(

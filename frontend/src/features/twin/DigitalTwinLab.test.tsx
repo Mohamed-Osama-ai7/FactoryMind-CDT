@@ -70,7 +70,7 @@ describe('DigitalTwinLab', () => {
     expect(screen.getByText(/Could not load digital twin specification/)).toBeInTheDocument()
   })
 
-  it('renders held-out validation, unidentifiable parameters, and simulates repair scenario', async () => {
+  it('validates numeric bounds cleanly and simulates non-step-aligned continuous scenarios', async () => {
     const seenBodies: string[] = []
     vi.stubGlobal(
       'fetch',
@@ -85,7 +85,16 @@ describe('DigitalTwinLab', () => {
                 model_version: 'apu-mass-balance-v1',
                 provenance_origin: 'advisory_physics_twin',
                 governing_equations: ['dP_TP3/dt = k_charge * u - k_drain - k_leak'],
-                parameters: [],
+                parameters: [
+                  {
+                    name: 'k_charge_bar_per_min',
+                    value: 0.948,
+                    unit: 'bar/min',
+                    identifiable: true,
+                    fit_source: 'live_pre_eval_fit',
+                    uncertainty_note: 'Steady slope.',
+                  },
+                ],
                 unidentifiable_parameters: [
                   {
                     name: 'reservoir_volume_m3',
@@ -133,7 +142,7 @@ describe('DigitalTwinLab', () => {
                   provenance_origin: 'simulated_projection',
                 },
                 {
-                  minute: 60,
+                  minute: 45,
                   tp3_bar: 9.6,
                   reservoirs_bar: 9.6,
                   oil_temp_c: 64.2,
@@ -173,12 +182,39 @@ describe('DigitalTwinLab', () => {
 
     expect(await screen.findByText(/simulated_projection/)).toBeInTheDocument()
     expect(await screen.findByText(/reservoir_volume_m3/)).toBeInTheDocument()
+    expect(screen.getByText(/k_charge_bar_per_min: 0.948 bar\/min/)).toBeInTheDocument()
     expect(screen.getByText(/3\.78x/)).toBeInTheDocument()
 
+    // Empty numeric input shows inline alert instead of crashing or snapping to 0
+    const horizonInput = screen.getByLabelText('Horizon (minutes, 10–240)')
+    await userEvent.clear(horizonInput)
+    expect(horizonInput).toHaveValue(null)
+    await userEvent.click(screen.getByRole('button', { name: 'Run scenario simulation' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/Horizon \(minutes\) is required/)
+
+    // Non-step-aligned continuous float inputs (horizon=15, leak=0.33, repair>=horizon check)
+    await userEvent.type(horizonInput, '15')
     await userEvent.selectOptions(screen.getByLabelText('Scenario'), 'maintenance_repair')
     await userEvent.click(screen.getByRole('button', { name: 'Run scenario simulation' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/strictly less than horizon/)
+
+    const repairInput = screen.getByLabelText('Repair intervention minute')
+    await userEvent.clear(repairInput)
+    await userEvent.type(repairInput, '10')
+    const leakInput = screen.getByLabelText('Leak loss rate (bar/min)')
+    await userEvent.clear(leakInput)
+    await userEvent.type(leakInput, '0.33')
+    await userEvent.click(screen.getByRole('button', { name: 'Run scenario simulation' }))
+
     await waitFor(() =>
-      expect(seenBodies.some((b) => b.includes('"scenario":"maintenance_repair"'))).toBe(true),
+      expect(
+        seenBodies.some(
+          (b) =>
+            b.includes('"scenario":"maintenance_repair"') &&
+            b.includes('"horizon_minutes":15') &&
+            b.includes('"leak_rate_bar_per_min":0.33'),
+        ),
+      ).toBe(true),
     )
   })
 })
