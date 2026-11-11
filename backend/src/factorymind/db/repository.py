@@ -156,6 +156,7 @@ class IncidentRepo:
                 .where(
                     EvidenceRow.incident_id == incident.id,
                     EvidenceRow.tenant_id == self._p.tenant_id,
+                    EvidenceRow.asset_id == incident.asset_id,
                 )
                 .order_by(EvidenceRow.id)
             )
@@ -170,6 +171,7 @@ class IncidentRepo:
                 .where(
                     Decision.incident_id == incident.id,
                     Decision.tenant_id == self._p.tenant_id,
+                    Decision.asset_id == incident.asset_id,
                 )
                 .order_by(Decision.created_at, Decision.id)
             )
@@ -216,6 +218,7 @@ class IncidentRepo:
                 .where(
                     HumanObservation.incident_id == incident.id,
                     HumanObservation.tenant_id == self._p.tenant_id,
+                    HumanObservation.asset_id == incident.asset_id,
                 )
                 .order_by(HumanObservation.created_at, HumanObservation.id)
             )

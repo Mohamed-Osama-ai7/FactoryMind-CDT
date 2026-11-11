@@ -16,7 +16,11 @@ import numpy as np
 import pandas as pd
 
 from factorymind.anomaly.events import is_integrity_warning_regime
-from factorymind.anomaly.features import WindowSpec, window_features
+from factorymind.anomaly.features import (
+    WindowSpec,
+    anchored_window_features,
+    window_features,
+)
 from factorymind.anomaly.regimes import OperatingRegime
 from factorymind.anomaly.service import AnomalyService, ReplayOutput, WindowScore
 from factorymind.contracts.events import (
@@ -293,6 +297,27 @@ def _select_peak_window(
     return at_or_after[0] if at_or_after else (event_windows[0] if event_windows else None)
 
 
+def _phase_features(
+    raw_slice: pd.DataFrame,
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    window: pd.Timedelta,
+    spec: WindowSpec,
+) -> pd.DataFrame:
+    """Compute strictly contained derived features inside ``[start, end)`` without leakage."""
+    if raw_slice.empty or (end - start) < window:
+        return pd.DataFrame()
+    aligned = start == start.floor(spec.length)
+    wf = (
+        window_features(raw_slice, spec)
+        if aligned
+        else anchored_window_features(raw_slice, spec, start)
+    )
+    win_starts = pd.DatetimeIndex(wf.index)
+    return wf[(win_starts >= start) & (win_starts + window <= end)]
+
+
 def _summarize_phase(
     *,
     phase: EventPhaseName,
@@ -306,9 +331,14 @@ def _summarize_phase(
 ) -> tuple[PhaseEvidenceSummary, list[str], list[str]]:
     raw_slice = _slice_raw(raw_data, start, end)
     observed, frozen, oor = _observed_signals_for_slice(raw_slice, dataset_id=dataset_id)
-    phase_wins = [w for w in windows if start <= w.window_start < end]
+    phase_wins = [w for w in windows if start <= w.window_start and w.window_end <= end]
 
     if end <= start:
+        empty_reason = (
+            "Single-window event has no distinct intermediate evolution span."
+            if phase == "evolution"
+            else "Phase disabled or zero duration requested (end <= start)."
+        )
         return (
             PhaseEvidenceSummary(
                 phase=phase,
@@ -316,9 +346,7 @@ def _summarize_phase(
                 start=start.to_pydatetime(),
                 end=end.to_pydatetime(),
                 available=False,
-                reason_unavailable=(
-                    "Single-window event has no distinct intermediate evolution span."
-                ),
+                reason_unavailable=empty_reason,
                 expected_windows=0,
                 total_windows=0,
                 valid_windows=0,
@@ -331,9 +359,12 @@ def _summarize_phase(
         )
 
     expected = _expected_window_count(start, end, window)
-    wf = window_features(raw_slice, spec) if not raw_slice.empty else pd.DataFrame()
+    wf = _phase_features(raw_slice, start=start, end=end, window=window, spec=spec)
     derived = _derived_features_for_windows(wf, spec)
-    valid_wins = sum(1 for w in phase_wins if w.regime.reason != "incomplete_or_gapped")
+    valid_wf_wins = int(wf["valid"].sum()) if not wf.empty else 0
+    valid_replay_wins = sum(1 for w in phase_wins if w.regime.reason != "incomplete_or_gapped")
+    total_wins = len(phase_wins) if phase_wins else len(wf)
+    valid_wins = valid_replay_wins if phase_wins else valid_wf_wins
     counts: Counter[OperatingRegime] = Counter(w.regime.regime for w in phase_wins)
     dominant = counts.most_common(1)[0][0] if counts else None
 
@@ -364,7 +395,7 @@ def _summarize_phase(
         available=available,
         reason_unavailable=reason_unavail,
         expected_windows=expected,
-        total_windows=len(phase_wins),
+        total_windows=total_wins,
         valid_windows=valid_wins,
         sample_count=len(raw_slice),
         dominant_regime=dominant,
@@ -474,24 +505,26 @@ def _assess_quality(
                 )
             )
 
-    for sensor in frozen_sensors:
+    for sensor in sorted(set(frozen_sensors)):
+        if stale_wins > 0 and sensor in {"TP3", "TP2", "Motor_current"}:
+            continue
         msg = f"Channel {sensor} remained constant (std <= 1e-12) across an event phase"
         if msg not in conflicting:
             conflicting.append(msg)
-        if stale_wins == 0:
-            contradictions.append(
-                ContradictionRecord(
-                    kind="sensor_freeze",
-                    timestamp=event_start.to_pydatetime(),
-                    severity="warning",
-                    signals=[sensor],
-                    description=msg,
-                )
+        contradictions.append(
+            ContradictionRecord(
+                kind="sensor_freeze",
+                timestamp=event_start.to_pydatetime(),
+                severity="warning",
+                signals=[sensor],
+                description=msg,
             )
+        )
 
-    for sensor in out_of_range_signals:
+    for sensor in sorted(set(out_of_range_signals)):
         msg = f"Channel {sensor} contained out-of-range raw samples"
-        conflicting.append(msg)
+        if msg not in conflicting:
+            conflicting.append(msg)
         contradictions.append(
             ContradictionRecord(
                 kind="out_of_range",
@@ -501,6 +534,15 @@ def _assess_quality(
                 description=msg,
             )
         )
+
+    dedup_contradictions: list[ContradictionRecord] = []
+    seen_contradictions: set[tuple[str, object, tuple[str, ...]]] = set()
+    for c in contradictions:
+        key = (c.kind, c.timestamp, tuple(c.signals))
+        if key not in seen_contradictions:
+            seen_contradictions.add(key)
+            dedup_contradictions.append(c)
+    contradictions = dedup_contradictions
 
     recovery_status: Literal["recovered", "persisting", "stopped", "unverified"] = "unverified"
     if recovery.available:
@@ -537,8 +579,15 @@ def _assess_quality(
         warnings.append(
             f"{stale_wins} event window(s) exhibited frozen whole-feed telemetry (stale_telemetry)."
         )
-    if frozen_sensors and stale_wins == 0:
-        warnings.append(f"Single-sensor constant reading observed on: {', '.join(frozen_sensors)}.")
+    non_stale_frozen = [
+        s
+        for s in sorted(set(frozen_sensors))
+        if stale_wins == 0 or s not in {"TP3", "TP2", "Motor_current"}
+    ]
+    if non_stale_frozen:
+        warnings.append(
+            f"Single-sensor constant reading observed on: {', '.join(non_stale_frozen)}."
+        )
     if any(w.regime.regime == "starting" for w in event_windows):
         warnings.append(
             "Startup transition detected (~0.1 Hz sampling misses sub-10 s electrical inrush)."
@@ -657,7 +706,7 @@ def _build_neighbors(
                 raised_at=w.raised_at.to_pydatetime(),
                 detector_or_source=w.detector_name,
                 relationship=_neighbor_relationship(w.start, w.end, event_start, event_end),
-                origin="statistical_inference",
+                origin="statistical_inference" if "pca_spe" in w.sources else "derived",
             )
         )
     for rep in replay.reports:
@@ -703,15 +752,22 @@ def _build_timeline(
     event_end: pd.Timestamp,
     primary_detector: str,
     primary_version: str,
-    dataset_id: str,
+    window_length: str,
 ) -> list[TimelineEntry]:
     entries: list[TimelineEntry] = []
-    source_id = f"dataset:{dataset_id}:processed_parquet"
+    source_id = f"window_features:{window_length}"
     prev_regime: str | None = None
     prev_reason: str | None = None
 
+    lookback_start = phases[0].start
+    recovery_end = phases[-1].end
+
     for idx, w in enumerate(replay.windows):
-        in_event = event_start <= w.window_start < event_end
+        w_start_dt = w.window_start.to_pydatetime()
+        w_end_dt = w.window_end.to_pydatetime()
+        if w_start_dt < lookback_start or w_end_dt > recovery_end:
+            continue
+        in_event = event_start <= w.window_start and w.window_end <= event_end
         phase = _phase_of_timestamp(w.window_start, phases)
         regime = w.regime
         regime_changed = regime.regime != prev_regime or (
@@ -728,21 +784,17 @@ def _build_timeline(
                     category="telemetry_window",
                     origin="derived",
                     phase=phase,
-                    title=f"Window {w.status} ({regime.regime})",
+                    title=f"Window kinematics ({regime.regime})",
                     summary=regime.summary,
                     source_id=source_id,
-                    detector=primary_detector,
-                    model_version=primary_version,
                     regime=regime.regime,
-                    event_class=w.event_class,
                     details={
                         "n_samples": w.n_samples,
                         "load_duty": regime.load_duty,
                         "off_fraction": regime.off_fraction,
-                        "score": w.score,
-                        "exceedance": w.exceedance,
-                        "warning_active": w.warning_active,
-                        "warning_score": w.warning_score,
+                        "load_starts": regime.load_starts,
+                        "inrush_samples": regime.inrush_samples,
+                        "stale_telemetry": regime.stale_telemetry,
                     },
                 )
             )
@@ -758,7 +810,6 @@ def _build_timeline(
                     summary=f"{regime.reason}: {regime.summary}",
                     source_id=source_id,
                     regime=regime.regime,
-                    event_class=w.event_class,
                     details={
                         "reason": regime.reason,
                         "quality_flags": list(regime.quality_flags),
@@ -776,7 +827,7 @@ def _build_timeline(
                 end_timestamp=ep.episode.end.to_pydatetime(),
                 category="alarm_episode",
                 origin="model_prediction",
-                phase="onset",
+                phase=_phase_of_timestamp(ep.episode.start, phases),
                 title=f"Air-leak alarm episode ({ep.dominant_regime})",
                 summary=ep.hypothesis or ep.uncertainty_note or "Sustained duty exceedance.",
                 source_id=f"model:{primary_version}",
@@ -901,7 +952,7 @@ def _build_timeline(
             )
         )
 
-    entries.sort(key=lambda e: (e.timestamp, e.category, e.title))
+    entries.sort(key=lambda e: (e.timestamp, e.category, e.phase or "", e.source_id, e.title))
     return entries
 
 
@@ -928,8 +979,12 @@ def build_event_evidence_package(
 
     replay = service.replay_details(lookback_start, recovery_end)
     raw_data = service.telemetry
-    event_wins = [w for w in replay.windows if event_start <= w.window_start < event_end]
-    recovery_wins = [w for w in replay.windows if event_end <= w.window_start < recovery_end]
+    event_wins = [
+        w for w in replay.windows if event_start <= w.window_start and w.window_end <= event_end
+    ]
+    recovery_wins = [
+        w for w in replay.windows if event_end <= w.window_start and w.window_end <= recovery_end
+    ]
     peak_win = _select_peak_window(event_wins, event_start=event_start)
 
     onset_end = min(event_end, event_start + window)
@@ -966,14 +1021,21 @@ def build_event_evidence_package(
         if pname in ("onset", "evolution", "peak"):
             frozen_all.extend(p_frozen)
             oor_all.extend(p_oor)
+    frozen_all = sorted(set(frozen_all))
+    oor_all = sorted(set(oor_all))
 
     evidence_items: list[EvidenceItemContract] = []
     if peak_win is not None:
         raw_items = peak_win.evidence or peak_win.warning_evidence
+        use_warning_profile = not peak_win.evidence and bool(peak_win.warning_evidence)
         source_model = (
-            peak_win.warning_detector or service.bundle.version
-            if (not peak_win.evidence and peak_win.warning_evidence)
-            else service.bundle.version
+            service.warning_bundle.version
+            if use_warning_profile and service.warning_bundle is not None
+            else (
+                peak_win.warning_detector or service.bundle.version
+                if use_warning_profile
+                else service.bundle.version
+            )
         )
         for e in raw_items:
             evidence_items.append(
@@ -1029,7 +1091,7 @@ def build_event_evidence_package(
         event_end=event_end,
         primary_detector=service.bundle.detector_name,
         primary_version=service.bundle.version,
-        dataset_id=dataset_id,
+        window_length=spec.length,
     )
 
     provenance = ProvenanceRecord(

@@ -97,6 +97,19 @@ const samplePackage: EventEvidencePackage = {
       warning_active_windows: 1,
       observed_signals: [
         {
+          signal: 'TP3',
+          unit: 'bar',
+          origin: 'observed',
+          sample_count: 60,
+          min: 8.8,
+          mean: 9.0,
+          max: 9.2,
+          std: 0.1,
+          last: 9.1,
+          frozen: false,
+          provenance: 'dataset:metropt3:processed_parquet',
+        },
+        {
           signal: 'Motor_current',
           unit: 'A',
           origin: 'observed',
@@ -218,6 +231,9 @@ describe('EventEvidencePackageView', () => {
     expect(screen.getByText('Quality status: degraded')).toBeInTheDocument()
     expect(screen.getByText('99.2 %')).toBeInTheDocument()
     expect(screen.getByText('Recovery/persistence tail unavailable')).toBeInTheDocument()
+    expect(screen.getByText('~0.1 Hz cadence')).toBeInTheDocument()
+    expect(screen.getByText('TP3 (bar)')).toBeInTheDocument()
+    expect(screen.getByText('Compressor stayed loaded continuously.')).toBeInTheDocument()
     expect(screen.getByText('Motor_current')).toBeInTheDocument()
     expect(screen.getByText(/1 fraction/)).toBeInTheDocument()
 

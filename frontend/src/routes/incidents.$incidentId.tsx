@@ -100,7 +100,11 @@ function IncidentInvestigationPage() {
                 ))}
               </ul>
             )}
-            <ObservationForm incidentId={incident.id} defaultTimestamp={incident.episode_start} />
+            <ObservationForm
+              key={incident.id}
+              incidentId={incident.id}
+              defaultTimestamp={incident.episode_start}
+            />
           </div>
         </section>
       )}
@@ -111,7 +115,7 @@ function IncidentInvestigationPage() {
           Evidence package unavailable: {describeApiError(evidenceQuery.error)}
         </p>
       )}
-      {pkg && <EventEvidencePackageView pkg={pkg} />}
+      {pkg && <EventEvidencePackageView key={pkg.package_id} pkg={pkg} />}
     </section>
   )
 }

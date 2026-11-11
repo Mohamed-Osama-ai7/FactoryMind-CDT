@@ -199,7 +199,7 @@ function InlineEventEvidence({
   const pkgQuery = useAnomalyEventEvidence({
     start: eventStart,
     end: eventEnd,
-    raised_at: raisedAt ?? null,
+    ...(raisedAt ? { raised_at: raisedAt } : {}),
   })
   if (pkgQuery.isPending) return <p role="status">Building event evidence package…</p>
   if (pkgQuery.isError) {
@@ -210,7 +210,7 @@ function InlineEventEvidence({
     )
   }
   const pkg = pkgQuery.data?.status === 200 ? pkgQuery.data.data : undefined
-  return pkg ? <EventEvidencePackageView pkg={pkg} /> : null
+  return pkg ? <EventEvidencePackageView key={pkg.package_id} pkg={pkg} headingLevel="h4" /> : null
 }
 
 /** Replays recorded telemetry through primary and warning detectors with regime context. */
@@ -224,6 +224,14 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
     end: string
     raisedAt?: string
   } | null>(null)
+  const rangeKey = `${start}-${hours}`
+  const [prevRangeKey, setPrevRangeKey] = useState(rangeKey)
+  if (rangeKey !== prevRangeKey) {
+    setPrevRangeKey(rangeKey)
+    setSelected(null)
+    setSelectedWarning(null)
+    setInspectedEvent(null)
+  }
 
   // Non-2xx responses throw (see api/http.ts), so a resolved response is always the 200 shape.
   const replay = data?.status === 200 ? data.data : undefined
@@ -526,6 +534,7 @@ export function ReplayPanel({ start, hours }: ReplayPanelProps) {
             </button>
           </div>
           <InlineEventEvidence
+            key={`${inspectedEvent.start}-${inspectedEvent.end}`}
             eventStart={inspectedEvent.start}
             eventEnd={inspectedEvent.end}
             raisedAt={inspectedEvent.raisedAt}

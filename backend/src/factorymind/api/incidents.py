@@ -434,7 +434,7 @@ def get_incident(
 def get_incident_evidence_package(
     incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
     request: Request,
-    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ))],
+    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ, cost=5))],
     service: ServiceDep,
     baseline_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 4.0,
     recovery_hours: Annotated[float, Query(ge=0.0, le=24.0)] = 2.0,

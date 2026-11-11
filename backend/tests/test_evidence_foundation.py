@@ -286,13 +286,18 @@ def test_evidence_api_observations_audit_and_tenant_isolation(
         for t in pkg_body["timeline"]
     )
 
-    # HumanObservation table is strictly append-only in SQLite
+    # HumanObservation table is strictly append-only in SQLite (both UPDATE and DELETE refused)
     db: Database = client.app.state.db  # type: ignore[attr-defined]
     with (
         db.engine.begin() as conn,
         pytest.raises(DatabaseError, match="append-only"),
     ):
         conn.execute(text("UPDATE human_observation SET note = 'tampered'"))
+    with (
+        db.engine.begin() as conn,
+        pytest.raises(DatabaseError, match="append-only"),
+    ):
+        conn.execute(text("DELETE FROM human_observation"))
 
     # Observation creation was recorded in the audit log
     audit_events = client.get(
@@ -314,3 +319,83 @@ def test_schema_v2_refuses_v1_database(tmp_path: Any) -> None:
 
     with pytest.raises(SchemaMismatchError):
         Database(url).ensure_ready()
+
+
+def test_unaligned_boundaries_origin_purity_and_dedup(tmp_path: Path) -> None:
+    service_clean, base, _ = _make_wp_a_service(tmp_path / "clean")
+
+    # 1. Inject whole-feed stale window in baseline BEFORE unaligned 06:05..06:35 event,
+    #    plus Oil_temperature single-sensor freeze spanning onset & evolution.
+    mod = base.copy()
+    stale_before = (mod.index >= pd.Timestamp("2020-01-04 03:00")) & (
+        mod.index < pd.Timestamp("2020-01-04 03:20")
+    )
+    mod.loc[stale_before, ["TP3", "TP2", "Motor_current"]] = [8.2, 8.1, 4.0]
+    ev_span = (mod.index >= pd.Timestamp("2020-01-04 06:05")) & (
+        mod.index < pd.Timestamp("2020-01-04 06:35")
+    )
+    mod.loc[ev_span, "Oil_temperature"] = 61.5
+    proc = tmp_path / "proc"
+    (proc / metropt3.DATASET_ID).mkdir(parents=True)
+    mod.to_parquet(proc / metropt3.DATASET_ID / "telemetry.parquet")
+    svc = AnomalyService(
+        service_clean.bundle,
+        service_clean.card,
+        proc,
+        service_clean.reports,
+        warning_bundle=service_clean.warning_bundle,
+    )
+
+    pkg = build_event_evidence_package(
+        svc,
+        asset_id=ASSET,
+        event_start=pd.Timestamp("2020-01-04 06:05"),
+        event_end=pd.Timestamp("2020-01-04 06:35"),
+        baseline_hours=4.0,
+        recovery_hours=2.0,
+    )
+    res = evaluate_package("unaligned", pkg, kind="synthetic_stress")
+    assert res.boundary_aligned
+    assert res.origins_pure
+    assert res.missing_data_honest
+
+    # Unaligned onset [06:05..06:15) should still observe anchored derived features cleanly
+    onset = next(p for p in pkg.phases if p.phase == "onset")
+    assert onset.available
+    assert onset.valid_windows == 1
+    assert any(d.name == "load_duty" and d.observable for d in onset.derived_features)
+
+    # Whole-feed stale neighbor window in baseline uses derived origin, and single-sensor freeze
+    # across onset/evolution emits exactly ONE deduplicated ContradictionRecord for Oil_temperature.
+    oil_freezes = [
+        c
+        for c in pkg.quality.contradictions
+        if c.kind == "sensor_freeze" and c.signals == ["Oil_temperature"]
+    ]
+    assert len(oil_freezes) == 1
+
+    # 2. Zero baseline/recovery durations yield accurate reason messages (not "single-window")
+    pkg_zero = build_event_evidence_package(
+        svc,
+        asset_id=ASSET,
+        event_start=pd.Timestamp("2020-01-06 06:00"),
+        event_end=pd.Timestamp("2020-01-06 09:00"),
+        baseline_hours=0.0,
+        recovery_hours=0.0,
+    )
+    base_zero = next(p for p in pkg_zero.phases if p.phase == "pre_event_baseline")
+    assert not base_zero.available
+    assert "Single-window" not in (base_zero.reason_unavailable or "")
+
+    # 3. Alarm episodes outside [event_start, onset_end) receive their true chronological phase
+    ep_pkg = build_event_evidence_package(
+        svc,
+        asset_id=ASSET,
+        event_start=pd.Timestamp("2020-01-06 07:00"),
+        event_end=pd.Timestamp("2020-01-06 09:00"),
+        baseline_hours=4.0,
+        recovery_hours=2.0,
+    )
+    ep_entries = [t for t in ep_pkg.timeline if t.category == "alarm_episode"]
+    if ep_entries:
+        assert all(t.phase != "onset" or t.timestamp >= ep_pkg.event_start for t in ep_entries)

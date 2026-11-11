@@ -45,18 +45,29 @@ def _boundary_aligned(pkg: EventEvidencePackage) -> bool:
     base = by_phase["pre_event_baseline"]
     onset = by_phase["onset"]
     evo = by_phase["evolution"]
+    peak = by_phase["peak"]
     rec = by_phase["recovery_or_persistence"]
-    return (
-        base.end == pkg.event_start
+    phases_ok = (
+        base.start == pkg.lookback_start
+        and base.end == pkg.event_start
         and onset.start == pkg.event_start
         and onset.end == evo.start
         and evo.end == pkg.event_end
         and rec.start == pkg.event_end
+        and rec.end == pkg.recovery_end
+        and pkg.event_start <= peak.start <= peak.end <= pkg.event_end
+    )
+    if not phases_ok:
+        return False
+    # Verify non-empty model outputs / warnings inside the timeline do not sit past recovery_end.
+    return all(
+        entry.end_timestamp is None or entry.end_timestamp <= pkg.recovery_end
+        for entry in pkg.timeline
+        if entry.category in ("telemetry_window", "regime_change")
     )
 
 
 def _origins_pure(pkg: EventEvidencePackage) -> bool:
-    # Observed signal summaries must always carry origin="observed"
     for p in pkg.phases:
         if any(s.origin != "observed" for s in p.observed_signals):
             return False
@@ -66,8 +77,44 @@ def _origins_pure(pkg: EventEvidencePackage) -> bool:
             return False
         if p.exceedance_origin != "statistical_inference":
             return False
-    # Inference evidence items must never masquerade as direct sensor observations
-    return all(item.origin in ("statistical_inference", "derived") for item in pkg.evidence_items)
+    if any(item.origin not in ("statistical_inference", "derived") for item in pkg.evidence_items):
+        return False
+    for n in pkg.neighboring_events:
+        if n.kind == "air_leak_alarm" and n.origin != "model_prediction":
+            return False
+        if n.kind == "operator_report" and n.origin != "human_observation":
+            return False
+        if n.kind == "sensor_consistency_warning":
+            expected = (
+                "derived" if n.detector_or_source == "signal_integrity" else "statistical_inference"
+            )
+            if n.origin != expected:
+                return False
+    for entry in pkg.timeline:
+        if entry.category in ("telemetry_window", "regime_change"):
+            if (
+                entry.origin != "derived"
+                or entry.detector is not None
+                or entry.model_version is not None
+            ):
+                return False
+            if any(k in entry.details for k in ("score", "exceedance", "warning_score")):
+                return False
+        elif entry.category in ("alarm_episode", "model_output"):
+            if entry.origin != "model_prediction":
+                return False
+        elif entry.category == "evidence_group":
+            if entry.origin not in ("statistical_inference", "derived"):
+                return False
+        elif entry.category in ("human_observation", "operator_report"):
+            if entry.origin != "human_observation":
+                return False
+        elif entry.category == "consistency_warning":
+            sources = entry.details.get("sources", [])
+            expected = "statistical_inference" if "pca_spe" in sources else "derived"
+            if entry.origin != expected:
+                return False
+    return all(c.origin in ("derived", "statistical_inference") for c in pkg.quality.contradictions)
 
 
 def _missing_data_honest(pkg: EventEvidencePackage) -> bool:

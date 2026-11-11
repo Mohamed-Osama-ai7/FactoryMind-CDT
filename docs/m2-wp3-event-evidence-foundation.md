@@ -33,8 +33,8 @@ To prevent downstream reasoning or operators from conflating raw sensor measurem
 `EvidenceQualityAssessment` makes evidence limitations first-class fields:
 
 - Computes `completeness_score` (`0..1`), `coverage_ratio` (`0..1`), `confidence_penalty_factor` (`0..1`), `missing_windows_count`, `missing_samples_count`, `stale_windows_count`, `frozen_sensors`, `out_of_range_signals`, `alignment_issues`, and explicit `overall_status` (`sufficient`, `degraded`, `insufficient`).
-- Surfaces explicit `ContradictionRecord` entries (`valve_contradiction`, `motor_valve_mismatch`, `sensor_freeze`, `out_of_range`, `model_divergence`).
-- Leaves absent or invalid windows uninterpolated (`sample_count == 0`, `mean == None`, explicit `available=False` and `reason_unavailable`).
+- Surfaces explicit `ContradictionRecord` entries (`valve_contradiction`, `motor_valve_mismatch`, `sensor_freeze`, `out_of_range`; `model_divergence` is reserved in `contracts/events.py` for downstream multi-model divergence checks).
+- Leaves absent or invalid windows uninterpolated (`sample_count == 0`, `mean == None`, explicit `available=False` and `reason_unavailable`), and prevents phase lookahead spillover via strict `[start, end)` containment and phase-anchored `anchored_window_features` for unaligned intervals.
 
 ---
 
@@ -47,7 +47,7 @@ To prevent downstream reasoning or operators from conflating raw sensor measurem
   - `POST /api/v1/incidents/{incident_id}/observations` (`observation:create`, CSRF/write check, append-only SQLite + hash-chained `observation.create` audit event).
   - `GET /api/v1/anomaly/event-evidence` (`anomaly:read` + data-source authorization, inspectable directly from Replay UI).
   - Extended `IncidentDetail` (`GET /api/v1/incidents/{id}`) with `observations`.
-- **Frontend UI & OpenAPI:** Regenerated `frontend/openapi.json` and Orval client; added `/incidents/` list route, `/incidents/$incidentId` investigation route, `EventEvidencePackageView` (quality banner, timeline category filter, phase drilldown, baseline/peak contrasts, contradictions, neighbor events), `ObservationForm` (permission-gated), and inline event package drawer inside `ReplayPanel`.
+- **Frontend UI & OpenAPI:** Regenerated `frontend/openapi.json` and Orval client; added `/incidents/` list route, `/incidents/$incidentId` investigation route, `EventEvidencePackageView` (quality banner, monitoring limits, timeline category filter, phase drilldown, baseline-vs-peak contrast, grouped peak deviations, contradictions, neighbor events), `ObservationForm` (permission-gated), and inline event package drawer inside `ReplayPanel`.
 
 ---
 
@@ -55,7 +55,7 @@ To prevent downstream reasoning or operators from conflating raw sensor measurem
 
 ### Synthetic & Integration Test Suites
 
-- **Backend:** `ruff format --check src tests` (`63 files`), `ruff check src tests`, `mypy src` (`0` errors across `36` source files), `pytest -q` -> **`436 passed`**. Covers WP-A package alignment, origin purity, synthetic missing-baseline/gapped/frozen-`TP3`/valve-contradiction stress tests, RBAC matrix, tenant isolation, SQLite append-only trigger enforcement, and read-only safety boundaries.
+- **Backend:** `ruff format --check src tests` (`63 files`), `ruff check src tests`, `mypy src` (`0` errors across `36` source files), `pytest -q` -> **`437 passed`**. Covers WP-A package alignment, origin purity, synthetic missing-baseline/gapped/frozen-`TP3`/valve-contradiction & unaligned-phase stress tests, RBAC matrix, tenant isolation, SQLite `UPDATE`/`DELETE` append-only trigger enforcement, and read-only safety boundaries.
 - **Frontend:** `npm run generate:api` synced with `openapi.json`, `npm run lint` (`biome check .`, `40` files), `npm run typecheck` (`tsc -b`), `npm run test` -> **`7` files / `31` passed** (including `EventEvidencePackageView.test.tsx`), `npm run build` (`tsc -b && vite build`).
 
 ### Live MetroPT-3 Failure Report Evaluation (Real Operational Telemetry)
@@ -66,9 +66,10 @@ Executed directly against processed MetroPT-3 telemetry and trained `20261111-f0
   - `boundary_alignment_rate`: `1.0`
   - `origin_purity_rate`: `1.0`
   - `missing_data_honesty_rate`: `1.0`
-  - `mean_completeness_score`: `0.9276`
-- Per-event findings (preserving missing/stale telemetry honestly rather than hiding gaps):
-  - `F1`: `degraded` (`completeness_score=0.9917`, `coverage_ratio=0.9861`, `confidence_penalty_factor=0.687`, `contradictions_detected=2`, `frozen_sensors=7`, `stale_windows_count=2`, `timeline_entries=203`, `neighbors_count=4`) — surfaces the actual pre-onset telemetry freeze window during `F1`.
+  - `mean_completeness_score`: `0.9266`
+- Per-event findings (preserving missing/stale telemetry and channel freezes honestly rather than hiding gaps):
+  - `F1`: `degraded` (`completeness_score=0.9875`, `coverage_ratio=0.9792`, `confidence_penalty_factor=0.3713`, `contradictions_detected=6`, `frozen_sensors=7`, `stale_windows_count=2`, `timeline_entries=201`, `neighbors_count=4`) — surfaces the two `stale_telemetry` windows inside `F1` (`00:00`, `00:10`) prior to `raised_at`, individual constant channels across the event, and the pre-onset frozen baseline in `pre_event_baseline.quality_flags`.
   - `F2`: `sufficient` (`completeness_score=1.0`, `coverage_ratio=1.0`, `confidence_penalty_factor=1.0`, `timeline_entries=95`, `neighbors_count=3`).
   - `F3`: `degraded` (`completeness_score=0.741`, `coverage_ratio=0.9016`, `confidence_penalty_factor=0.741`, `timeline_entries=343`, `neighbors_count=12`).
   - `F4`: `degraded` (`completeness_score=0.9778`, `coverage_ratio=0.963`, `confidence_penalty_factor=0.9778`, `timeline_entries=62`, `neighbors_count=4`).
+

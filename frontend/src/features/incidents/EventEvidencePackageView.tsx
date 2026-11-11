@@ -6,6 +6,7 @@ type EventPhaseName = EventEvidencePackage['phases'][number]['phase']
 
 export interface EventEvidencePackageViewProps {
   pkg: EventEvidencePackage
+  headingLevel?: 'h2' | 'h3' | 'h4'
 }
 
 const ORIGIN_LABELS: Record<string, string> = {
@@ -43,7 +44,11 @@ function fmtNum(value: number | null | undefined, digits = 3): string {
 }
 
 /** Accessible, origin-tagged multi-phase event evidence explorer and timeline. */
-export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps) {
+export function EventEvidencePackageView({
+  pkg,
+  headingLevel = 'h2',
+}: EventEvidencePackageViewProps) {
+  const Heading = headingLevel
   const headingPrefix = useId()
   const [selectedPhase, setSelectedPhase] = useState<EventPhaseName>('peak')
   const [timelineFilter, setTimelineFilter] = useState<string>('all')
@@ -52,6 +57,30 @@ export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps)
     () => pkg.phases.find((p) => p.phase === selectedPhase) ?? pkg.phases[0],
     [pkg.phases, selectedPhase],
   )
+
+  const contrastRows = useMemo(() => {
+    const base = pkg.phases.find((p) => p.phase === 'pre_event_baseline')
+    const peak = pkg.phases.find((p) => p.phase === 'peak')
+    if (!base?.available || !peak?.available) return []
+    const baseBySignal = new Map((base.observed_signals ?? []).map((s) => [s.signal, s]))
+    return (peak.observed_signals ?? [])
+      .map((ps) => {
+        const bs = baseBySignal.get(ps.signal)
+        const bVal = bs?.mean ?? bs?.active_fraction ?? null
+        const pVal = ps.mean ?? ps.active_fraction ?? null
+        if (bs == null || bVal === null || pVal === null) return null
+        return {
+          name: ps.signal,
+          unit: ps.unit,
+          origin: 'Observed',
+          baseline: bVal,
+          peak: pVal,
+          delta: pVal - bVal,
+        }
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null)
+      .slice(0, 6)
+  }, [pkg.phases])
 
   const filteredTimeline = useMemo(() => {
     const items = pkg.timeline ?? []
@@ -68,9 +97,9 @@ export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps)
         className="rounded-lg border border-border bg-panel p-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id={`${headingPrefix}-quality`} className="font-medium">
+          <Heading id={`${headingPrefix}-quality`} className="font-medium">
             Evidence quality &amp; provenance
-          </h3>
+          </Heading>
           <span className={`rounded border px-2 py-0.5 text-xs font-medium ${qualityStyle}`}>
             Quality status: {pkg.quality.overall_status}
           </span>
@@ -167,6 +196,16 @@ export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps)
                 </ul>
               </div>
             )}
+            {(pkg.quality.limitations?.length ?? 0) > 0 && (
+              <div>
+                <p className="font-medium text-ink">Known monitoring limits:</p>
+                <ul className="mt-1 list-disc pl-5 text-muted">
+                  {pkg.quality.limitations?.map((lim) => (
+                    <li key={lim}>{lim}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -175,9 +214,9 @@ export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps)
         aria-labelledby={`${headingPrefix}-phases`}
         className="rounded-lg border border-border bg-panel p-4"
       >
-        <h3 id={`${headingPrefix}-phases`} className="font-medium">
+        <Heading id={`${headingPrefix}-phases`} className="font-medium">
           Event phases (observed telemetry vs derived &amp; inferred signals)
-        </h3>
+        </Heading>
         <div className="mt-3 flex flex-wrap gap-2">
           {pkg.phases.map((p) => (
             <button
@@ -325,14 +364,105 @@ export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps)
         )}
       </section>
 
+      {contrastRows.length > 0 && (
+        <section
+          aria-labelledby={`${headingPrefix}-contrast`}
+          className="rounded-lg border border-border bg-panel p-4"
+        >
+          <Heading id={`${headingPrefix}-contrast`} className="font-medium">
+            Baseline vs peak signal contrast ({ORIGIN_LABELS.observed})
+          </Heading>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th scope="col" className="pr-3 font-normal">
+                    Signal
+                  </th>
+                  <th scope="col" className="pr-3 font-normal">
+                    Baseline
+                  </th>
+                  <th scope="col" className="pr-3 font-normal">
+                    Peak
+                  </th>
+                  <th scope="col" className="font-normal">
+                    Delta (peak − baseline)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {contrastRows.map((row) => (
+                  <tr key={row.name} className="border-t border-border">
+                    <td className="py-1 pr-3 font-mono text-ink">
+                      {row.name} ({row.unit})
+                    </td>
+                    <td className="py-1 pr-3">{fmtNum(row.baseline)}</td>
+                    <td className="py-1 pr-3">{fmtNum(row.peak)}</td>
+                    <td className="py-1">
+                      {row.delta >= 0 ? `+${fmtNum(row.delta)}` : fmtNum(row.delta)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {pkg.evidence_items.length > 0 && (
+        <section
+          aria-labelledby={`${headingPrefix}-deviations`}
+          className="rounded-lg border border-border bg-panel p-4"
+        >
+          <Heading id={`${headingPrefix}-deviations`} className="font-medium">
+            Grouped peak deviations ({ORIGIN_LABELS.statistical_inference})
+          </Heading>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th scope="col" className="pr-3 font-normal">
+                    Group / feature
+                  </th>
+                  <th scope="col" className="pr-3 font-normal">
+                    Observed / ref
+                  </th>
+                  <th scope="col" className="pr-3 font-normal">
+                    Robust z / novel
+                  </th>
+                  <th scope="col" className="font-normal">
+                    Meaning
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {pkg.evidence_items.map((item) => (
+                  <tr key={`${item.group}-${item.feature}`} className="border-t border-border">
+                    <td className="py-1 pr-3">
+                      <span className="font-medium text-ink">{item.group_label}</span>
+                      <span className="block font-mono text-muted">{item.feature}</span>
+                    </td>
+                    <td className="py-1 pr-3">
+                      {fmtNum(item.value)} vs {fmtNum(item.training_median)} {item.unit}
+                    </td>
+                    <td className="py-1 pr-3">{item.novel ? 'novel' : fmtNum(item.robust_z, 2)}</td>
+                    <td className="py-1 text-muted">{item.meaning}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {(pkg.neighboring_events.length > 0 || (pkg.quality.contradictions?.length ?? 0) > 0) && (
         <section
           aria-labelledby={`${headingPrefix}-neighbors`}
           className="rounded-lg border border-border bg-panel p-4"
         >
-          <h3 id={`${headingPrefix}-neighbors`} className="font-medium">
+          <Heading id={`${headingPrefix}-neighbors`} className="font-medium">
             Neighboring events &amp; signal contradictions
-          </h3>
+          </Heading>
           {pkg.neighboring_events.length > 0 && (
             <ul className="mt-2 space-y-1 text-xs text-muted">
               {pkg.neighboring_events.map((n) => (
@@ -347,7 +477,7 @@ export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps)
           {(pkg.quality.contradictions?.length ?? 0) > 0 && (
             <ul className="mt-2 space-y-1 text-xs text-warn">
               {pkg.quality.contradictions?.map((c) => (
-                <li key={`${c.kind}-${c.timestamp}-${c.signals.join('-')}`}>
+                <li key={`${c.kind}-${c.timestamp}-${c.signals.join('-')}-${c.description}`}>
                   [{c.severity}] {formatNaive(c.timestamp)} · {c.kind} ({c.signals.join(', ')}):{' '}
                   {c.description}
                 </li>
@@ -362,9 +492,9 @@ export function EventEvidencePackageView({ pkg }: EventEvidencePackageViewProps)
         className="rounded-lg border border-border bg-panel p-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id={`${headingPrefix}-timeline`} className="font-medium">
+          <Heading id={`${headingPrefix}-timeline`} className="font-medium">
             Chronological event timeline ({filteredTimeline.length})
-          </h3>
+          </Heading>
           <div className="flex flex-wrap gap-1.5">
             {TIMELINE_CATEGORIES.map((cat) => (
               <button
