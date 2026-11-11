@@ -16,9 +16,12 @@ export interface EdgeSampleValidationResponse {
   asset_id: string;
   buffer: EdgeBufferStats;
   cadence: EdgeCadenceReport;
-  endpoint_allowlist_ok: boolean;
+  endpoint_check_scope?: 'url_string_only_no_dns_resolution';
+  endpoint_url_policy_ok: boolean;
+  mode?: 'preflight_validation_only';
   protocol: EdgeSampleValidationResponseProtocol;
   read_only?: true;
+  real_connector_io?: false;
   safety_note: string;
   source_id: string;
   warnings?: string[];

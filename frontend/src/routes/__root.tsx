@@ -51,7 +51,7 @@ function Shell() {
           )}
           {permissions.has('asset:read') && (
             <Link to="/edge" className={LINK} activeProps={ACTIVE}>
-              OT &amp; Edge Health
+              Edge Preflight
             </Link>
           )}
           {permissions.has('anomaly:read') && (

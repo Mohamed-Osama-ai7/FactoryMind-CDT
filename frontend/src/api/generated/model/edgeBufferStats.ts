@@ -17,8 +17,8 @@ export interface EdgeBufferStats {
   /** @minimum 0 */
   evicted_count: number;
   /** @minimum 0 */
-  reconnect_attempts: number;
-  /** @minimum 0 */
   retained_count: number;
+  /** @minimum 0 */
+  simulated_reconnect_attempts: number;
   state: EdgeBufferStatsState;
 }

@@ -5,22 +5,19 @@
  * Evidence-grounded, uncertainty-aware decision support. Advisory only.
  * OpenAPI spec version: 0.1.0
  */
-import type { EdgeSourceStatusEntryConnectionState } from './edgeSourceStatusEntryConnectionState';
+import type { EdgeSourceStatusEntryEndpointUrlPolicy } from './edgeSourceStatusEntryEndpointUrlPolicy';
 import type { EdgeSourceStatusEntryProtocol } from './edgeSourceStatusEntryProtocol';
-import type { EdgeSourceStatusEntrySsrfPolicyStatus } from './edgeSourceStatusEntrySsrfPolicyStatus';
 
 /**
  * Summary of one registered read-only OT/edge source.
  */
 export interface EdgeSourceStatusEntry {
   asset_id: string;
-  /**
-     * @minimum 0
-     * @maximum 1
-     */
-  buffer_utilization: number;
-  connection_state: EdgeSourceStatusEntryConnectionState;
+  connection_state?: 'descriptor_only_not_connected';
+  connector_io?: 'not_implemented';
+  endpoint_check_scope?: 'url_string_only_no_dns_resolution';
   endpoint_url: string;
+  endpoint_url_policy: EdgeSourceStatusEntryEndpointUrlPolicy;
   /** @minimum 4 */
   max_buffer_records: number;
   /** @minimum 1 */
@@ -29,8 +26,5 @@ export interface EdgeSourceStatusEntry {
   nominal_cadence_s: number;
   protocol: EdgeSourceStatusEntryProtocol;
   read_only?: true;
-  /** @minimum 0 */
-  reconnect_attempts: number;
   source_id: string;
-  ssrf_policy_status: EdgeSourceStatusEntrySsrfPolicyStatus;
 }

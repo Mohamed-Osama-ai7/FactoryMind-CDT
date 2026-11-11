@@ -1,6 +1,7 @@
-"""Read-only OT & edge connector health, stateless batch validation, and supply-chain API.
+"""OT/edge source descriptors, stateless batch preflight, and supply-chain checks API.
 
-Paths intentionally use ``/api/v1/edge/...`` and expose zero write/actuation operations.
+Paths intentionally use ``/api/v1/edge/...`` and expose zero write/actuation operations. No real
+OPC-UA, MQTT or historian client I/O is implemented; endpoint checks inspect URL text only.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ def get_edge_sources(
     principal: Annotated[Principal, Depends(require_data_source(Permission.ASSET_READ))],
     asset_id: Annotated[str | None, Query()] = None,
 ) -> EdgeSourcesResponse:
-    """List SSRF-verified read-only OT & edge telemetry sources visible to this caller."""
+    """List registered read-only source descriptors (URL-text checked; no live connections)."""
     settings: Settings = request.app.state.settings
     if asset_id is not None and (
         not IDENTIFIER.fullmatch(asset_id)
@@ -72,7 +73,7 @@ def get_supply_chain_hardening(
     request: Request,
     principal: Annotated[Principal, Depends(require_data_source(Permission.ASSET_READ))],
 ) -> SupplyChainHardeningResponse:
-    """Inspect repository license, SHA-pinned CI workflow, and artifact attestation status."""
+    """Run repository and runtime-artifact supply-chain checks and disclose check limits."""
     _ = principal
     settings: Settings = request.app.state.settings
     return build_supply_chain_report(

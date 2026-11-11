@@ -15,22 +15,44 @@ ConnectorProtocol = Literal[
     "historian_readonly",
 ]
 
-EdgeConnectionState = Literal[
-    "standby_offline",
-    "connected_readonly",
-    "reconnecting_backoff",
-    "degraded_buffer_evicting",
+# No adapter opens a network connection: a source is only ever a descriptor.
+EdgeSourceState = Literal["descriptor_only_not_connected"]
+
+# Outcome of validating one caller-submitted batch against an in-memory ring buffer. These are
+# properties of the submitted batch, never of a live connection.
+EdgeBufferState = Literal[
+    "batch_within_capacity",
+    "simulated_reconnect_backoff",
+    "batch_exceeds_capacity",
 ]
+
+ConnectorIoStatus = Literal["not_implemented"]
 
 CadenceStatus = Literal["nominal", "gapped_or_jittered", "stale_or_invalid"]
 
 AttestationStatus = Literal[
-    "verified",
-    "sha_pinned",
+    "present",  # file exists and contains the expected text
+    "sha_pinned",  # every CI 'uses:' line names a 40-hex commit (syntax only)
+    "unattested",  # parsed and hashed, but no reference digest exists to compare against
+    "self_consistent_unsigned",  # manifest matches its own digest; no signature verified
+    "signature_verified",  # HMAC verified with the supplied key (manifest metadata only)
+    "sha_matches_adjacent_card",  # joblib SHA equals the card beside it: corruption check only
     "missing",
     "tamper_or_hash_mismatch",
-    "legacy_pickle_advisory",
 ]
+
+RuntimeModelAttestation = Literal[
+    "not_checked",
+    "no_current_model",
+    "invalid_pointer",
+    "manifest_missing",
+    "manifest_invalid",
+    "manifest_unsigned_self_consistent",
+    "manifest_signature_verified",
+    "integrity_failed",
+]
+
+RuntimeModelFormat = Literal["joblib_pickle", "unknown"]
 
 
 def _validate_identifier(value: str, label: str) -> str:
@@ -136,9 +158,9 @@ class EdgeBufferStats(BaseModel):
     capacity: int = Field(ge=4)
     retained_count: int = Field(ge=0)
     evicted_count: int = Field(ge=0)
-    reconnect_attempts: int = Field(ge=0)
+    simulated_reconnect_attempts: int = Field(ge=0)
     backoff_schedule_s: tuple[float, ...] = ()
-    state: EdgeConnectionState
+    state: EdgeBufferState
 
 
 class EdgeSampleValidationResponse(BaseModel):
@@ -150,7 +172,14 @@ class EdgeSampleValidationResponse(BaseModel):
     asset_id: str
     protocol: ConnectorProtocol
     read_only: Literal[True] = True
-    endpoint_allowlist_ok: bool
+    # What this endpoint is: a stateless check of a caller-submitted batch. No connection to the
+    # source is made and nothing is read from it.
+    mode: Literal["preflight_validation_only"] = "preflight_validation_only"
+    real_connector_io: Literal[False] = False
+    endpoint_url_policy_ok: bool
+    endpoint_check_scope: Literal["url_string_only_no_dns_resolution"] = (
+        "url_string_only_no_dns_resolution"
+    )
     cadence: EdgeCadenceReport
     buffer: EdgeBufferStats
     warnings: tuple[str, ...] = ()
@@ -167,13 +196,15 @@ class EdgeSourceStatusEntry(BaseModel):
     protocol: ConnectorProtocol
     endpoint_url: str
     read_only: Literal[True] = True
-    connection_state: EdgeConnectionState
+    connection_state: EdgeSourceState = "descriptor_only_not_connected"
+    connector_io: ConnectorIoStatus = "not_implemented"
     nominal_cadence_s: float = Field(gt=0.0)
     max_buffer_records: int = Field(ge=4)
     node_allowlist_count: int = Field(ge=1)
-    ssrf_policy_status: Literal["allowlisted_host_verified", "blocked"]
-    buffer_utilization: float = Field(ge=0.0, le=1.0)
-    reconnect_attempts: int = Field(ge=0)
+    endpoint_url_policy: Literal["passed", "rejected"]
+    endpoint_check_scope: Literal["url_string_only_no_dns_resolution"] = (
+        "url_string_only_no_dns_resolution"
+    )
 
 
 class EdgeSourcesResponse(BaseModel):
@@ -182,7 +213,14 @@ class EdgeSourcesResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     advisory_only: Literal[True] = True
-    write_capabilities: Literal["none_disabled_by_architecture"] = "none_disabled_by_architecture"
+    # No OPC-UA, MQTT or historian client exists in this codebase, so there is nothing that could
+    # write; this is a statement about missing code, not an enforced guarantee over a real client.
+    connector_io_status: ConnectorIoStatus = "not_implemented"
+    write_capabilities: Literal["none_no_connector_io_exists"] = "none_no_connector_io_exists"
+    capability_note: str = (
+        "These are registered source descriptors. FactoryMind does not currently connect to any "
+        "OPC-UA server, MQTT broker or historian; endpoint checks inspect the URL text only."
+    )
     sources: list[EdgeSourceStatusEntry]
 
 
@@ -214,6 +252,9 @@ class SupplyChainHardeningResponse(BaseModel):
     license_present: bool
     ci_actions_sha_pinned: bool
     unpinned_workflow_uses: tuple[str, ...] = ()
-    non_pickle_attestation_ready: bool
+    runtime_model_attestation: RuntimeModelAttestation
+    runtime_model_format: RuntimeModelFormat
+    runtime_loader_consults_manifest: Literal[False] = False
+    manifest_signature_key_configured: bool
     attestations: list[ArtifactAttestationEntry]
-    cross_system_benchmarks: dict[str, str]
+    limitations: tuple[str, ...]

@@ -12,6 +12,8 @@ import type { EdgeSourceStatusEntry } from './edgeSourceStatusEntry';
  */
 export interface EdgeSourcesResponse {
   advisory_only?: true;
+  capability_note?: string;
+  connector_io_status?: 'not_implemented';
   sources: EdgeSourceStatusEntry[];
-  write_capabilities?: 'none_disabled_by_architecture';
+  write_capabilities?: 'none_no_connector_io_exists';
 }

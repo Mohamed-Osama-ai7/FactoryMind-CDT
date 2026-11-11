@@ -76,7 +76,7 @@ export const getGetSupplyChainHardeningUrl = () => {
 }
 
 /**
- * Inspect repository license, SHA-pinned CI workflow, and artifact attestation status.
+ * Run repository and runtime-artifact supply-chain checks and disclose check limits.
  * @summary Get Supply Chain Hardening
  */
 export const getSupplyChainHardening = async ( options?: Parameters<typeof apiFetch>[1]): Promise<getSupplyChainHardeningResponse> => {
@@ -124,7 +124,7 @@ export type GetSupplyChainHardeningQueryError = unknown
 
 
 /**
- * Inspect repository license, SHA-pinned CI workflow, and artifact attestation status.
+ * Run repository and runtime-artifact supply-chain checks and disclose check limits.
  * @summary Get Supply Chain Hardening
  */
 export function useGetSupplyChainHardening<TData = Awaited<ReturnType<typeof getSupplyChainHardening>>, TError = unknown>(
@@ -138,7 +138,7 @@ export function useGetSupplyChainHardening<TData = Awaited<ReturnType<typeof get
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * Inspect repository license, SHA-pinned CI workflow, and artifact attestation status.
+ * Run repository and runtime-artifact supply-chain checks and disclose check limits.
  * @summary Get Supply Chain Hardening
  */
 export function useGetSupplyChainHardening<TData = Awaited<ReturnType<typeof getSupplyChainHardening>>, TError = unknown>(
@@ -152,7 +152,7 @@ export function useGetSupplyChainHardening<TData = Awaited<ReturnType<typeof get
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * Inspect repository license, SHA-pinned CI workflow, and artifact attestation status.
+ * Run repository and runtime-artifact supply-chain checks and disclose check limits.
  * @summary Get Supply Chain Hardening
  */
 export function useGetSupplyChainHardening<TData = Awaited<ReturnType<typeof getSupplyChainHardening>>, TError = unknown>(
@@ -160,7 +160,7 @@ export function useGetSupplyChainHardening<TData = Awaited<ReturnType<typeof get
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * Inspect repository license, SHA-pinned CI workflow, and artifact attestation status.
+ * Run repository and runtime-artifact supply-chain checks and disclose check limits.
  * @summary Get Supply Chain Hardening
  */
 export function useGetSupplyChainHardening<TData = Awaited<ReturnType<typeof getSupplyChainHardening>>, TError = unknown>(
@@ -215,7 +215,7 @@ export const getGetEdgeSourcesUrl = (params?: GetEdgeSourcesParams,) => {
 }
 
 /**
- * List SSRF-verified read-only OT & edge telemetry sources visible to this caller.
+ * List registered read-only source descriptors (URL-text checked; no live connections).
  * @summary Get Edge Sources
  */
 export const getEdgeSources = async (params?: GetEdgeSourcesParams, options?: Parameters<typeof apiFetch>[1]): Promise<getEdgeSourcesResponse> => {
@@ -263,7 +263,7 @@ export type GetEdgeSourcesQueryError = HTTPValidationError
 
 
 /**
- * List SSRF-verified read-only OT & edge telemetry sources visible to this caller.
+ * List registered read-only source descriptors (URL-text checked; no live connections).
  * @summary Get Edge Sources
  */
 export function useGetEdgeSources<TData = Awaited<ReturnType<typeof getEdgeSources>>, TError = HTTPValidationError>(
@@ -277,7 +277,7 @@ export function useGetEdgeSources<TData = Awaited<ReturnType<typeof getEdgeSourc
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * List SSRF-verified read-only OT & edge telemetry sources visible to this caller.
+ * List registered read-only source descriptors (URL-text checked; no live connections).
  * @summary Get Edge Sources
  */
 export function useGetEdgeSources<TData = Awaited<ReturnType<typeof getEdgeSources>>, TError = HTTPValidationError>(
@@ -291,7 +291,7 @@ export function useGetEdgeSources<TData = Awaited<ReturnType<typeof getEdgeSourc
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * List SSRF-verified read-only OT & edge telemetry sources visible to this caller.
+ * List registered read-only source descriptors (URL-text checked; no live connections).
  * @summary Get Edge Sources
  */
 export function useGetEdgeSources<TData = Awaited<ReturnType<typeof getEdgeSources>>, TError = HTTPValidationError>(
@@ -299,7 +299,7 @@ export function useGetEdgeSources<TData = Awaited<ReturnType<typeof getEdgeSourc
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * List SSRF-verified read-only OT & edge telemetry sources visible to this caller.
+ * List registered read-only source descriptors (URL-text checked; no live connections).
  * @summary Get Edge Sources
  */
 export function useGetEdgeSources<TData = Awaited<ReturnType<typeof getEdgeSources>>, TError = HTTPValidationError>(

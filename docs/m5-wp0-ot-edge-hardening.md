@@ -1,49 +1,42 @@
-# M5-WP0 (`WP-H`) — Read-Only OT/Edge Connector Foundations & Supply-Chain Hardening
+# M5-WP0 (`WP-H`) & WP-P0A — Edge Source Descriptors, Preflight Validation, and Supply-Chain Checks
 
-M5-WP0 closes the FactoryMind CDT master roadmap by adding strictly read-only industrial telemetry connector foundations, SSRF/host-allowlist and bounded ring-buffer validation, repository supply-chain hardening (`LICENSE` + SHA-pinned GitHub Actions CI + non-pickle HMAC/SHA-256 manifest verification), an `/edge` diagnostics UI, and end-to-end verification across all milestones M0–M5.
-
----
-
-## 1. Read-Only OT & Edge Architecture (`factorymind.connectors.edge`)
-
-All adapters strictly prohibit write, command, setpoint, publish, or physical actuation interfaces at both contract (`read_only: Literal[True] = True`) and class levels:
-
-- **`OpcUaReadOnlyAdapter` (`opcua_readonly`):** `opc.tcp://` read-only tag subscription descriptor.
-- **`MqttReadOnlyAdapter` (`mqtt_readonly`):** `mqtts://` TLS read-only topic subscriber descriptor.
-- **`HistorianReadOnlyAdapter` (`historian_readonly`):** `https://` read-only time-series pull descriptor.
-- **SSRF & URI Hygiene (`validate_edge_endpoint`):** Rejects insecure schemes (`http://`, `mqtt://`, `file://`), embedded URL userinfo credentials, query/fragment smuggling, non-public/loopback/link-local/IPv4-mapped IPv6 literals (`127.0.0.1`, `169.254.169.254`, `10.*`, `::1`, `::ffff:169.254.169.254`), `localhost`/`.local`/cloud-metadata hostnames (even if misconfigured inside `allowed_hosts`), and un-allowlisted hosts.
-- **Cadence, Gap Honesty & Bounded Ring Buffers:** Validates MetroPT-3 `~0.1 Hz` (`10 s`) sampling cadence, rejects non-allowlisted sensor keys, counts out-of-order/duplicate timestamps, preserves gaps (`> 2 * nominal_cadence_s`) uninterpolated, enforces bounded FIFO ring buffers (`collections.deque`), and computes exponential reconnect backoff (`min(60s, 2^attempt)`).
+M5-WP0 added descriptor contracts, stateless batch preflight checks, repository workflow pinning, and the `/edge` view. **WP-P0A** remediates overclaimed security and connectivity language so every API response, test, UI view, and document states only what is actually implemented and checked at runtime.
 
 ---
 
-## 2. Supply-Chain & Model Artifact Hardening (`factorymind.connectors.attestation`)
+## 1. Connector Scope: Descriptors & Preflight Only (`factorymind.connectors.edge`)
 
-- **Root `LICENSE`:** MIT license at repository root matching `backend/pyproject.toml` (`license = "MIT"`).
-- **SHA-Pinned GitHub Actions (`.github/workflows/ci.yml`):** Every `uses:` action (`actions/checkout`, `astral-sh/setup-uv`, `actions/setup-node`) is pinned to its verified 40-hex commit SHA and regression-checked via `audit_ci_workflow()` in pytest.
-- **Non-Pickle Model Attestation (`build_signed_manifest` / `verify_non_pickle_manifest`):** Canonical sorted JSON (`json_parameters_v1`) verification with SHA-256 parameter digest and constant-time HMAC-SHA256 verification without executing `pickle`/`joblib` deserialization, while runtime `build_supply_chain_report()` audits `LICENSE`, CI pinning, configs, and runtime model bundles.
+**OPC-UA, MQTT, and historian connector I/O is NOT implemented** (`connector_io_status="not_implemented"`). This repository installs no OPC-UA, MQTT, or historian client library, opens no network sockets, never connects to plant systems, and reads no live plant data:
 
----
-
-## 3. Safe API, Safety Boundaries & `/edge` UI
-
-Route paths intentionally use `/api/v1/edge/...` and expose zero write/actuation primitives:
-
-- `GET  /api/v1/edge/sources` (`Permission.ASSET_READ`): Tenant/asset-scoped listing of read-only registered adapters and SSRF status.
-- `POST /api/v1/edge/validate-sample` (`Permission.ASSET_READ`, allowlisted stateless validator in `test_safety_boundary.py`): Validates telemetry batches, simulated disconnects, and ring-buffer eviction.
-- `GET  /api/v1/edge/hardening` (`Permission.ASSET_READ`): Returns repository license, CI SHA pinning, artifact attestations, and cross-system verified benchmarks.
-- **Frontend (`/edge`, `EdgeConnectorsWorkspace.tsx`, `routes/edge.tsx`):** Accessible via the `OT & Edge Health` sidebar link (`asset:read`), displaying read-only adapter posture, supply-chain audit status, M2–M5 verified metrics, and an interactive stateless cadence/ring-buffer validator.
+- **`OpcUaReadOnlyAdapter` (`opcua_readonly`), `MqttReadOnlyAdapter` (`mqtt_readonly`), `HistorianReadOnlyAdapter` (`historian_readonly`):** Compatibility class names for protocol-specific **source descriptors** (`connection_state="descriptor_only_not_connected"`), not live connectors. The absence of write methods holds trivially while no client exists; any future real connector must independently design and test read-only enforcement.
+- **URL-String Policy Check (`validate_edge_endpoint`, `endpoint_check_scope="url_string_only_no_dns_resolution"`):** Checks raw endpoint URL text against scheme rules (`opc.tcp`, `mqtts`, `https`), embedded credentials, query/fragment components, control characters, non-canonical numeric/octal/hex IPv4 literals, non-global/loopback/link-local/CGNAT IPs, metadata hostnames, `.local`/`.localhost` suffixes, and `allowed_hosts`. **No DNS resolution or connect-time IP pinning is performed.**
+- **Stateless Batch Preflight (`ingest_batch`, `mode="preflight_validation_only"`, `real_connector_io=False`):** Validates caller-submitted sample batches against allowlisted sensor names, finite values, sampling cadence (`~0.1 Hz` / `10 s`), uninterpolated gaps (`> 2 * nominal_cadence_s`), out-of-order/duplicate timestamps, in-memory ring-buffer capacity, and synthetic disconnect backoff schedules (`simulated_reconnect_attempts`).
 
 ---
 
-## 4. Final Cross-System Ablation & Verification Summary (M0–M5)
+## 2. Supply-Chain & Model Artifact Checks (`factorymind.connectors.attestation`)
 
-| Layer / Milestone | Authoritative Verified Result |
-| --- | --- |
-| **M2-WP0 / WP2 Anomaly Detection (Real MetroPT-3)** | `duty_rule` LOEO `4/4` leaks, `0.034/0.044` FA/day (`wp2_integrity_gated` `0.026/0.035`), `50 min` median `\|delay\|`, `1` frozen leak prevented, `34` warnings |
-| **M2-WP3 / WP4 Evidence & RCA (Real MetroPT-3)** | `mean_completeness_score 0.9266`, `1.0` grounding/agreement/disclaimer on `F1..F4`, `0.6765` warning non-leak rate |
-| **M3-WP1 Calibration & OOD (AI4I 2020 Separate Bench)** | `ai4i-hgb` `ROC-AUC 0.9803`, `Brier 0.0124`, `ECE 0.0054`; Ledoit-Wolf Mahalanobis OOD abstention |
-| **M3-WP2 Hybrid RAG + KG** | `Recall@5 1.0`, `MRR@10 1.0`, `nDCG@5 0.7683` across `61` live chunks |
-| **M4-WP0 Physics Digital Twin** | `168` held-out segments: `10m MAE 0.2526 bar`, `60m MAE 0.5218 bar`, `RMSE 0.5853`, `0` violations, `3.78x` leak ratio |
-| **M4-WP1 / WP2 Optimization & Copilot** | 4-tier impact stratification + constrained optimizer; 6 permission-scoped read-only Copilot tools, red-team refusal firewall + strict `[C1..Cn]` subset gate |
-| **M5-WP0 OT/Edge & Full Suite** | Zero PLC write methods, SSRF IP/scheme/host enforcement, MIT `LICENSE`, SHA-pinned CI, **`602` backend tests & `62` frontend tests (17 files) passing** |
+Every field returned by [`build_supply_chain_report`](backend/src/factorymind/connectors/attestation.py) reflects the concrete check executed and explicitly discloses its limits in `limitations`:
 
+- **`LICENSE` (`present` / `missing` / `tamper_or_hash_mismatch`):** Verifies the root MIT `LICENSE` file exists and contains MIT license phrases.
+- **GitHub Actions CI (`.github/workflows/ci.yml`, `sha_pinned` / `tamper_or_hash_mismatch`):** Verifies via `audit_ci_workflow()` that every `uses:` line in `ci.yml` uses a 40-hex commit pin syntax (`owner/repo@<40-hex>`). It does **not** prove upstream commits exist or are authentic, and does not check lockfiles or transitive dependencies.
+- **Runtime Model Bundle (`runtime_model_format="joblib_pickle"` / `"unknown"`):** The runtime loader (`AnomalyService`) still loads `model.joblib` using `joblib` (**pickle**) after comparing its SHA-256 against `model_card.json` in the same directory (`sha_matches_adjacent_card`). That detects file corruption, not an adversary able to modify both files.
+- **Non-Pickle Manifest (`json_parameters_v1`, `verify_non_pickle_manifest`):** No shipped model includes `model_manifest.json`, `runtime_loader_consults_manifest=False`, and `manifest_signature_key_configured=False` in the default API deployment. Without an HMAC key, the best status is `self_consistent_unsigned` (digest computed over manifest JSON parameters only, never verified as a signature and never covering `model.joblib` bytes). `signature_verified` requires an explicit HMAC key (`hmac_key`) that verifies against `hmac_sha256`. Missing, unconfigured, or invalid states are reported as `no_current_model`, `invalid_pointer`, `manifest_missing`, `manifest_invalid`, or `integrity_failed`.
+
+---
+
+## 3. Safe API, Boundaries & `/edge` UI
+
+Route paths use `/api/v1/edge/...` and expose zero write or actuation operations:
+
+- `GET  /api/v1/edge/sources` (`Permission.ASSET_READ`): Lists registered source descriptors scoped by asset permissions (`connector_io_status="not_implemented"`, `write_capabilities="none_no_connector_io_exists"`).
+- `POST /api/v1/edge/validate-sample` (`Permission.ASSET_READ`, allowlisted stateless endpoint in `test_safety_boundary.py`): Runs caller-submitted batch preflight validation (`mode="preflight_validation_only"`, `real_connector_io=False`).
+- `GET  /api/v1/edge/hardening` (`Permission.ASSET_READ`): Runs repository and runtime-artifact checks and returns explicit `runtime_model_attestation`, `runtime_loader_consults_manifest=False`, `manifest_signature_key_configured`, per-artifact `attestations`, and `limitations`.
+- **Frontend (`/edge`, `EdgeConnectorsWorkspace.tsx`, `routes/edge.tsx`):** Linked in the sidebar as **`Edge Preflight`** (`asset:read`), displaying explicit non-connected descriptor state, URL-text check scope, supply-chain limitations, unavailable/unverified/failed statuses, and the stateless batch preflight form.
+
+---
+
+## 4. Verified Test Results Across the Repository
+
+- **Backend:** `uv run ruff format --check .` (`112 files`), `uv run ruff check .`, `uv run mypy` (`75 source files`), `uv run pytest -q` (**604 passed**, including socket/DNS/urllib no-I/O checks, HMAC-vs-unsigned distinction checks, and unavailable/failed attestation state tests in `tests/test_edge_connectors.py`).
+- **Frontend:** `npm run lint`, `npm run typecheck`, `npm test` (**17 files, 63 tests passed**), `npm run build`, and `npm run generate:api` Orval client parity.

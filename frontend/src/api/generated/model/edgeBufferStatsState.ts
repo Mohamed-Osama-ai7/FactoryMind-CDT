@@ -10,8 +10,7 @@ export type EdgeBufferStatsState = typeof EdgeBufferStatsState[keyof typeof Edge
 
 
 export const EdgeBufferStatsState = {
-  standby_offline: 'standby_offline',
-  connected_readonly: 'connected_readonly',
-  reconnecting_backoff: 'reconnecting_backoff',
-  degraded_buffer_evicting: 'degraded_buffer_evicting',
+  batch_within_capacity: 'batch_within_capacity',
+  simulated_reconnect_backoff: 'simulated_reconnect_backoff',
+  batch_exceeds_capacity: 'batch_exceeds_capacity',
 } as const;

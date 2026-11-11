@@ -26,7 +26,31 @@ function parseBoundedInt(
   return { value: n, error: null }
 }
 
-/** Read-only OT/edge connector diagnostics, SSRF status, and supply-chain hardening view. */
+function statusBadgeTone(status: string): string {
+  if (
+    status === 'tamper_or_hash_mismatch' ||
+    status === 'integrity_failed' ||
+    status === 'manifest_invalid' ||
+    status === 'invalid_pointer' ||
+    status === 'rejected'
+  ) {
+    return 'rounded border border-critical px-1.5 py-0.5 font-mono text-[11px] text-critical'
+  }
+  if (
+    status === 'missing' ||
+    status === 'no_current_model' ||
+    status === 'manifest_missing' ||
+    status === 'unattested' ||
+    status === 'self_consistent_unsigned' ||
+    status === 'not_checked' ||
+    status === 'unknown'
+  ) {
+    return 'rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[11px] text-muted'
+  }
+  return 'rounded bg-border px-1.5 py-0.5 font-mono text-[11px]'
+}
+
+/** Source descriptors, stateless batch preflight checks, and honest supply-chain check report. */
 export function EdgeConnectorsWorkspace() {
   const idPrefix = useId()
   const me = useMe()
@@ -47,15 +71,15 @@ export function EdgeConnectorsWorkspace() {
   const hardeningQuery = useGetSupplyChainHardening({ query: { enabled: canRead } })
   const validateMutation = useValidateEdgeSample()
 
-  if (me.isPending) return <p role="status">Checking OT &amp; edge permissions…</p>
+  if (me.isPending) return <p role="status">Checking edge preflight permissions…</p>
   if (me.isError) {
     return (
       <section aria-labelledby={`${idPrefix}-title`} className="max-w-5xl">
         <h1 id={`${idPrefix}-title`} className="text-2xl font-semibold">
-          Read-Only OT &amp; Edge Connectors + Supply-Chain Hardening
+          OT &amp; Edge Source Descriptors + Supply-Chain Checks
         </h1>
         <p role="alert" className="mt-2 rounded border border-critical p-3 text-sm text-critical">
-          Could not verify OT/edge permissions: {describeApiError(me.error)}
+          Could not verify edge preflight permissions: {describeApiError(me.error)}
         </p>
       </section>
     )
@@ -64,14 +88,14 @@ export function EdgeConnectorsWorkspace() {
     return (
       <section aria-labelledby={`${idPrefix}-title`} className="max-w-5xl">
         <h1 id={`${idPrefix}-title`} className="text-2xl font-semibold">
-          Read-Only OT &amp; Edge Connectors + Supply-Chain Hardening
+          OT &amp; Edge Source Descriptors + Supply-Chain Checks
         </h1>
         <p
           role="status"
           className="mt-2 rounded border border-border bg-panel p-4 text-sm text-muted"
         >
           You do not hold the <span className="font-mono">asset:read</span> permission required to
-          inspect OT/edge connector health and supply-chain attestation.
+          inspect edge source descriptors and supply-chain checks.
         </p>
       </section>
     )
@@ -80,31 +104,28 @@ export function EdgeConnectorsWorkspace() {
   const sourcesData = sourcesQuery.data?.status === 200 ? sourcesQuery.data.data : null
   const hardeningData = hardeningQuery.data?.status === 200 ? hardeningQuery.data.data : null
   const validationResult = validateMutation.data?.status === 200 ? validateMutation.data.data : null
-  const sourceOptions = sourcesData?.sources.length
+  const sourceOptions = sourcesData
     ? sourcesData.sources.map((src) => ({
         source_id: src.source_id,
         asset_id: src.asset_id,
       }))
-    : [
-        { source_id: 'metropt3-opcua-ro', asset_id: 'metropt3-apu-1' },
-        { source_id: 'metropt3-mqtt-ro', asset_id: 'metropt3-apu-1' },
-        { source_id: 'metropt3-historian-ro', asset_id: 'metropt3-apu-1' },
-      ]
-  const activeSource = sourceOptions.find((item) => item.source_id === sourceId) ??
-    sourceOptions[0] ?? {
-      source_id: sourceId,
-      asset_id: 'metropt3-apu-1',
-    }
+    : []
+  const activeSource =
+    sourceOptions.find((item) => item.source_id === sourceId) ?? sourceOptions[0] ?? null
   const validationId = `${idPrefix}-validation-error`
 
   function handleValidateSubmit(event: FormEvent) {
     event.preventDefault()
+    const selected = activeSource
+    if (!selected) {
+      return
+    }
     const parsedStep = parseBoundedInt(intervalSeconds, 'Nominal step (s)', 1, 300)
     if (parsedStep.error !== null) {
       setValidation({ field: 'intervalSeconds', message: parsedStep.error })
       return
     }
-    const parsedDisc = parseBoundedInt(disconnects, 'Reconnect events', 0, 20)
+    const parsedDisc = parseBoundedInt(disconnects, 'Simulated disconnects', 0, 20)
     if (parsedDisc.error !== null) {
       setValidation({ field: 'disconnects', message: parsedDisc.error })
       return
@@ -116,7 +137,7 @@ export function EdgeConnectorsWorkspace() {
     }
     setValidation(null)
 
-    const primarySensor = activeSource.source_id === 'metropt3-mqtt-ro' ? 'COMP' : 'TP2'
+    const primarySensor = selected.source_id === 'metropt3-mqtt-ro' ? 'COMP' : 'TP2'
     const baseMs = Date.UTC(2020, 3, 15, 10, 0, 0)
     let cursorMs = baseMs
     const samples = Array.from({ length: 6 }, (_, idx) => {
@@ -124,22 +145,22 @@ export function EdgeConnectorsWorkspace() {
       const gapStep = includeGap && idx === 2 ? parsedStep.value * 4 : parsedStep.value
       cursorMs += gapStep * 1000
       const sensorValues: Record<string, number> = {
-        [primarySensor]: activeSource.source_id === 'metropt3-mqtt-ro' ? 1.0 : 8.4 + idx * 0.05,
+        [primarySensor]: selected.source_id === 'metropt3-mqtt-ro' ? 1.0 : 8.4 + idx * 0.05,
       }
       if (includeUnallowlistedTag) {
         sensorValues.UNALLOWLISTED_SETPOINT_WRITE = 9.9
       }
       return {
         timestamp: ts,
-        source_id: activeSource.source_id,
+        source_id: selected.source_id,
         sensor_values: sensorValues,
       }
     })
 
     validateMutation.mutate({
       data: {
-        source_id: activeSource.source_id,
-        asset_id: activeSource.asset_id,
+        source_id: selected.source_id,
+        asset_id: selected.asset_id,
         samples,
         simulate_disconnects: parsedDisc.value,
         buffer_capacity_override: parsedCap.value,
@@ -151,31 +172,52 @@ export function EdgeConnectorsWorkspace() {
     <section aria-labelledby={`${idPrefix}-title`} className="max-w-5xl space-y-6">
       <header>
         <h1 id={`${idPrefix}-title`} className="text-2xl font-semibold">
-          Read-Only OT &amp; Edge Connectors + Supply-Chain Hardening
+          OT &amp; Edge Source Descriptors + Supply-Chain Checks
         </h1>
         <p className="mt-1 text-sm text-muted">
-          Architectural standby adapters for OPC-UA, TLS MQTT, and HTTPS Historian feeds with SSRF
-          host allowlisting, bounded ring buffers, SHA-pinned CI workflows, and non-pickle model
-          attestation. Zero PLC write or actuation capabilities exist.
+          Descriptors and stateless batch preflight checks only. No OPC-UA, MQTT, or historian
+          client I/O is implemented; endpoint checks inspect URL text only without DNS resolution or
+          live plant connections.
         </p>
       </header>
 
       <div className="rounded border border-border bg-panel p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Registered Read-Only Telemetry Sources</h2>
+          <h2 className="text-sm font-semibold">Registered Source Descriptors (Not Connected)</h2>
           {sourcesData && (
-            <span className="rounded bg-border px-2 py-0.5 text-xs font-medium">
-              write capabilities: {sourcesData.write_capabilities}
-            </span>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="rounded bg-border px-2 py-0.5 font-mono">
+                connector I/O: {sourcesData.connector_io_status ?? 'not_implemented'}
+              </span>
+              <span className="rounded bg-border px-2 py-0.5 font-mono">
+                write capabilities:{' '}
+                {sourcesData.write_capabilities ?? 'none_no_connector_io_exists'}
+              </span>
+            </div>
           )}
         </div>
-        {sourcesQuery.isPending && <p className="mt-2 text-xs text-muted">Loading OT sources…</p>}
-        {sourcesQuery.isError && (
-          <p role="alert" className="mt-2 text-xs text-critical">
-            Could not load OT sources: {describeApiError(sourcesQuery.error)}
+        {sourcesData?.capability_note && (
+          <p className="mt-2 rounded border border-border bg-surface px-3 py-2 text-xs text-muted">
+            {sourcesData.capability_note}
           </p>
         )}
-        {sourcesData && (
+        {sourcesQuery.isPending && (
+          <p role="status" className="mt-2 text-xs text-muted">
+            Loading edge source descriptors…
+          </p>
+        )}
+        {sourcesQuery.isError && (
+          <p role="alert" className="mt-2 text-xs text-critical">
+            Could not load edge source descriptors: {describeApiError(sourcesQuery.error)}
+          </p>
+        )}
+        {sourcesData && sourcesData.sources.length === 0 && (
+          <p role="status" className="mt-2 text-xs text-muted">
+            No registered source descriptors available for your asset permissions; preflight
+            submission is disabled.
+          </p>
+        )}
+        {sourcesData && sourcesData.sources.length > 0 && (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
@@ -183,8 +225,8 @@ export function EdgeConnectorsWorkspace() {
                   <th className="py-1.5 pr-3">Source ID</th>
                   <th className="py-1.5 pr-3">Protocol</th>
                   <th className="py-1.5 pr-3">Endpoint</th>
-                  <th className="py-1.5 pr-3">State</th>
-                  <th className="py-1.5 pr-3">SSRF Policy</th>
+                  <th className="py-1.5 pr-3">Descriptor State</th>
+                  <th className="py-1.5 pr-3">URL Check (No DNS)</th>
                   <th className="py-1.5">Tags / Buffer</th>
                 </tr>
               </thead>
@@ -194,8 +236,18 @@ export function EdgeConnectorsWorkspace() {
                     <td className="py-1.5 pr-3 font-mono font-medium">{src.source_id}</td>
                     <td className="py-1.5 pr-3">{src.protocol}</td>
                     <td className="py-1.5 pr-3 font-mono">{src.endpoint_url}</td>
-                    <td className="py-1.5 pr-3">{src.connection_state}</td>
-                    <td className="py-1.5 pr-3">{src.ssrf_policy_status}</td>
+                    <td className="py-1.5 pr-3 font-mono">
+                      {src.connection_state ?? 'descriptor_only_not_connected'} (
+                      {src.connector_io ?? 'not_implemented'})
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <span className={statusBadgeTone(src.endpoint_url_policy)}>
+                        {src.endpoint_url_policy}
+                      </span>{' '}
+                      <span className="text-[11px] text-muted">
+                        ({src.endpoint_check_scope ?? 'url_string_only_no_dns_resolution'})
+                      </span>
+                    </td>
                     <td className="py-1.5">
                       {src.node_allowlist_count} tags · {src.max_buffer_records} cap (
                       {src.nominal_cadence_s}s)
@@ -209,29 +261,55 @@ export function EdgeConnectorsWorkspace() {
       </div>
 
       <div className="rounded border border-border bg-panel p-4">
-        <h2 className="text-sm font-semibold">Supply-Chain Hardening &amp; Artifact Attestation</h2>
+        <h2 className="text-sm font-semibold">Supply-Chain &amp; Runtime Artifact Checks</h2>
         {hardeningQuery.isPending && (
-          <p className="mt-2 text-xs text-muted">Inspecting license, CI workflow, and artifacts…</p>
+          <p role="status" className="mt-2 text-xs text-muted">
+            Running repository and artifact checks…
+          </p>
         )}
         {hardeningQuery.isError && (
           <p role="alert" className="mt-2 text-xs text-critical">
-            Could not load supply-chain report: {describeApiError(hardeningQuery.error)}
+            Could not load supply-chain check report: {describeApiError(hardeningQuery.error)}
           </p>
         )}
         {hardeningData && (
           <div className="mt-3 space-y-4">
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className="rounded bg-border px-2 py-0.5 font-mono">
-                LICENSE: {hardeningData.license_present ? 'MIT present' : 'missing'}
+              <span
+                className={statusBadgeTone(hardeningData.license_present ? 'present' : 'missing')}
+              >
+                LICENSE: {hardeningData.license_present ? 'MIT phrases present' : 'missing/invalid'}
               </span>
-              <span className="rounded bg-border px-2 py-0.5 font-mono">
-                CI actions SHA-pinned: {hardeningData.ci_actions_sha_pinned ? 'yes' : 'no'}
+              <span
+                className={statusBadgeTone(
+                  hardeningData.ci_actions_sha_pinned ? 'sha_pinned' : 'tamper_or_hash_mismatch',
+                )}
+              >
+                CI uses syntax:{' '}
+                {hardeningData.ci_actions_sha_pinned ? '40-hex commit SHAs' : 'unpinned'}
               </span>
-              <span className="rounded bg-border px-2 py-0.5 font-mono">
-                Non-pickle manifest ready:{' '}
-                {hardeningData.non_pickle_attestation_ready ? 'yes' : 'no'}
+              <span className={statusBadgeTone(hardeningData.runtime_model_attestation)}>
+                runtime model: {hardeningData.runtime_model_attestation}
+              </span>
+              <span className="rounded bg-border px-2 py-0.5 font-mono text-[11px]">
+                format: {hardeningData.runtime_model_format}
+              </span>
+              <span className="rounded border border-border bg-surface px-2 py-0.5 font-mono text-[11px] text-muted">
+                loader consults manifest:{' '}
+                {hardeningData.runtime_loader_consults_manifest ? 'yes' : 'no'}
+              </span>
+              <span className="rounded border border-border bg-surface px-2 py-0.5 font-mono text-[11px] text-muted">
+                HMAC key configured:{' '}
+                {hardeningData.manifest_signature_key_configured ? 'yes' : 'no'}
               </span>
             </div>
+
+            {hardeningData.unpinned_workflow_uses &&
+              hardeningData.unpinned_workflow_uses.length > 0 && (
+                <p role="alert" className="text-xs text-critical">
+                  Unpinned CI actions: {hardeningData.unpinned_workflow_uses.join(', ')}
+                </p>
+              )}
 
             <ul className="space-y-1.5 text-xs">
               {hardeningData.attestations.map((entry) => (
@@ -241,9 +319,7 @@ export function EdgeConnectorsWorkspace() {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium">{entry.name}</span>
-                    <span className="rounded bg-border px-1.5 py-0.5 font-mono text-[11px]">
-                      {entry.status}
-                    </span>
+                    <span className={statusBadgeTone(entry.status)}>{entry.status}</span>
                   </div>
                   <p className="mt-0.5 text-muted">
                     <span className="font-mono">{entry.relative_path}</span> — {entry.detail}
@@ -254,16 +330,13 @@ export function EdgeConnectorsWorkspace() {
 
             <div>
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
-                Cross-System Verified Benchmark Summary (M2–M5)
+                Check Scope &amp; Limitations
               </h3>
-              <dl className="mt-2 grid gap-2 sm:grid-cols-2 text-xs">
-                {Object.entries(hardeningData.cross_system_benchmarks).map(([milestone, note]) => (
-                  <div key={milestone} className="rounded border border-border p-2">
-                    <dt className="font-medium">{milestone}</dt>
-                    <dd className="mt-0.5 text-muted">{note}</dd>
-                  </div>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted">
+                {hardeningData.limitations.map((item) => (
+                  <li key={item}>{item}</li>
                 ))}
-              </dl>
+              </ul>
             </div>
           </div>
         )}
@@ -274,28 +347,39 @@ export function EdgeConnectorsWorkspace() {
         onSubmit={handleValidateSubmit}
         className="space-y-4 rounded border border-border bg-panel p-4"
       >
-        <h2 className="text-sm font-semibold">
-          Stateless Edge Cadence &amp; Ring-Buffer Resilience Check
-        </h2>
+        <div>
+          <h2 className="text-sm font-semibold">
+            Stateless Batch Preflight Check (No Network I/O)
+          </h2>
+          <p className="mt-0.5 text-xs text-muted">
+            Validates caller-submitted samples against tag allowlists, sampling cadence, and
+            in-memory ring-buffer capacity. Does not connect to or read from any source.
+          </p>
+        </div>
         <div className="grid gap-3 sm:grid-cols-4">
           <div>
             <label htmlFor={`${idPrefix}-source`} className="block text-xs font-medium">
-              Source Adapter
+              Source Descriptor
             </label>
             <select
               id={`${idPrefix}-source`}
-              value={activeSource.source_id}
+              value={activeSource?.source_id ?? ''}
+              disabled={!activeSource}
               onChange={(e) => {
                 setSourceId(e.target.value)
                 setValidation(null)
               }}
-              className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
+              className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm disabled:opacity-50"
             >
-              {sourceOptions.map((item) => (
-                <option key={item.source_id} value={item.source_id}>
-                  {item.source_id}
-                </option>
-              ))}
+              {sourceOptions.length === 0 ? (
+                <option value="">No valid descriptors</option>
+              ) : (
+                sourceOptions.map((item) => (
+                  <option key={item.source_id} value={item.source_id}>
+                    {item.source_id}
+                  </option>
+                ))
+              )}
             </select>
           </div>
           <div>
@@ -318,7 +402,7 @@ export function EdgeConnectorsWorkspace() {
           </div>
           <div>
             <label htmlFor={`${idPrefix}-disc`} className="block text-xs font-medium">
-              Reconnect events
+              Simulated disconnects
             </label>
             <input
               id={`${idPrefix}-disc`}
@@ -386,24 +470,31 @@ export function EdgeConnectorsWorkspace() {
 
         <button
           type="submit"
-          disabled={validateMutation.isPending}
+          disabled={!activeSource || validateMutation.isPending}
           className="rounded border border-border bg-border px-4 py-1.5 text-sm font-medium hover:opacity-90 disabled:opacity-50"
         >
-          {validateMutation.isPending ? 'Validating batch…' : 'Run Read-Only Batch Check'}
+          {validateMutation.isPending ? 'Validating batch…' : 'Run Preflight Batch Check'}
         </button>
 
         {validationResult && (
           <div className="mt-3 rounded border border-border bg-surface p-3 text-xs space-y-2">
             <div className="flex flex-wrap gap-2">
               <span className="rounded bg-border px-2 py-0.5 font-mono">
+                mode: {validationResult.mode ?? 'preflight_validation_only'}
+              </span>
+              <span className="rounded bg-border px-2 py-0.5 font-mono">
+                connector I/O: {String(validationResult.real_connector_io ?? false)}
+              </span>
+              <span className="rounded bg-border px-2 py-0.5 font-mono">
                 cadence: {validationResult.cadence.cadence_status}
               </span>
               <span className="rounded bg-border px-2 py-0.5 font-mono">
-                state: {validationResult.buffer.state}
+                buffer state: {validationResult.buffer.state}
               </span>
               <span className="rounded bg-border px-2 py-0.5 font-mono">
                 retained {validationResult.buffer.retained_count}/{validationResult.buffer.capacity}{' '}
-                · evicted {validationResult.buffer.evicted_count}
+                · evicted {validationResult.buffer.evicted_count} · sim reconnects{' '}
+                {validationResult.buffer.simulated_reconnect_attempts}
               </span>
             </div>
             {validationResult.warnings && validationResult.warnings.length > 0 && (

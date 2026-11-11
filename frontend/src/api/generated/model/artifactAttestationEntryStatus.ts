@@ -10,9 +10,12 @@ export type ArtifactAttestationEntryStatus = typeof ArtifactAttestationEntryStat
 
 
 export const ArtifactAttestationEntryStatus = {
-  verified: 'verified',
+  present: 'present',
   sha_pinned: 'sha_pinned',
+  unattested: 'unattested',
+  self_consistent_unsigned: 'self_consistent_unsigned',
+  signature_verified: 'signature_verified',
+  sha_matches_adjacent_card: 'sha_matches_adjacent_card',
   missing: 'missing',
   tamper_or_hash_mismatch: 'tamper_or_hash_mismatch',
-  legacy_pickle_advisory: 'legacy_pickle_advisory',
 } as const;
