@@ -271,7 +271,8 @@ def _build_metropt3_passport() -> AssetPassport:
                 status="active",
                 scope_note=(
                     "Primary calibrated air-leak detector scoring 10-min loaded duty (load_duty) "
-                    "with binomial exceedance calibration and stateful persistence (LOEO 4/4)."
+                    "with smoothed conformal empirical p-value calibration and persistence "
+                    "(LOEO 4/4)."
                 ),
                 limitations=[
                     "Scores load_duty only; unloaded_tp3_slope pressure decay is evaluated "

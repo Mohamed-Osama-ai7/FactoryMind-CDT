@@ -32,6 +32,20 @@ from factorymind.contracts.events import (
     TimelineCategory,
     TimelineEntry,
 )
+from factorymind.contracts.ml_engine import (
+    ABSTENTION_MESSAGE,
+    ModelCalibrationMetrics,
+    ModelComparisonRow,
+    ModelPromotionContract,
+    ModelPromotionGate,
+    ModelRoutingDecision,
+    MultiModelBenchmarkReport,
+    MultiModelCatalogResponse,
+    QualityGateStatus,
+    SpecialistModelEntry,
+    UncertaintyBand,
+    UncertaintyEstimate,
+)
 from factorymind.contracts.rca import (
     EvidenceReference,
     RankedHypothesis,
@@ -43,6 +57,7 @@ from factorymind.contracts.rca import (
 )
 
 __all__ = [
+    "ABSTENTION_MESSAGE",
     "AssetDetailResponse",
     "AssetListResponse",
     "AssetPassport",
@@ -63,11 +78,19 @@ __all__ = [
     "HumanObservationCategory",
     "HumanObservationOut",
     "ModelApplicabilityEntry",
+    "ModelCalibrationMetrics",
+    "ModelComparisonRow",
+    "ModelPromotionContract",
+    "ModelPromotionGate",
+    "ModelRoutingDecision",
+    "MultiModelBenchmarkReport",
+    "MultiModelCatalogResponse",
     "NeighboringEventSummary",
     "ObservedSignalSummary",
     "PhaseEvidenceSummary",
     "ProvenanceRecord",
     "QualityCheckItem",
+    "QualityGateStatus",
     "RankedHypothesis",
     "RcaAssessment",
     "RcaConfidenceBand",
@@ -75,7 +98,10 @@ __all__ = [
     "RelativeSupport",
     "SensorPassport",
     "SourceDatasetRecord",
+    "SpecialistModelEntry",
     "TimelineCategory",
     "TimelineEntry",
+    "UncertaintyBand",
+    "UncertaintyEstimate",
     "VerificationStep",
 ]
