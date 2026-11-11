@@ -91,3 +91,36 @@ Remaining risks and unfinished items:
 - Audit hash chain detects tampering after the fact; it does not prevent a database owner rewriting it.
 - No UI yet for recording decisions or reading the audit log (API only).
 
+## Review follow-up (PR #5 independent review)
+
+Fixed after the review, each with regression tests (`backend/tests/test_review_fixes.py`,
+`frontend/src/auth/auth.test.tsx`):
+
+- Anomaly routes now require the principal's tenant to own the served data source and the data
+  source's asset to be granted (403, audited with a reason code). With no data-source owner
+  configured they are denied to everyone.
+- Incident creation is bound to `data_source_asset_id`; any other asset is rejected (404, audited)
+  and nothing is stored.
+- Every PyJWT/key error, including key-type and algorithm mismatches, is a controlled 401; role
+  claims with non-string entries are ignored rather than crashing.
+- The authentication-failure throttle only rejects callers that fail to authenticate; a valid token
+  is never locked out by failures from a shared address. Unknown key ids refetch a remote JWKS at
+  most once per 30 s.
+- A missing tenant claim is rejected unless `FACTORYMIND_SINGLE_TENANT_MODE=true` with a
+  `DEFAULT_TENANT_ID`. A default tenant alone no longer acts as a fallback.
+- The OIDC library's transient PKCE/state store is pinned to `sessionStorage` (its default is
+  `localStorage`); access tokens stay in memory only.
+
+### Database-specific limits (audit and evidence immutability)
+
+- **SQLite:** `evidence`, `decision` and `audit_event` carry database triggers that abort UPDATE and
+  DELETE.
+- **Other databases (for example PostgreSQL):** the triggers are not installed, and the application
+  logs a warning at start-up. Immutability must be enforced with database privileges (no UPDATE or
+  DELETE for the application role). The audit hash chain still detects tampering afterwards, but
+  neither mechanism stops a database owner from rewriting history. Not verified against PostgreSQL.
+- **Contention:** two writers racing for the same audit position make one transaction fail and roll
+  back (no corruption; the caller sees an error and may retry). Concurrent decisions on one incident
+  yield exactly one winner and clean 409s for the rest (tested on SQLite only).
+- The rate limiter and the JWKS refresh cooldown are per process.
+

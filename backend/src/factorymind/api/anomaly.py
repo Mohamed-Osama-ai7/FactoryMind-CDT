@@ -27,7 +27,7 @@ from factorymind.anomaly.service import (
     WindowScore,
     load_bundle,
 )
-from factorymind.auth.deps import require
+from factorymind.auth.deps import require_data_source
 from factorymind.auth.principal import Permission
 from factorymind.data.metropt3 import (
     ANALOG_SENSORS,
@@ -373,7 +373,7 @@ def _loeo(summary: dict[str, Any]) -> LoeoSummary:
 @router.get(
     "/model",
     response_model=ModelInfo,
-    dependencies=[Depends(require(Permission.ANOMALY_READ))],
+    dependencies=[Depends(require_data_source(Permission.ANOMALY_READ))],
 )
 def anomaly_model(service: ServiceDep) -> ModelInfo:
     card, bundle = service.card, service.bundle
@@ -421,7 +421,7 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
 @router.post(
     "/score",
     response_model=ScoreResponse,
-    dependencies=[Depends(require(Permission.ANOMALY_READ, cost=2))],
+    dependencies=[Depends(require_data_source(Permission.ANOMALY_READ, cost=2))],
 )
 def anomaly_score(request: ScoreRequest, service: ServiceDep) -> ScoreResponse:
     result = service.score_block(request.to_frame())
@@ -438,7 +438,7 @@ def anomaly_score(request: ScoreRequest, service: ServiceDep) -> ScoreResponse:
 @router.get(
     "/replay",
     response_model=ReplayResponse,
-    dependencies=[Depends(require(Permission.ANOMALY_READ, cost=5))],
+    dependencies=[Depends(require_data_source(Permission.ANOMALY_READ, cost=5))],
 )
 def anomaly_replay(
     service: ServiceDep,

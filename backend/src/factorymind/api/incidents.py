@@ -266,8 +266,13 @@ def create_incident(
     service: ServiceDep,
 ) -> IncidentDetail:
     settings = _settings(request)
-    if body.asset_id not in settings.asset_ids or not principal.can_access_asset(body.asset_id):
-        _audit_denied(request, principal, "asset_not_granted", body.asset_id)
+    # the replayed telemetry belongs to exactly one asset and tenant; anything else is a mismatch
+    if body.asset_id != settings.data_source_asset_id:
+        _audit_denied(request, principal, "asset_mismatch", body.asset_id)
+        raise _not_found()
+    denial = principal.data_source_denial(settings)
+    if denial is not None:
+        _audit_denied(request, principal, denial, body.asset_id)
         raise _not_found()
     try:
         windows, episodes, _ = service.replay(

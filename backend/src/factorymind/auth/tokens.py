@@ -8,6 +8,8 @@ a cached JWKS URL. Failures carry a short reason code, never token contents.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any, Protocol
 
 import jwt
@@ -43,16 +45,38 @@ class StaticJwks:
 
 
 class RemoteJwks:
-    def __init__(self, url: str) -> None:
+    """Cached remote JWKS. An unknown ``kid`` triggers at most one refetch per cooldown, so a
+    flood of forged key ids cannot be amplified into requests against the identity provider."""
+
+    def __init__(self, url: str, refresh_cooldown_s: float = 30.0) -> None:
         self._client = PyJWKClient(
             url, cache_keys=True, max_cached_keys=16, lifespan=300, timeout=5
         )
+        self._cooldown = refresh_cooldown_s
+        self._last_refresh = float("-inf")
+        self._lock = threading.Lock()
 
     def key_for(self, token: str) -> Any:
+        kid = jwt.get_unverified_header(token).get("kid")
+        if not isinstance(kid, str):
+            raise TokenError("no_kid")
         try:
-            return self._client.get_signing_key_from_jwt(token).key
+            with self._lock:
+                found = self._lookup(kid, refresh=False)
+                if found is None and time.monotonic() - self._last_refresh >= self._cooldown:
+                    self._last_refresh = time.monotonic()
+                    found = self._lookup(kid, refresh=True)
         except jwt.PyJWKClientError as exc:
             raise TokenError("unknown_key") from exc
+        if found is None:
+            raise TokenError("unknown_key")
+        return found
+
+    def _lookup(self, kid: str, *, refresh: bool) -> Any:
+        for key in self._client.get_signing_keys(refresh=refresh):
+            if key.key_id == kid:
+                return key.key
+        return None
 
 
 class TokenVerifier:
@@ -103,10 +127,12 @@ class TokenVerifier:
             raise TokenError("bad_signature") from exc
         except jwt.MissingRequiredClaimError as exc:
             raise TokenError("missing_claim") from exc
-        except jwt.InvalidAlgorithmError as exc:
+        except (jwt.InvalidAlgorithmError, jwt.InvalidKeyError) as exc:
             raise TokenError("bad_algorithm") from exc
         except jwt.DecodeError as exc:
             raise TokenError("malformed") from exc
-        except jwt.InvalidTokenError as exc:
+        except jwt.PyJWTError as exc:
+            raise TokenError("invalid") from exc
+        except Exception as exc:  # malformed keys/JWKS content, library surprises: fail closed
             raise TokenError("invalid") from exc
         return claims

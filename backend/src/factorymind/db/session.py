@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -13,6 +14,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from factorymind.db.models import APPEND_ONLY_TABLES, SCHEMA_VERSION, Base, SchemaMeta
+
+log = logging.getLogger("factorymind.db")
 
 
 class SchemaMismatchError(RuntimeError):
@@ -50,6 +53,13 @@ class Database:
         if self._sqlite:
             kwargs["connect_args"] = {"check_same_thread": False}
         self.engine = create_engine(url, **kwargs)
+        if not self._sqlite:
+            log.warning(
+                "append-only triggers are installed for SQLite only; on %s, enforce immutability "
+                "of evidence, decision and audit_event with database privileges (no UPDATE/DELETE "
+                "for the application role). The audit hash chain still detects tampering.",
+                parsed.get_backend_name(),
+            )
         if self._sqlite:
             _sqlite_pragmas(self.engine)
         self._ready = False

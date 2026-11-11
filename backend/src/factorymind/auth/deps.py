@@ -71,19 +71,21 @@ def get_principal(request: Request) -> Principal:
     verifier: TokenVerifier | None = request.app.state.verifier
     key = _client_key(request)
 
+    # A client that keeps failing is throttled, but a *valid* token is still honoured: failures from
+    # a shared address (NAT, proxy) must not lock out legitimate users.
     blocked = limiter.blocked(key, settings.rate_limit_auth_failures_per_min)
-    if not blocked.allowed:
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed authentication attempts",
-            headers={"Retry-After": str(blocked.retry_after)},
-        )
 
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     presented = scheme.lower() == "bearer" and bool(token.strip())
 
     def fail(reason: str) -> HTTPException:
+        if not blocked.allowed:  # already throttled: no further audit rows or counting
+            return HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed authentication attempts",
+                headers={"Retry-After": str(blocked.retry_after)},
+            )
         limiter.record(key)
         _audit(request, action="authn.failure", outcome="failure", reason=reason)
         return _unauthorized(presented)
@@ -101,6 +103,36 @@ def get_principal(request: Request) -> Principal:
     except IdentityError as exc:
         _audit(request, action="authz.denied", outcome="denied", reason=exc.reason)
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Forbidden") from None
+
+
+def audit_denied(request: Request, principal: Principal, reason: str) -> None:
+    _audit(
+        request,
+        action="authz.denied",
+        outcome="denied",
+        tenant_id=principal.tenant_id,
+        actor_id=principal.actor_id,
+        roles=principal.roles,
+        object_id=request.url.path,
+        reason=reason,
+    )
+
+
+def require_data_source(
+    permission: Permission, *, write: bool = False, cost: int = 1
+) -> Callable[..., Principal]:
+    """``require`` plus tenant and asset grants for the data source this deployment serves."""
+    base = require(permission, write=write, cost=cost)
+
+    # not Annotated: ``base`` is a closure variable that postponed annotations cannot resolve
+    def dependency(request: Request, principal: Principal = Depends(base)) -> Principal:  # noqa: B008
+        reason = principal.data_source_denial(request.app.state.settings)
+        if reason is not None:
+            audit_denied(request, principal, reason)
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        return principal
+
+    return dependency
 
 
 def require(

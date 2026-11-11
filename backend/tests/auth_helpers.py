@@ -54,6 +54,7 @@ class AuthKit:
             "auth_issuer": ISSUER,
             "auth_audience": AUDIENCE,
             "auth_jwks_file": self.jwks_path,
+            "data_source_tenant_id": "acme",
             "data_dir": self.root / "data",
             "artifacts_dir": self.root / "artifacts",
             "database_url": f"sqlite:///{(self.root / 'app.sqlite3').as_posix()}",

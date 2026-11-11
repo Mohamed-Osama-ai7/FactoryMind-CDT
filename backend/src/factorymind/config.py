@@ -36,10 +36,18 @@ class Settings(BaseSettings):
     auth_roles_claim: str = "roles"  # dotted path allowed, e.g. realm_access.roles
     auth_tenant_claim: str = "tenant_id"
     auth_assets_claim: str = "assets"  # list of asset ids, or ["*"] for every asset of the tenant
-    default_tenant_id: str | None = None  # single-tenant mode: used when the token has no tenant
+    # Single-tenant mode (explicit opt-in): a token without a tenant claim belongs to
+    # ``default_tenant_id``. Otherwise a missing tenant claim is rejected.
+    single_tenant_mode: bool = False
+    default_tenant_id: str | None = None
+    # The tenant that owns the telemetry/model this deployment serves (defaults to the single
+    # tenant in single-tenant mode). With neither set, anomaly and incident data are denied.
+    data_source_tenant_id: str | None = None
 
     # --- authorization, assets, persistence ---
     asset_ids: list[str] = ["metropt3-apu-1"]
+    # The one asset whose telemetry the configured model/dataset actually describes.
+    data_source_asset_id: str = "metropt3-apu-1"
     require_separation_of_duties: bool = True
     database_url: str | None = None  # default: SQLite file under data_dir
 
@@ -63,12 +71,29 @@ class Settings(BaseSettings):
             raise ValueError("asset ids must match [a-z0-9][a-z0-9_.-]{0,63}")
         return value
 
-    @field_validator("default_tenant_id")
+    @field_validator("default_tenant_id", "data_source_tenant_id")
     @classmethod
     def _tenant(cls, value: str | None) -> str | None:
         if value is not None and not IDENTIFIER.match(value):
-            raise ValueError("default_tenant_id must match [a-z0-9][a-z0-9_.-]{0,63}")
+            raise ValueError("tenant ids must match [a-z0-9][a-z0-9_.-]{0,63}")
         return value
+
+    @model_validator(mode="after")
+    def _tenancy_and_data_source(self) -> "Settings":
+        if self.single_tenant_mode and self.default_tenant_id is None:
+            raise ValueError("single_tenant_mode requires default_tenant_id")
+        if not IDENTIFIER.match(self.data_source_asset_id):
+            raise ValueError("data_source_asset_id must match [a-z0-9][a-z0-9_.-]{0,63}")
+        if self.data_source_asset_id not in self.asset_ids:
+            raise ValueError("data_source_asset_id must be one of asset_ids")
+        return self
+
+    @property
+    def data_source_owner(self) -> str | None:
+        """Tenant that owns the served data; None means nobody (deny by default)."""
+        if self.data_source_tenant_id is not None:
+            return self.data_source_tenant_id
+        return self.default_tenant_id if self.single_tenant_mode else None
 
     @model_validator(mode="after")
     def _jwks_url_scheme(self) -> "Settings":

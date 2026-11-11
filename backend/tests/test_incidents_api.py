@@ -99,7 +99,8 @@ def test_unknown_episode_unknown_asset_and_ungranted_asset_are_404(world: World)
     scoped = world.kit.headers(roles=["engineer"], assets=[])
     assert world.client.post("/api/v1/incidents", json=good, headers=scoped).status_code == 404
     reasons = [e["details"].get("reason") for e in world.audit()["items"]]
-    assert reasons.count("asset_not_granted") == 2
+    assert reasons.count("asset_mismatch") == 1  # pump-9 is not the asset the data describes
+    assert reasons.count("asset_not_granted") == 1
 
 
 # ---------------------------------------------------------------- tenant and asset isolation
@@ -112,9 +113,8 @@ def test_other_tenants_cannot_see_or_decide_an_incident_and_get_404(world: World
     assert world.client.get(path, headers=stranger).status_code == 404
     assert world.client.get("/api/v1/incidents", headers=stranger).json()["total"] == 0
     assert world.decide(incident, tenant="globex").status_code == 404
-    # the same episode in another tenant is a separate incident, not a duplicate
-    other = world.create(tenant="globex")
-    assert other.status_code == 201 and other.json()["id"] != incident["id"]
+    # the data source belongs to one tenant: another tenant cannot mint incidents from it
+    assert world.create(tenant="globex").status_code == 404
     # and tenant A still sees exactly its own
     assert world.client.get("/api/v1/incidents", headers=world.kit.headers()).json()["total"] == 1
 

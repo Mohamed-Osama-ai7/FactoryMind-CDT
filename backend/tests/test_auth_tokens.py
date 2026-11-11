@@ -137,7 +137,12 @@ def test_tenant_comes_from_the_token_or_an_explicit_single_tenant_default(kit: A
     with pytest.raises(IdentityError) as info:
         principal(kit, kit.claims(tenant=None))
     assert info.value.reason == "no_tenant"
-    assert principal(kit, kit.claims(tenant=None), default_tenant_id="solo").tenant_id == "solo"
+    with pytest.raises(IdentityError):  # a default without the explicit mode is not a fallback
+        principal(kit, kit.claims(tenant=None), default_tenant_id="solo")
+    solo = principal(
+        kit, kit.claims(tenant=None), single_tenant_mode=True, default_tenant_id="solo"
+    )
+    assert solo.tenant_id == "solo"
     with pytest.raises(IdentityError):
         principal(kit, kit.claims(tenant="Bad Tenant!"))
 

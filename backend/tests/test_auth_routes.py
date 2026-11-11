@@ -159,7 +159,14 @@ def test_denials_are_audited_in_the_callers_tenant(kit: AuthKit) -> None:
 def test_missing_tenant_is_forbidden_not_defaulted(kit: AuthKit) -> None:
     client = make_client(kit)
     assert client.get("/api/v1/me", headers=kit.headers(tenant=None)).status_code == 403
-    solo = make_client(kit, default_tenant_id="solo")
+    # a default tenant alone does not enable the fallback: single-tenant mode is an explicit opt-in
+    assert (
+        make_client(kit, default_tenant_id="solo")
+        .get("/api/v1/me", headers=kit.headers(tenant=None))
+        .status_code
+        == 403
+    )
+    solo = make_client(kit, single_tenant_mode=True, default_tenant_id="solo")
     assert solo.get("/api/v1/me", headers=kit.headers(tenant=None)).json()["tenant_id"] == "solo"
 
 
@@ -213,8 +220,9 @@ def test_repeated_authentication_failures_are_throttled(kit: AuthKit) -> None:
         for _ in range(5)
     ]
     assert codes == [401, 401, 401, 429, 429]
-    throttled = client.get("/api/v1/me", headers=kit.headers())
-    assert throttled.status_code == 429 and "retry-after" in throttled.headers
+    # still-failing callers carry Retry-After, but a valid token is never locked out
+    assert "retry-after" in client.get("/api/v1/me", headers={"Authorization": "Bearer x"}).headers
+    assert client.get("/api/v1/me", headers=kit.headers()).status_code == 200
     # throttled attempts are not written to the audit log (no audit flooding)
     assert len(audit_rows(client, "-")) == 3
 

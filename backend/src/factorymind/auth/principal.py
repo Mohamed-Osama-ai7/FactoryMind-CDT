@@ -74,6 +74,16 @@ class Principal:
     def can_access_asset(self, asset_id: str) -> bool:
         return asset_id in self.asset_ids
 
+    def data_source_denial(self, settings: Settings) -> str | None:
+        """Why this principal may not use the served data source (None when it may)."""
+        if settings.data_source_owner is None:
+            return "data_source_unowned"
+        if self.tenant_id != settings.data_source_owner:
+            return "tenant_mismatch"
+        if not self.can_access_asset(settings.data_source_asset_id):
+            return "asset_not_granted"
+        return None
+
 
 def _dig(claims: dict[str, Any], path: str) -> Any:
     node: Any = claims
@@ -89,14 +99,18 @@ def principal_from_claims(claims: dict[str, Any], settings: Settings) -> Princip
     if not isinstance(actor, str) or not _ACTOR.match(actor):
         raise IdentityError("bad_subject")
 
-    tenant = _dig(claims, settings.auth_tenant_claim) or settings.default_tenant_id
+    tenant = _dig(claims, settings.auth_tenant_claim)
+    if tenant is None and settings.single_tenant_mode:
+        tenant = settings.default_tenant_id
     if not isinstance(tenant, str) or not IDENTIFIER.match(tenant):
         raise IdentityError("no_tenant")
 
     raw_roles = _dig(claims, settings.auth_roles_claim)
     items = [raw_roles] if isinstance(raw_roles, str) else raw_roles
     roles = frozenset(
-        Role(r) for r in (items if isinstance(items, list) else []) if r in Role._value2member_map_
+        Role(r)
+        for r in (items if isinstance(items, list) else [])
+        if isinstance(r, str) and r in Role._value2member_map_
     )
 
     raw_assets = _dig(claims, settings.auth_assets_claim)

@@ -58,7 +58,10 @@ export function readOidcConfig(
   }
 }
 
-export function createUserManager(config: OidcConfig): UserManager {
+export function createUserManager(
+  config: OidcConfig,
+  overrides: Partial<UserManagerSettings> = {},
+): UserManager {
   const settings: UserManagerSettings = {
     authority: config.authority,
     client_id: config.clientId,
@@ -67,8 +70,11 @@ export function createUserManager(config: OidcConfig): UserManager {
     response_type: 'code', // authorization code flow; oidc-client-ts adds PKCE (S256)
     scope: config.scope,
     automaticSilentRenew: false,
-    // access tokens are kept in memory only; the transient PKCE state uses sessionStorage
+    // access tokens are kept in memory only; the transient PKCE state (code verifier, state) is
+    // pinned to sessionStorage because the library would otherwise default to localStorage
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
+    stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
+    ...overrides,
   }
   return new UserManager(settings)
 }
