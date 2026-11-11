@@ -31,11 +31,19 @@ from factorymind.contracts.events import (
 )
 from factorymind.contracts.rca import RcaAssessment
 from factorymind.db.audit import append_audit, verify_chain
-from factorymind.db.models import AuditEvent, Decision, EvidenceRow, HumanObservation, Incident
+from factorymind.db.models import (
+    AuditEvent,
+    Decision,
+    EvidenceRow,
+    HumanObservation,
+    Incident,
+    OutcomeVerification,
+)
 from factorymind.db.repository import (
     DuplicateIncidentError,
     IncidentRepo,
     NewEvidence,
+    OutcomeKind,
     VersionConflictError,
 )
 from factorymind.db.session import Database
@@ -161,10 +169,50 @@ class HumanObservationCreate(BaseModel):
         return value
 
 
+class OutcomeVerificationCreate(BaseModel):
+    """Post-review field outcome verification (strictly human-recorded, never control)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: OutcomeKind
+    maintenance_action: str = Field(min_length=1, max_length=256)
+    verified_at: datetime | None = None
+    notes: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("maintenance_action", "notes")
+    @classmethod
+    def _clean_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("field must not be blank")
+        return cleaned
+
+    @field_validator("verified_at")
+    @classmethod
+    def _naive_verified_at(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            raise ValueError("verified_at must be naive local train time")
+        return value
+
+
+class OutcomeVerificationOut(BaseModel):
+    id: str
+    incident_id: str
+    asset_id: str
+    actor_id: str
+    outcome: OutcomeKind
+    maintenance_action: str
+    verified_at: datetime | None = None
+    notes: str
+    created_at: datetime
+    origin: Literal["human_observation"] = "human_observation"
+
+
 class IncidentDetail(IncidentOut):
     evidence: list[EvidenceOut]
     decisions: list[DecisionOut]
     observations: list[HumanObservationOut] = Field(default_factory=list)
+    outcomes: list[OutcomeVerificationOut] = Field(default_factory=list)
 
 
 class IncidentList(BaseModel):
@@ -258,12 +306,27 @@ def _observation_out(obs: HumanObservation) -> HumanObservationOut:
     )
 
 
+def _outcome_out(row: OutcomeVerification) -> OutcomeVerificationOut:
+    return OutcomeVerificationOut(
+        id=row.id,
+        incident_id=row.incident_id,
+        asset_id=row.asset_id,
+        actor_id=row.actor_id,
+        outcome=cast(OutcomeKind, row.outcome),
+        maintenance_action=row.maintenance_action,
+        verified_at=row.verified_at,
+        notes=row.notes,
+        created_at=row.created_at,
+    )
+
+
 def _detail(repo: IncidentRepo, incident: Incident) -> IncidentDetail:
     return IncidentDetail(
         **_incident_out(incident).model_dump(),
         evidence=[_evidence_out(e) for e in repo.evidence(incident)],
         decisions=[_decision_out(d) for d in repo.decisions(incident)],
         observations=[_observation_out(o) for o in repo.observations(incident)],
+        outcomes=[_outcome_out(v) for v in repo.outcomes(incident)],
     )
 
 
@@ -591,6 +654,46 @@ def create_decision(
             details={"decision": decision.decision, "version": decision.incident_version},
         )
         return _detail(repo, current)
+
+    return _db(request).run_with_retry(work)
+
+
+@router.post(
+    "/incidents/{incident_id}/outcomes",
+    response_model=OutcomeVerificationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_outcome_verification(
+    incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
+    body: OutcomeVerificationCreate,
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Permission.OUTCOME_CREATE, write=True))],
+) -> OutcomeVerificationOut:
+    def work(session: Session) -> OutcomeVerificationOut:
+        repo = IncidentRepo(session, principal)
+        incident = repo.get(incident_id)
+        if incident is None:
+            raise _not_found()
+        row = repo.add_outcome(
+            incident,
+            outcome=body.outcome,
+            maintenance_action=body.maintenance_action,
+            verified_at=body.verified_at,
+            notes=body.notes,
+        )
+        append_audit(
+            session,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.actor_id,
+            roles=principal.roles,
+            action="outcome.create",
+            object_type="incident",
+            object_id=incident.id,
+            outcome="allowed",
+            request_id=request_id_of(request),
+            details={"outcome": body.outcome, "verification_id": row.id},
+        )
+        return _outcome_out(row)
 
     return _db(request).run_with_retry(work)
 

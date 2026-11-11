@@ -9,6 +9,7 @@ import type { DecisionOut } from './decisionOut';
 import type { EvidenceOut } from './evidenceOut';
 import type { HumanObservationOut } from './humanObservationOut';
 import type { IncidentDetailStatus } from './incidentDetailStatus';
+import type { OutcomeVerificationOut } from './outcomeVerificationOut';
 
 export interface IncidentDetail {
   asset_id: string;
@@ -22,6 +23,7 @@ export interface IncidentDetail {
   id: string;
   model_version: string;
   observations?: HumanObservationOut[];
+  outcomes?: OutcomeVerificationOut[];
   peak_score: number;
   raised_at: string;
   status: IncidentDetailStatus;

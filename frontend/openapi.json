@@ -1336,6 +1336,13 @@
             "title": "Observations",
             "type": "array"
           },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomeVerificationOut"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          },
           "peak_score": {
             "title": "Peak Score",
             "type": "number"
@@ -2020,6 +2027,128 @@
           "failure"
         ],
         "title": "OperatorReport",
+        "type": "object"
+      },
+      "OutcomeVerificationCreate": {
+        "additionalProperties": false,
+        "description": "Post-review field outcome verification (strictly human-recorded, never control).",
+        "properties": {
+          "maintenance_action": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Maintenance Action",
+            "type": "string"
+          },
+          "notes": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Notes",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "confirmed_leak",
+              "false_positive",
+              "sensor_fault_confirmed",
+              "high_demand_confirmed",
+              "inconclusive"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "outcome",
+          "maintenance_action",
+          "notes"
+        ],
+        "title": "OutcomeVerificationCreate",
+        "type": "object"
+      },
+      "OutcomeVerificationOut": {
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "incident_id": {
+            "title": "Incident Id",
+            "type": "string"
+          },
+          "maintenance_action": {
+            "title": "Maintenance Action",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "origin": {
+            "const": "human_observation",
+            "default": "human_observation",
+            "title": "Origin",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "confirmed_leak",
+              "false_positive",
+              "sensor_fault_confirmed",
+              "high_demand_confirmed",
+              "inconclusive"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "id",
+          "incident_id",
+          "asset_id",
+          "actor_id",
+          "outcome",
+          "maintenance_action",
+          "notes",
+          "created_at"
+        ],
+        "title": "OutcomeVerificationOut",
         "type": "object"
       },
       "PhaseEvidenceSummary": {
@@ -4709,6 +4838,59 @@
           }
         },
         "summary": "Create Observation",
+        "tags": [
+          "incidents"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/outcomes": {
+      "post": {
+        "operationId": "create_outcome_verification",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{32}$",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeVerificationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeVerificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Outcome Verification",
         "tags": [
           "incidents"
         ]

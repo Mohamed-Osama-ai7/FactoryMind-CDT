@@ -16,6 +16,7 @@ ALLOWED_MUTATING_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/incidents"),  # records an incident re-detected by the server
         ("POST", "/api/v1/incidents/{incident_id}/decisions"),  # human review record
         ("POST", "/api/v1/incidents/{incident_id}/observations"),  # human field observation
+        ("POST", "/api/v1/incidents/{incident_id}/outcomes"),  # human outcome verification
     }
 )
 

@@ -39,6 +39,11 @@ function Shell() {
               Incidents
             </Link>
           )}
+          {permissions.has('audit:read') && (
+            <Link to="/audit" className={LINK} activeProps={ACTIVE}>
+              Audit trail
+            </Link>
+          )}
         </nav>
         <div className="mt-auto pt-6 text-xs text-muted">
           {me.isPending && <p role="status">Loading identity…</p>}

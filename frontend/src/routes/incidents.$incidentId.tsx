@@ -5,8 +5,10 @@ import {
   useGetIncidentEvidencePackage,
   useGetIncidentRca,
 } from '../api/generated/incidents/incidents'
+import { DecisionPanel } from '../features/incidents/DecisionPanel'
 import { EventEvidencePackageView } from '../features/incidents/EventEvidencePackageView'
 import { ObservationForm } from '../features/incidents/ObservationForm'
+import { OutcomeVerificationPanel } from '../features/incidents/OutcomeVerificationPanel'
 import { RcaPanel } from '../features/incidents/RcaPanel'
 import { formatNaive } from '../lib/naiveTime'
 
@@ -114,6 +116,13 @@ function IncidentInvestigationPage() {
             />
           </div>
         </section>
+      )}
+
+      {incident && (
+        <>
+          <DecisionPanel key={`${incident.id}-decisions`} incident={incident} />
+          <OutcomeVerificationPanel key={`${incident.id}-outcomes`} incident={incident} />
+        </>
       )}
 
       {evidenceQuery.isPending && <p role="status">Building event evidence package…</p>}

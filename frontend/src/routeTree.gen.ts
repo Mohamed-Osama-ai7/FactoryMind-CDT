@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnomalyRouteImport } from './routes/anomaly'
+import { Route as AuditRouteImport } from './routes/audit'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents.index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents.$incidentId'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const AnomalyRoute = AnomalyRouteImport.update({
   id: '/anomaly',
   path: '/anomaly',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuditRoute = AuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
@@ -44,6 +50,7 @@ const IncidentsIncidentIdRoute = IncidentsIncidentIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
+  '/audit': typeof AuditRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/incidents/': typeof IncidentsIndexRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
+  '/audit': typeof AuditRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/incidents': typeof IncidentsIndexRoute
@@ -59,6 +67,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
+  '/audit': typeof AuditRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
   '/incidents/': typeof IncidentsIndexRoute
@@ -68,6 +77,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/anomaly'
+    | '/audit'
     | '/auth/callback'
     | '/incidents/$incidentId'
     | '/incidents/'
@@ -75,6 +85,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/anomaly'
+    | '/audit'
     | '/auth/callback'
     | '/incidents/$incidentId'
     | '/incidents'
@@ -82,6 +93,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/anomaly'
+    | '/audit'
     | '/auth/callback'
     | '/incidents/$incidentId'
     | '/incidents/'
@@ -90,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnomalyRoute: typeof AnomalyRoute
+  AuditRoute: typeof AuditRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
   IncidentsIndexRoute: typeof IncidentsIndexRoute
@@ -109,6 +122,13 @@ declare module '@tanstack/react-router' {
       path: '/anomaly'
       fullPath: '/anomaly'
       preLoaderRoute: typeof AnomalyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audit': {
+      id: '/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/callback': {
@@ -138,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnomalyRoute: AnomalyRoute,
+  AuditRoute: AuditRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   IncidentsIncidentIdRoute: IncidentsIncidentIdRoute,
   IncidentsIndexRoute: IncidentsIndexRoute,
