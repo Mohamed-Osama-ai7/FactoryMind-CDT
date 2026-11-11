@@ -1,8 +1,19 @@
-"""Strictly read-only OT & edge telemetry adapters (OPC-UA, MQTT, Historian).
+"""Read-only OT/edge source descriptors and a stateless batch preflight validator.
 
-Architectural safety invariant: adapters in this module only validate endpoints, subscribe/read
-allowlisted tags, buffer bounded windows, and emit cadence diagnostics. No write, publish,
-command, actuation, or setpoint modification methods exist anywhere in this package.
+IMPORTANT: this module performs NO network I/O. It does not open OPC-UA, MQTT or historian
+connections, subscribe to tags, or read from any plant system, and the project depends on no client
+library for those protocols. What it does:
+
+- checks endpoint *URL text* against scheme, credential, literal-IP and host-allowlist rules
+  (hostnames are not resolved, so this says nothing about where a name points);
+- validates a sample batch that a caller submits (allowlisted tags, finite numbers, cadence, gaps,
+  duplicate/out-of-order timestamps) against an in-memory ring buffer;
+- computes the exponential backoff list for a number of *simulated* disconnects.
+
+The class names ``OpcUaReadOnlyAdapter`` / ``MqttReadOnlyAdapter`` / ``HistorianReadOnlyAdapter``
+are kept for compatibility; they are protocol-specific descriptors, not connectors. The absence of
+write methods is trivially true while no client exists; any future real connector must be designed
+and tested for read-only behaviour on its own.
 """
 
 from __future__ import annotations
@@ -21,9 +32,9 @@ from urllib.parse import urlsplit
 from factorymind.contracts.connectors import (
     CadenceStatus,
     ConnectorProtocol,
+    EdgeBufferState,
     EdgeBufferStats,
     EdgeCadenceReport,
-    EdgeConnectionState,
     EdgeSampleValidationRequest,
     EdgeSampleValidationResponse,
     EdgeSourceConfig,
@@ -68,7 +79,11 @@ def validate_edge_endpoint(
     protocol: ConnectorProtocol,
     allowed_hosts: Sequence[str],
 ) -> tuple[str, int | None]:
-    """Validate an industrial read-only endpoint URL against SSRF and host-allowlist policy.
+    """Check an endpoint URL's *text* against SSRF-style and host-allowlist rules.
+
+    Scope and limits: the hostname is never resolved, so a name on the allowlist that resolves to a
+    private or metadata address is NOT detected; there is also no connection-time IP pinning. A
+    real connector would additionally have to resolve and validate addresses at connect time.
 
     Rejects insecure schemes, embedded userinfo credentials, query strings/fragments, control
     characters, non-canonical numeric/octal/hex IPv4 literals, non-global/private/loopback/
@@ -145,7 +160,7 @@ def _normalize_utc(value: datetime) -> datetime:
 
 
 class _BaseReadOnlyEdgeAdapter(ABC):
-    """Base read-only OT/edge adapter with bounded ring buffering and cadence diagnostics."""
+    """Source descriptor plus batch preflight (ring buffer + cadence diagnostics). No I/O."""
 
     expected_protocol: ConnectorProtocol
 
@@ -162,36 +177,28 @@ class _BaseReadOnlyEdgeAdapter(ABC):
         )
         self.config = config
         self.read_only: Literal[True] = True
-        self._buffer: deque[dict[str, object]] = deque(maxlen=config.max_buffer_records)
-        self._evicted_count = 0
-        self._reconnect_attempts = 0
-        self._state: EdgeConnectionState = "standby_offline"
 
     def snapshot_status(self) -> EdgeSourceStatusEntry:
-        ssrf_status: Literal["allowlisted_host_verified", "blocked"]
+        url_policy: Literal["passed", "rejected"]
         try:
             validate_edge_endpoint(
                 self.config.endpoint_url,
                 protocol=self.config.protocol,
                 allowed_hosts=self.config.allowed_hosts,
             )
-            ssrf_status = "allowlisted_host_verified"
+            url_policy = "passed"
         except EdgeSecurityError:
-            ssrf_status = "blocked"
-        utilization = len(self._buffer) / float(self.config.max_buffer_records)
+            url_policy = "rejected"
         return EdgeSourceStatusEntry(
             source_id=self.config.source_id,
             asset_id=self.config.asset_id,
             protocol=self.config.protocol,
             endpoint_url=self.config.endpoint_url,
             read_only=True,
-            connection_state=self._state,
             nominal_cadence_s=self.config.nominal_cadence_s,
             max_buffer_records=self.config.max_buffer_records,
             node_allowlist_count=len(self.config.node_allowlist),
-            ssrf_policy_status=ssrf_status,
-            buffer_utilization=round(utilization, 4),
-            reconnect_attempts=self._reconnect_attempts,
+            endpoint_url_policy=url_policy,
         )
 
     def ingest_batch(
@@ -291,11 +298,11 @@ class _BaseReadOnlyEdgeAdapter(ABC):
             min(60.0, float(1 << attempt)) for attempt in range(simulate_disconnects)
         )
         if evicted > 0:
-            state: EdgeConnectionState = "degraded_buffer_evicting"
+            state: EdgeBufferState = "batch_exceeds_capacity"
         elif simulate_disconnects > 0:
-            state = "reconnecting_backoff"
+            state = "simulated_reconnect_backoff"
         else:
-            state = "connected_readonly"
+            state = "batch_within_capacity"
 
         warnings: list[str] = []
         if ignored_sensors:
@@ -324,7 +331,7 @@ class _BaseReadOnlyEdgeAdapter(ABC):
             asset_id=self.config.asset_id,
             protocol=self.config.protocol,
             read_only=True,
-            endpoint_allowlist_ok=True,
+            endpoint_url_policy_ok=True,
             cadence=EdgeCadenceReport(
                 sample_count=len(samples),
                 expected_cadence_s=nominal,
@@ -341,32 +348,33 @@ class _BaseReadOnlyEdgeAdapter(ABC):
                 capacity=capacity,
                 retained_count=len(ring),
                 evicted_count=evicted,
-                reconnect_attempts=simulate_disconnects,
+                simulated_reconnect_attempts=simulate_disconnects,
                 backoff_schedule_s=backoff_schedule,
                 state=state,
             ),
             warnings=tuple(warnings),
             safety_note=(
-                "Read-only advisory edge validation only; adapters expose zero PLC/OPC-UA write, "
-                "MQTT publish, or actuation interfaces."
+                "Preflight validation of the submitted batch only. No connection to the source was "
+                "made and nothing was read from any plant system; there is no connector I/O in "
+                "this build."
             ),
         )
 
 
 class OpcUaReadOnlyAdapter(_BaseReadOnlyEdgeAdapter):
-    """Strictly read-only OPC-UA subscription adapter (``opc.tcp://``)."""
+    """OPC-UA source descriptor (``opc.tcp://``). Not a connector: no OPC-UA client exists."""
 
     expected_protocol: ConnectorProtocol = "opcua_readonly"
 
 
 class MqttReadOnlyAdapter(_BaseReadOnlyEdgeAdapter):
-    """Strictly read-only TLS MQTT telemetry subscriber (``mqtts://``)."""
+    """MQTT source descriptor (``mqtts://``). Not a connector: no MQTT client exists."""
 
     expected_protocol: ConnectorProtocol = "mqtt_readonly"
 
 
 class HistorianReadOnlyAdapter(_BaseReadOnlyEdgeAdapter):
-    """Strictly read-only HTTPS industrial historian pull client (``https://``)."""
+    """Historian source descriptor (``https://``). Not a connector: no historian client."""
 
     expected_protocol: ConnectorProtocol = "historian_readonly"
 
@@ -418,7 +426,7 @@ _SOURCE_MAP: Final[dict[str, EdgeSourceConfig]] = {
 
 
 def build_adapter(config: EdgeSourceConfig) -> _BaseReadOnlyEdgeAdapter:
-    """Instantiate the strictly read-only adapter for a validated source config."""
+    """Instantiate the (I/O-free) source descriptor for a validated source config."""
     return _ADAPTER_BY_PROTOCOL[config.protocol](config)
 
 
@@ -434,7 +442,7 @@ def list_edge_sources(
     allowed_assets: frozenset[str] | None = None,
     asset_id: str | None = None,
 ) -> EdgeSourcesResponse:
-    """Return SSRF-verified read-only edge source descriptors scoped to allowed assets."""
+    """Return registered source descriptors (URL-policy checked) scoped to allowed assets."""
     entries: list[EdgeSourceStatusEntry] = []
     for cfg in DEFAULT_EDGE_SOURCES:
         if allowed_assets is not None and cfg.asset_id not in allowed_assets:

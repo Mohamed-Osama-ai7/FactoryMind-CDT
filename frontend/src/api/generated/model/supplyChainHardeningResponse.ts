@@ -6,7 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ArtifactAttestationEntry } from './artifactAttestationEntry';
-import type { SupplyChainHardeningResponseCrossSystemBenchmarks } from './supplyChainHardeningResponseCrossSystemBenchmarks';
+import type { SupplyChainHardeningResponseRuntimeModelAttestation } from './supplyChainHardeningResponseRuntimeModelAttestation';
+import type { SupplyChainHardeningResponseRuntimeModelFormat } from './supplyChainHardeningResponseRuntimeModelFormat';
 
 /**
  * Repository supply-chain, CI pinning, license, and artifact attestation audit.
@@ -15,8 +16,11 @@ export interface SupplyChainHardeningResponse {
   advisory_only?: true;
   attestations: ArtifactAttestationEntry[];
   ci_actions_sha_pinned: boolean;
-  cross_system_benchmarks: SupplyChainHardeningResponseCrossSystemBenchmarks;
   license_present: boolean;
-  non_pickle_attestation_ready: boolean;
+  limitations: string[];
+  manifest_signature_key_configured: boolean;
+  runtime_loader_consults_manifest?: false;
+  runtime_model_attestation: SupplyChainHardeningResponseRuntimeModelAttestation;
+  runtime_model_format: SupplyChainHardeningResponseRuntimeModelFormat;
   unpinned_workflow_uses?: string[];
 }

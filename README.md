@@ -6,16 +6,21 @@ Simulation, and Decision Support.**
 SENSE → VALIDATE → UNDERSTAND → RETRIEVE → DIAGNOSE → ASSESS UNCERTAINTY → SIMULATE →
 ESTIMATE IMPACT → HUMAN REVIEW → VERIFY → LEARN
 
-> **Status: research prototype.** Implemented so far: engineering foundation (M0), real-data
-> compressor anomaly detection (M1, [docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md)),
-> LOEO detection hardening ([docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md)),
-> OIDC auth, RBAC and persistent incidents ([docs/m2-wp1-auth-persistence.md](docs/m2-wp1-auth-persistence.md)),
-> and operating-regime / consistency-warning separation
-> ([docs/m2-wp2-operating-regime-warning-separation.md](docs/m2-wp2-operating-regime-warning-separation.md)).
-> M2 evidence/RCA, simulation and the full decision workflow are tracked in
-> [docs/roadmap-execution-tracker.md](docs/roadmap-execution-tracker.md). Nothing here
-> has been deployed in a real factory; reported results come only from the evaluation pipeline in
-> this repository.
+> **Status: research prototype.** Implemented work packages (M0–M5) are tracked in
+> [docs/roadmap-execution-tracker.md](docs/roadmap-execution-tracker.md), including real-data
+> MetroPT-3 anomaly detection ([docs/m1-anomaly-detection.md](docs/m1-anomaly-detection.md),
+> [docs/m2-wp0-detection-hardening.md](docs/m2-wp0-detection-hardening.md),
+> [docs/m2-wp2-operating-regime-warning-separation.md](docs/m2-wp2-operating-regime-warning-separation.md)),
+> OIDC/RBAC/audit persistence ([docs/m2-wp1-auth-persistence.md](docs/m2-wp1-auth-persistence.md)),
+> evidence/RCA/simulation/copilot modules, and OT/edge preflight descriptors
+> ([docs/m5-wp0-ot-edge-hardening.md](docs/m5-wp0-ot-edge-hardening.md)).
+>
+> **Important scope boundaries:** Nothing here has been deployed in a real factory, and
+> **OPC-UA, MQTT, and historian connector I/O is not implemented** (`connector_io_status = "not_implemented"`):
+> no industrial client libraries or live telemetry connections exist, endpoint checks inspect URL text
+> only without DNS resolution, and the runtime loader still loads `model.joblib` (pickle) with
+> adjacent `model_card.json` SHA-256 comparison rather than a verified non-pickle format.
+> Reported metrics come solely from the evaluation pipelines and automated tests in this repository.
 
 ## Safety boundary
 

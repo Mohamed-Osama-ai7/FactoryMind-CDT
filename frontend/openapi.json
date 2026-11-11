@@ -195,11 +195,14 @@
           },
           "status": {
             "enum": [
-              "verified",
+              "present",
               "sha_pinned",
+              "unattested",
+              "self_consistent_unsigned",
+              "signature_verified",
+              "sha_matches_adjacent_card",
               "missing",
-              "tamper_or_hash_mismatch",
-              "legacy_pickle_advisory"
+              "tamper_or_hash_mismatch"
             ],
             "title": "Status",
             "type": "string"
@@ -1302,22 +1305,21 @@
             "title": "Evicted Count",
             "type": "integer"
           },
-          "reconnect_attempts": {
-            "minimum": 0.0,
-            "title": "Reconnect Attempts",
-            "type": "integer"
-          },
           "retained_count": {
             "minimum": 0.0,
             "title": "Retained Count",
             "type": "integer"
           },
+          "simulated_reconnect_attempts": {
+            "minimum": 0.0,
+            "title": "Simulated Reconnect Attempts",
+            "type": "integer"
+          },
           "state": {
             "enum": [
-              "standby_offline",
-              "connected_readonly",
-              "reconnecting_backoff",
-              "degraded_buffer_evicting"
+              "batch_within_capacity",
+              "simulated_reconnect_backoff",
+              "batch_exceeds_capacity"
             ],
             "title": "State",
             "type": "string"
@@ -1327,7 +1329,7 @@
           "capacity",
           "retained_count",
           "evicted_count",
-          "reconnect_attempts",
+          "simulated_reconnect_attempts",
           "state"
         ],
         "title": "EdgeBufferStats",
@@ -1491,9 +1493,21 @@
           "cadence": {
             "$ref": "#/components/schemas/EdgeCadenceReport"
           },
-          "endpoint_allowlist_ok": {
-            "title": "Endpoint Allowlist Ok",
+          "endpoint_check_scope": {
+            "const": "url_string_only_no_dns_resolution",
+            "default": "url_string_only_no_dns_resolution",
+            "title": "Endpoint Check Scope",
+            "type": "string"
+          },
+          "endpoint_url_policy_ok": {
+            "title": "Endpoint Url Policy Ok",
             "type": "boolean"
+          },
+          "mode": {
+            "const": "preflight_validation_only",
+            "default": "preflight_validation_only",
+            "title": "Mode",
+            "type": "string"
           },
           "protocol": {
             "enum": [
@@ -1508,6 +1522,12 @@
             "const": true,
             "default": true,
             "title": "Read Only",
+            "type": "boolean"
+          },
+          "real_connector_io": {
+            "const": false,
+            "default": false,
+            "title": "Real Connector Io",
             "type": "boolean"
           },
           "safety_note": {
@@ -1531,7 +1551,7 @@
           "source_id",
           "asset_id",
           "protocol",
-          "endpoint_allowlist_ok",
+          "endpoint_url_policy_ok",
           "cadence",
           "buffer",
           "safety_note"
@@ -1547,24 +1567,34 @@
             "title": "Asset Id",
             "type": "string"
           },
-          "buffer_utilization": {
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Buffer Utilization",
-            "type": "number"
-          },
           "connection_state": {
-            "enum": [
-              "standby_offline",
-              "connected_readonly",
-              "reconnecting_backoff",
-              "degraded_buffer_evicting"
-            ],
+            "const": "descriptor_only_not_connected",
+            "default": "descriptor_only_not_connected",
             "title": "Connection State",
+            "type": "string"
+          },
+          "connector_io": {
+            "const": "not_implemented",
+            "default": "not_implemented",
+            "title": "Connector Io",
+            "type": "string"
+          },
+          "endpoint_check_scope": {
+            "const": "url_string_only_no_dns_resolution",
+            "default": "url_string_only_no_dns_resolution",
+            "title": "Endpoint Check Scope",
             "type": "string"
           },
           "endpoint_url": {
             "title": "Endpoint Url",
+            "type": "string"
+          },
+          "endpoint_url_policy": {
+            "enum": [
+              "passed",
+              "rejected"
+            ],
+            "title": "Endpoint Url Policy",
             "type": "string"
           },
           "max_buffer_records": {
@@ -1597,21 +1627,8 @@
             "title": "Read Only",
             "type": "boolean"
           },
-          "reconnect_attempts": {
-            "minimum": 0.0,
-            "title": "Reconnect Attempts",
-            "type": "integer"
-          },
           "source_id": {
             "title": "Source Id",
-            "type": "string"
-          },
-          "ssrf_policy_status": {
-            "enum": [
-              "allowlisted_host_verified",
-              "blocked"
-            ],
-            "title": "Ssrf Policy Status",
             "type": "string"
           }
         },
@@ -1620,13 +1637,10 @@
           "asset_id",
           "protocol",
           "endpoint_url",
-          "connection_state",
           "nominal_cadence_s",
           "max_buffer_records",
           "node_allowlist_count",
-          "ssrf_policy_status",
-          "buffer_utilization",
-          "reconnect_attempts"
+          "endpoint_url_policy"
         ],
         "title": "EdgeSourceStatusEntry",
         "type": "object"
@@ -1641,6 +1655,17 @@
             "title": "Advisory Only",
             "type": "boolean"
           },
+          "capability_note": {
+            "default": "These are registered source descriptors. FactoryMind does not currently connect to any OPC-UA server, MQTT broker or historian; endpoint checks inspect the URL text only.",
+            "title": "Capability Note",
+            "type": "string"
+          },
+          "connector_io_status": {
+            "const": "not_implemented",
+            "default": "not_implemented",
+            "title": "Connector Io Status",
+            "type": "string"
+          },
           "sources": {
             "items": {
               "$ref": "#/components/schemas/EdgeSourceStatusEntry"
@@ -1649,8 +1674,8 @@
             "type": "array"
           },
           "write_capabilities": {
-            "const": "none_disabled_by_architecture",
-            "default": "none_disabled_by_architecture",
+            "const": "none_no_connector_io_exists",
+            "default": "none_no_connector_io_exists",
             "title": "Write Capabilities",
             "type": "string"
           }
@@ -5952,20 +5977,48 @@
             "title": "Ci Actions Sha Pinned",
             "type": "boolean"
           },
-          "cross_system_benchmarks": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Cross System Benchmarks",
-            "type": "object"
-          },
           "license_present": {
             "title": "License Present",
             "type": "boolean"
           },
-          "non_pickle_attestation_ready": {
-            "title": "Non Pickle Attestation Ready",
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "manifest_signature_key_configured": {
+            "title": "Manifest Signature Key Configured",
             "type": "boolean"
+          },
+          "runtime_loader_consults_manifest": {
+            "const": false,
+            "default": false,
+            "title": "Runtime Loader Consults Manifest",
+            "type": "boolean"
+          },
+          "runtime_model_attestation": {
+            "enum": [
+              "not_checked",
+              "no_current_model",
+              "invalid_pointer",
+              "manifest_missing",
+              "manifest_invalid",
+              "manifest_unsigned_self_consistent",
+              "manifest_signature_verified",
+              "integrity_failed"
+            ],
+            "title": "Runtime Model Attestation",
+            "type": "string"
+          },
+          "runtime_model_format": {
+            "enum": [
+              "joblib_pickle",
+              "unknown"
+            ],
+            "title": "Runtime Model Format",
+            "type": "string"
           },
           "unpinned_workflow_uses": {
             "default": [],
@@ -5979,9 +6032,11 @@
         "required": [
           "license_present",
           "ci_actions_sha_pinned",
-          "non_pickle_attestation_ready",
+          "runtime_model_attestation",
+          "runtime_model_format",
+          "manifest_signature_key_configured",
           "attestations",
-          "cross_system_benchmarks"
+          "limitations"
         ],
         "title": "SupplyChainHardeningResponse",
         "type": "object"
@@ -8026,7 +8081,7 @@
     },
     "/api/v1/edge/hardening": {
       "get": {
-        "description": "Inspect repository license, SHA-pinned CI workflow, and artifact attestation status.",
+        "description": "Run repository and runtime-artifact supply-chain checks and disclose check limits.",
         "operationId": "get_supply_chain_hardening",
         "responses": {
           "200": {
@@ -8048,7 +8103,7 @@
     },
     "/api/v1/edge/sources": {
       "get": {
-        "description": "List SSRF-verified read-only OT & edge telemetry sources visible to this caller.",
+        "description": "List registered read-only source descriptors (URL-text checked; no live connections).",
         "operationId": "get_edge_sources",
         "parameters": [
           {

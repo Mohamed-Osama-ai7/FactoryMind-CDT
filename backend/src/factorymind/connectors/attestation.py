@@ -1,4 +1,22 @@
-"""Supply-chain hardening, workflow SHA-pinning, and non-pickle model attestation."""
+"""Supply-chain checks and model-manifest verification.
+
+Every status returned here is the result of a check that actually ran in this call, and each check
+states what it does *not* establish. Nothing in this module reports a component as "ready": a
+missing, unreadable or unconfigured input is reported as such (``missing`` / ``not_checked``), never
+as success.
+
+What the checks establish:
+
+- ``LICENSE``: the file exists and contains the MIT licence phrases. Nothing more.
+- CI workflow: every ``uses:`` line in ``ci.yml`` names a 40-hex commit. It does not prove the
+  commit exists upstream, is authentic, or that other workflows or lockfiles are pinned.
+- Model manifest (``json_parameters_v1``): the manifest's parameters match the manifest's own
+  SHA-256 (``self_consistent_unsigned``), and, only when an HMAC key is supplied and verifies,
+  ``signature_verified``. A manifest does not cover the bytes of ``model.joblib``.
+- Runtime joblib bundle: the SHA-256 of ``model.joblib`` equals the digest in ``model_card.json``
+  stored in the same directory. That detects corruption; it does not stop a writer who can change
+  both files, and the runtime loader still unpickles the bundle.
+"""
 
 from __future__ import annotations
 
@@ -8,12 +26,14 @@ import json
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from factorymind.config import IDENTIFIER
 from factorymind.contracts.connectors import (
     ArtifactAttestationEntry,
     AttestationStatus,
+    RuntimeModelAttestation,
+    RuntimeModelFormat,
     SupplyChainHardeningResponse,
 )
 
@@ -21,34 +41,23 @@ _WORKFLOW_USES_RE: Final[re.Pattern[str]] = re.compile(r"^\s*-?\s*uses:\s*([^\s#
 _SHA_PINNED_RE: Final[re.Pattern[str]] = re.compile(r"^[^@]+@[0-9a-f]{40}$")
 _FORBIDDEN_PICKLE_FORMATS: Final[frozenset[str]] = frozenset({"pickle", "joblib", "dill"})
 
+# Static disclosures of what this report does NOT establish. They are statements about the
+# implementation, not check results.
+LIMITATIONS: Final[tuple[str, ...]] = (
+    "The runtime loads model.joblib with joblib (pickle) after comparing its SHA-256 with "
+    "model_card.json in the same directory: this detects corruption, not a writer who can change "
+    "both files.",
+    "No runtime code path reads model_manifest.json, and no shipped model has one; a manifest "
+    "would attest its own JSON parameters, not the bytes of model.joblib.",
+    "No manifest signature is verified because no HMAC key is configured in this deployment.",
+    "The CI check only parses 'uses:' lines in ci.yml; it does not verify that pinned commits "
+    "exist or are authentic, nor other workflows, lockfiles or dependency provenance.",
+    "The LICENSE check confirms MIT licence phrases are present in the file.",
+)
+
 
 def _reject_json_constant(value: str) -> Any:
     raise ValueError(f"Non-standard JSON constant {value!r} is forbidden")
-
-
-_CROSS_SYSTEM_BENCHMARKS: Final[dict[str, str]] = {
-    "M2-WP0/WP2 MetroPT-3 LOEO Detection": (
-        "duty_rule 4/4 leaks, 0.034/0.044 FA/day (wp2_integrity_gated 0.026/0.035), "
-        "median abs delay 50 min"
-    ),
-    "M2-WP3/WP4 Evidence & RCA": (
-        "Mean completeness 0.9266, 1.0 grounding/agreement, 0.6765 warning non-leak rate"
-    ),
-    "M3-WP1 AI4I 2020 Calibration": (
-        "ai4i-hgb ROC-AUC 0.9803, Brier 0.0124, ECE 0.0054; Mahalanobis OOD gate"
-    ),
-    "M3-WP2 Hybrid RAG + KG": "Recall@5 1.0, MRR@10 1.0, nDCG@5 0.7683 across 61 verified chunks",
-    "M4-WP0 Physics Digital Twin": (
-        "168 held-out segments: 10m MAE 0.2526 bar, 60m MAE 0.5218 bar, "
-        "0 violations, 3.78x leak ratio"
-    ),
-    "M4-WP2 Controlled Copilot": (
-        "6 permission-scoped read-only tools, red-team refusal firewall + [C1..Cn] subset gate"
-    ),
-    "M5-WP0 OT/Edge & Supply Chain": (
-        "Read-only OPC-UA/MQTT/Historian adapters, SSRF allowlists, MIT LICENSE, SHA-pinned CI"
-    ),
-}
 
 
 def discover_repo_root(start: Path | None = None) -> Path:
@@ -109,7 +118,12 @@ def verify_non_pickle_manifest(
     *,
     hmac_key: bytes | None = None,
 ) -> tuple[AttestationStatus, str | None, str]:
-    """Verify a JSON model manifest without deserializing any pickle/joblib payload."""
+    """Verify a JSON model manifest without deserializing any pickle/joblib payload.
+
+    Returns ``signature_verified`` only when ``hmac_key`` is given and the HMAC matches.
+    Without a key the best outcome is ``self_consistent_unsigned``: the parameters match the
+    manifest's own digest, which anyone who can edit the file can also recompute.
+    """
     if not manifest_path.is_file():
         return "missing", None, "Non-pickle manifest file not present"
     try:
@@ -144,29 +158,40 @@ def verify_non_pickle_manifest(
             digest,
             "Parameters SHA-256 mismatch (manifest modified)",
         )
-    if hmac_key is not None:
-        sig = data.get("hmac_sha256")
-        if not isinstance(sig, str):
-            return "tamper_or_hash_mismatch", digest, "Missing required HMAC signature"
-        try:
-            material = canonical_json_bytes(
-                {
-                    "schema_version": data.get("schema_version"),
-                    "artifact_format": fmt,
-                    "model_name": data.get("model_name"),
-                    "parameters_sha256": expected_sha,
-                }
-            )
-        except (ValueError, TypeError) as exc:
-            return "tamper_or_hash_mismatch", digest, f"Invalid manifest metadata: {exc}"
-        expected_sig = hmac.new(hmac_key, material, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected_sig):
-            return "tamper_or_hash_mismatch", digest, "HMAC-SHA256 verification failed"
-    return "verified", digest, "Non-pickle JSON manifest hash verified"
+    if hmac_key is None:
+        return (
+            "self_consistent_unsigned",
+            digest,
+            "Parameters match the manifest's own SHA-256; no signature was verified, so this does "
+            "not establish authenticity or that it describes the deployed model.joblib",
+        )
+    sig = data.get("hmac_sha256")
+    if not isinstance(sig, str):
+        return "tamper_or_hash_mismatch", digest, "Missing required HMAC signature"
+    try:
+        material = canonical_json_bytes(
+            {
+                "schema_version": data.get("schema_version"),
+                "artifact_format": fmt,
+                "model_name": data.get("model_name"),
+                "parameters_sha256": expected_sha,
+            }
+        )
+    except (ValueError, TypeError) as exc:
+        return "tamper_or_hash_mismatch", digest, f"Invalid manifest metadata: {exc}"
+    expected_sig = hmac.new(hmac_key, material, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return "tamper_or_hash_mismatch", digest, "HMAC-SHA256 verification failed"
+    return (
+        "signature_verified",
+        digest,
+        "HMAC-SHA256 over the manifest metadata verified with the supplied key (covers the "
+        "manifest parameters, not model.joblib)",
+    )
 
 
 def audit_ci_workflow(ci_path: Path) -> tuple[bool, tuple[str, ...], str | None, str]:
-    """Verify every ``uses:`` action in GitHub Actions CI is pinned to a 40-hex commit SHA."""
+    """Check that every ``uses:`` line in the CI workflow names a 40-hex commit SHA."""
     if not ci_path.is_file():
         return False, (), None, "Workflow file missing"
     raw = ci_path.read_bytes()
@@ -190,10 +215,17 @@ def audit_ci_workflow(ci_path: Path) -> tuple[bool, tuple[str, ...], str | None,
             file_sha,
             f"Unpinned CI actions found: {', '.join(unpinned)}",
         )
-    return True, (), file_sha, f"All {seen} CI workflow action steps pinned to 40-hex commit SHAs"
+    return (
+        True,
+        (),
+        file_sha,
+        f"All {seen} 'uses:' lines in ci.yml name a 40-hex commit (pin syntax only; the commits "
+        "were not checked upstream)",
+    )
 
 
 def _audit_json_file(path: Path) -> tuple[AttestationStatus, str | None, str]:
+    """Hash and parse a JSON file; without a reference digest this is not an integrity check."""
     if not path.is_file():
         return "missing", None, "File not found"
     try:
@@ -205,7 +237,151 @@ def _audit_json_file(path: Path) -> tuple[AttestationStatus, str | None, str]:
         json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         return "tamper_or_hash_mismatch", digest, f"Malformed JSON: {exc}"
-    return "verified", digest, "Valid UTF-8 JSON verified by SHA-256"
+    return (
+        "unattested",
+        digest,
+        "Valid UTF-8 JSON; SHA-256 computed but there is no reference digest to compare, so this "
+        "is not an integrity check",
+    )
+
+
+def _entry(
+    name: str,
+    relative_path: str,
+    fmt: Literal[
+        "json",
+        "json_manifest",
+        "text_license",
+        "yaml_workflow",
+        "joblib_legacy",
+    ],
+    status: AttestationStatus,
+    sha: str | None,
+    detail: str,
+) -> ArtifactAttestationEntry:
+    return ArtifactAttestationEntry(
+        name=name,
+        relative_path=relative_path,
+        format=fmt,
+        status=status,
+        sha256=sha,
+        detail=detail,
+    )
+
+
+def _check_runtime_model(
+    models_dir: Path,
+    model_name: str,
+    hmac_key: bytes | None,
+    attestations: list[ArtifactAttestationEntry],
+) -> tuple[RuntimeModelAttestation, RuntimeModelFormat]:
+    base_dir = (models_dir / model_name).resolve()
+    pointer = base_dir / "CURRENT"
+    if not pointer.is_file():
+        attestations.append(
+            _entry(
+                f"Model {model_name} CURRENT Pointer",
+                f"artifacts/{model_name}/CURRENT",
+                "json_manifest",
+                "missing",
+                None,
+                "No CURRENT pointer: no runtime model was inspected",
+            )
+        )
+        return "no_current_model", "unknown"
+    try:
+        version = pointer.read_text(encoding="utf-8").strip()
+    except OSError:
+        version = ""
+    if not IDENTIFIER.fullmatch(version):
+        attestations.append(
+            _entry(
+                f"Model {model_name} CURRENT Pointer",
+                f"artifacts/{model_name}/CURRENT",
+                "json_manifest",
+                "tamper_or_hash_mismatch",
+                None,
+                "Invalid model version identifier in CURRENT pointer",
+            )
+        )
+        return "invalid_pointer", "unknown"
+    try:
+        version_dir = (base_dir / version).resolve()
+        valid_dir = (
+            version_dir != base_dir
+            and version_dir.is_relative_to(base_dir)
+            and version_dir.is_dir()
+        )
+    except (OSError, ValueError):
+        valid_dir = False
+        version_dir = base_dir
+    if not valid_dir:
+        attestations.append(
+            _entry(
+                f"Model {version} Directory",
+                f"artifacts/{model_name}/{version}",
+                "json_manifest",
+                "missing",
+                None,
+                "Model version directory missing or invalid",
+            )
+        )
+        return "invalid_pointer", "unknown"
+
+    rel = f"artifacts/{model_name}/{version}"
+    # 1. the bundle the runtime actually loads
+    integrity_failed = False
+    fmt: RuntimeModelFormat = "unknown"
+    joblib_path = version_dir / "model.joblib"
+    if joblib_path.is_file():
+        fmt = "joblib_pickle"
+        j_sha = sha256_bytes(joblib_path.read_bytes())
+        card_path = version_dir / "model_card.json"
+        c_status, _, _ = _audit_json_file(card_path)
+        card_match = False
+        if c_status == "unattested":
+            card_obj = json.loads(
+                card_path.read_text(encoding="utf-8"), parse_constant=_reject_json_constant
+            )
+            card_match = isinstance(card_obj, dict) and card_obj.get("artifact_sha256") == j_sha
+        integrity_failed = not card_match
+        attestations.append(
+            _entry(
+                f"Model {version} joblib bundle",
+                f"{rel}/model.joblib",
+                "joblib_legacy",
+                "sha_matches_adjacent_card" if card_match else "tamper_or_hash_mismatch",
+                j_sha,
+                "SHA-256 matches adjacent model_card.json (corruption check only; runtime "
+                "still unpickles this file)"
+                if card_match
+                else "SHA-256 does not match model_card.json (or the card is missing/invalid)",
+            )
+        )
+    # 2. the optional non-pickle manifest
+    manifest_path = version_dir / "model_manifest.json"
+    m_status, m_sha, m_detail = verify_non_pickle_manifest(manifest_path, hmac_key=hmac_key)
+    attestations.append(
+        _entry(
+            f"Model {version} JSON manifest",
+            f"{rel}/model_manifest.json",
+            "json_manifest",
+            m_status,
+            m_sha,
+            m_detail
+            if m_status != "missing"
+            else "No json_parameters_v1 manifest exists for this runtime bundle",
+        )
+    )
+    if integrity_failed:
+        return "integrity_failed", fmt
+    if m_status == "signature_verified":
+        return "manifest_signature_verified", fmt
+    if m_status == "self_consistent_unsigned":
+        return "manifest_unsigned_self_consistent", fmt
+    if m_status == "missing":
+        return "manifest_missing", fmt
+    return "manifest_invalid", fmt
 
 
 def build_supply_chain_report(
@@ -213,8 +389,9 @@ def build_supply_chain_report(
     repo_root: Path | None = None,
     models_dir: Path | None = None,
     model_name: str = "metropt3-anomaly",
+    hmac_key: bytes | None = None,
 ) -> SupplyChainHardeningResponse:
-    """Inspect repository governance, workflow pinning, configs, and runtime model artifacts."""
+    """Run the repository and runtime-artifact checks and report each result as executed."""
     root = repo_root or discover_repo_root()
     attestations: list[ArtifactAttestationEntry] = []
 
@@ -224,27 +401,27 @@ def build_supply_chain_report(
         lic_text = lic_bytes.decode("utf-8", errors="replace")
         has_mit = "MIT License" in lic_text and "Permission is hereby granted" in lic_text
         attestations.append(
-            ArtifactAttestationEntry(
-                name="Root Repository License",
-                relative_path="LICENSE",
-                format="text_license",
-                status="verified" if has_mit else "tamper_or_hash_mismatch",
-                sha256=sha256_bytes(lic_bytes),
-                detail="MIT License matching backend/pyproject.toml"
+            _entry(
+                "Root Repository License",
+                "LICENSE",
+                "text_license",
+                "present" if has_mit else "tamper_or_hash_mismatch",
+                sha256_bytes(lic_bytes),
+                "File exists and contains the MIT licence phrases"
                 if has_mit
-                else "Unexpected license text",
+                else "File exists but does not contain the expected MIT licence text",
             )
         )
         license_ok = has_mit
     else:
         attestations.append(
-            ArtifactAttestationEntry(
-                name="Root Repository License",
-                relative_path="LICENSE",
-                format="text_license",
-                status="missing",
-                sha256=None,
-                detail="Root LICENSE file missing",
+            _entry(
+                "Root Repository License",
+                "LICENSE",
+                "text_license",
+                "missing",
+                None,
+                "Root LICENSE file missing",
             )
         )
         license_ok = False
@@ -252,147 +429,46 @@ def build_supply_chain_report(
     ci_path = root / ".github" / "workflows" / "ci.yml"
     ci_pinned, unpinned, ci_sha, ci_detail = audit_ci_workflow(ci_path)
     attestations.append(
-        ArtifactAttestationEntry(
-            name="GitHub Actions CI Workflow",
-            relative_path=".github/workflows/ci.yml",
-            format="yaml_workflow",
-            status="sha_pinned" if ci_pinned else "tamper_or_hash_mismatch",
-            sha256=ci_sha,
-            detail=ci_detail,
+        _entry(
+            "GitHub Actions CI Workflow",
+            ".github/workflows/ci.yml",
+            "yaml_workflow",
+            "sha_pinned" if ci_pinned else "tamper_or_hash_mismatch",
+            ci_sha,
+            ci_detail,
         )
     )
 
-    cfg_path = root / "backend" / "configs" / "metropt3_anomaly.json"
-    cfg_status, cfg_sha, cfg_detail = _audit_json_file(cfg_path)
+    cfg_status, cfg_sha, cfg_detail = _audit_json_file(
+        root / "backend" / "configs" / "metropt3_anomaly.json"
+    )
     attestations.append(
-        ArtifactAttestationEntry(
-            name="MetroPT-3 Experiment Config",
-            relative_path="backend/configs/metropt3_anomaly.json",
-            format="json",
-            status=cfg_status,
-            sha256=cfg_sha,
-            detail=cfg_detail,
+        _entry(
+            "MetroPT-3 Experiment Config",
+            "backend/configs/metropt3_anomaly.json",
+            "json",
+            cfg_status,
+            cfg_sha,
+            cfg_detail,
         )
     )
 
-    non_pickle_ready = True
+    runtime: RuntimeModelAttestation = "not_checked"
+    runtime_format: RuntimeModelFormat = "unknown"
     if models_dir is not None:
-        base_dir = (models_dir / model_name).resolve()
-        pointer = base_dir / "CURRENT"
-        if pointer.is_file():
-            try:
-                version = pointer.read_text(encoding="utf-8").strip()
-            except OSError:
-                version = ""
-            if not IDENTIFIER.fullmatch(version):
-                non_pickle_ready = False
-                attestations.append(
-                    ArtifactAttestationEntry(
-                        name=f"Model {model_name} CURRENT Pointer",
-                        relative_path=f"artifacts/{model_name}/CURRENT",
-                        format="json_manifest",
-                        status="tamper_or_hash_mismatch",
-                        sha256=None,
-                        detail="Invalid model version identifier in CURRENT pointer",
-                    )
-                )
-            else:
-                try:
-                    version_dir = (base_dir / version).resolve()
-                    valid_dir = (
-                        version_dir != base_dir
-                        and version_dir.is_relative_to(base_dir)
-                        and version_dir.is_dir()
-                    )
-                except (OSError, ValueError):
-                    valid_dir = False
-                    version_dir = base_dir
-                if not valid_dir:
-                    non_pickle_ready = False
-                    attestations.append(
-                        ArtifactAttestationEntry(
-                            name=f"Model {version} Directory",
-                            relative_path=f"artifacts/{model_name}/{version}",
-                            format="json_manifest",
-                            status="missing",
-                            sha256=None,
-                            detail="Model version directory missing or invalid",
-                        )
-                    )
-                else:
-                    manifest_path = version_dir / "model_manifest.json"
-                    if manifest_path.is_file():
-                        m_status, m_sha, m_detail = verify_non_pickle_manifest(manifest_path)
-                        non_pickle_ready = m_status == "verified"
-                        attestations.append(
-                            ArtifactAttestationEntry(
-                                name=f"Model {version} JSON Manifest",
-                                relative_path=(
-                                    f"artifacts/{model_name}/{version}/model_manifest.json"
-                                ),
-                                format="json_manifest",
-                                status=m_status,
-                                sha256=m_sha,
-                                detail=m_detail,
-                            )
-                        )
-                    else:
-                        non_pickle_ready = False
-                        attestations.append(
-                            ArtifactAttestationEntry(
-                                name=f"Model {version} JSON Manifest",
-                                relative_path=(
-                                    f"artifacts/{model_name}/{version}/model_manifest.json"
-                                ),
-                                format="json_manifest",
-                                status="missing",
-                                sha256=None,
-                                detail="Non-pickle json_parameters_v1 manifest not present for "
-                                "this runtime bundle",
-                            )
-                        )
-                    joblib_path = version_dir / "model.joblib"
-                    card_path = version_dir / "model_card.json"
-                    if joblib_path.is_file():
-                        j_sha = sha256_bytes(joblib_path.read_bytes())
-                        c_status, _, _ = _audit_json_file(card_path)
-                        card_match = False
-                        if c_status == "verified":
-                            card_obj = json.loads(
-                                card_path.read_text(encoding="utf-8"),
-                                parse_constant=_reject_json_constant,
-                            )
-                            card_match = (
-                                isinstance(card_obj, dict)
-                                and card_obj.get("artifact_sha256") == j_sha
-                            )
-                        attestations.append(
-                            ArtifactAttestationEntry(
-                                name=f"Model {version} Legacy Joblib Bundle",
-                                relative_path=f"artifacts/{model_name}/{version}/model.joblib",
-                                format="joblib_legacy",
-                                status=(
-                                    "legacy_pickle_advisory"
-                                    if card_match
-                                    else "tamper_or_hash_mismatch"
-                                ),
-                                sha256=j_sha,
-                                detail=(
-                                    "Legacy joblib/pickle bundle matches model_card.json "
-                                    "artifact_sha256; json_parameters_v1 manifest verifier ready"
-                                    if card_match
-                                    else "Legacy joblib bundle fails model_card.json "
-                                    "artifact_sha256 check"
-                                ),
-                            )
-                        )
+        runtime, runtime_format = _check_runtime_model(
+            models_dir, model_name, hmac_key, attestations
+        )
 
     return SupplyChainHardeningResponse(
         advisory_only=True,
         license_present=license_ok,
         ci_actions_sha_pinned=ci_pinned,
         unpinned_workflow_uses=unpinned,
-        non_pickle_attestation_ready=non_pickle_ready,
+        runtime_model_attestation=runtime,
+        runtime_model_format=runtime_format,
+        runtime_loader_consults_manifest=False,
+        manifest_signature_key_configured=hmac_key is not None,
         attestations=attestations,
-        cross_system_benchmarks=_CROSS_SYSTEM_BENCHMARKS,
+        limitations=LIMITATIONS,
     )
