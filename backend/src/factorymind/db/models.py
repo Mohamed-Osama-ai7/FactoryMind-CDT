@@ -26,8 +26,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-SCHEMA_VERSION = "2"
-APPEND_ONLY_TABLES = ("evidence", "decision", "audit_event", "human_observation")
+SCHEMA_VERSION = "3"
+APPEND_ONLY_TABLES = (
+    "evidence",
+    "decision",
+    "audit_event",
+    "human_observation",
+    "outcome_verification",
+)
 
 
 class Base(DeclarativeBase):
@@ -105,6 +111,23 @@ class HumanObservation(Base):
     category: Mapped[str] = mapped_column(String(32))
     observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     note: Mapped[str] = mapped_column(String(2000))
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class OutcomeVerification(Base):
+    """Append-only post-review human verification & maintenance outcome record."""
+
+    __tablename__ = "outcome_verification"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    asset_id: Mapped[str] = mapped_column(String(64))
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incident.id"), index=True)
+    actor_id: Mapped[str] = mapped_column(String(128))
+    outcome: Mapped[str] = mapped_column(String(32))
+    maintenance_action: Mapped[str] = mapped_column(String(256))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notes: Mapped[str] = mapped_column(String(2000))
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 

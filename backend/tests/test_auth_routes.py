@@ -100,6 +100,11 @@ RANGE = {
 }
 DECISION = {"decision": "dismiss", "rationale": "ok", "expected_version": 1}
 OBSERVATION = {"category": "field_inspection", "note": "Verified intake valve visually."}
+OUTCOME = {
+    "outcome": "confirmed_leak",
+    "maintenance_action": "Tightened purge hose coupling during inspection",
+    "notes": "Verified leak cleared post-tightening.",
+}
 
 MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
     ("GET", "/api/v1/anomaly/model", None, VIEW_ROLES),
@@ -131,6 +136,12 @@ MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
         "POST",
         f"/api/v1/incidents/{ZERO_ID}/observations",
         OBSERVATION,
+        {"engineer", "approver", "admin"},
+    ),
+    (
+        "POST",
+        f"/api/v1/incidents/{ZERO_ID}/outcomes",
+        OUTCOME,
         {"engineer", "approver", "admin"},
     ),
     ("POST", f"/api/v1/incidents/{ZERO_ID}/decisions", DECISION, {"approver"}),

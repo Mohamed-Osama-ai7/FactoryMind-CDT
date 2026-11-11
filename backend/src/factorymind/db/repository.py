@@ -18,9 +18,22 @@ from sqlalchemy.orm import Session
 
 from factorymind.auth.principal import Principal
 from factorymind.db.audit import utcnow
-from factorymind.db.models import Decision, EvidenceRow, HumanObservation, Incident
+from factorymind.db.models import (
+    Decision,
+    EvidenceRow,
+    HumanObservation,
+    Incident,
+    OutcomeVerification,
+)
 
 DecisionKind = Literal["confirm", "dismiss", "defer"]
+OutcomeKind = Literal[
+    "confirmed_leak",
+    "false_positive",
+    "sensor_fault_confirmed",
+    "high_demand_confirmed",
+    "inconclusive",
+]
 _NEW_STATUS: dict[str, str] = {"confirm": "confirmed", "dismiss": "dismissed", "defer": "open"}
 MAX_PAGE = 100
 
@@ -245,6 +258,48 @@ class IncidentRepo:
             category=category,
             observed_at=observed_at,
             note=note,
+            created_at=utcnow(),
+        )
+        self._s.add(row)
+        self._s.flush()
+        return row
+
+    def outcomes(self, incident: Incident) -> list[OutcomeVerification]:
+        return list(
+            self._s.execute(
+                select(OutcomeVerification)
+                .where(
+                    OutcomeVerification.incident_id == incident.id,
+                    OutcomeVerification.tenant_id == self._p.tenant_id,
+                    OutcomeVerification.asset_id == incident.asset_id,
+                )
+                .order_by(OutcomeVerification.created_at, OutcomeVerification.id)
+            )
+            .scalars()
+            .all()
+        )
+
+    def add_outcome(
+        self,
+        incident: Incident,
+        *,
+        outcome: OutcomeKind,
+        maintenance_action: str,
+        verified_at: datetime | None,
+        notes: str,
+    ) -> OutcomeVerification:
+        if not self._p.can_access_asset(incident.asset_id):
+            raise PermissionError("asset outside the principal's grants")
+        row = OutcomeVerification(
+            id=uuid.uuid4().hex,
+            tenant_id=self._p.tenant_id,
+            asset_id=incident.asset_id,
+            incident_id=incident.id,
+            actor_id=self._p.actor_id,
+            outcome=outcome,
+            maintenance_action=maintenance_action,
+            verified_at=verified_at,
+            notes=notes,
             created_at=utcnow(),
         )
         self._s.add(row)

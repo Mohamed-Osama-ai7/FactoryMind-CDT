@@ -29,6 +29,7 @@ class Permission(StrEnum):
     INCIDENT_CREATE = "incident:create"
     OBSERVATION_CREATE = "observation:create"
     DECISION_CREATE = "decision:create"
+    OUTCOME_CREATE = "outcome:create"
     AUDIT_READ = "audit:read"
 
 
@@ -36,8 +37,14 @@ _VIEW = {Permission.ANOMALY_READ, Permission.INCIDENT_READ}
 
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.VIEWER: frozenset(_VIEW),
-    Role.ENGINEER: frozenset(_VIEW | {Permission.INCIDENT_CREATE, Permission.OBSERVATION_CREATE}),
-    Role.APPROVER: frozenset(_VIEW | {Permission.DECISION_CREATE, Permission.OBSERVATION_CREATE}),
+    Role.ENGINEER: frozenset(
+        _VIEW
+        | {Permission.INCIDENT_CREATE, Permission.OBSERVATION_CREATE, Permission.OUTCOME_CREATE}
+    ),
+    Role.APPROVER: frozenset(
+        _VIEW
+        | {Permission.DECISION_CREATE, Permission.OBSERVATION_CREATE, Permission.OUTCOME_CREATE}
+    ),
     Role.AUDITOR: frozenset({Permission.INCIDENT_READ, Permission.AUDIT_READ}),
     # separation of duties: administrators manage and audit but do not approve
     Role.ADMIN: frozenset(set(Permission) - {Permission.DECISION_CREATE}),
