@@ -29,6 +29,11 @@ function Shell() {
           <Link to="/" className={LINK} activeProps={ACTIVE}>
             Overview
           </Link>
+          {permissions.has('asset:read') && (
+            <Link to="/assets" className={LINK} activeProps={ACTIVE}>
+              Assets &amp; Data
+            </Link>
+          )}
           {permissions.has('anomaly:read') && (
             <Link to="/anomaly" className={LINK} activeProps={ACTIVE}>
               Anomaly monitor

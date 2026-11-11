@@ -25,6 +25,7 @@ class Role(StrEnum):
 
 class Permission(StrEnum):
     ANOMALY_READ = "anomaly:read"
+    ASSET_READ = "asset:read"
     INCIDENT_READ = "incident:read"
     INCIDENT_CREATE = "incident:create"
     OBSERVATION_CREATE = "observation:create"
@@ -33,7 +34,7 @@ class Permission(StrEnum):
     AUDIT_READ = "audit:read"
 
 
-_VIEW = {Permission.ANOMALY_READ, Permission.INCIDENT_READ}
+_VIEW = {Permission.ANOMALY_READ, Permission.ASSET_READ, Permission.INCIDENT_READ}
 
 ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.VIEWER: frozenset(_VIEW),

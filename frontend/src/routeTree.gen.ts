@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnomalyRouteImport } from './routes/anomaly'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as AssetsIndexRouteImport } from './routes/assets.index'
+import { Route as AssetsAssetIdRouteImport } from './routes/assets.$assetId'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as IncidentsIndexRouteImport } from './routes/incidents.index'
 import { Route as IncidentsIncidentIdRouteImport } from './routes/incidents.$incidentId'
@@ -29,6 +31,16 @@ const AnomalyRoute = AnomalyRouteImport.update({
 const AuditRoute = AuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssetsIndexRoute = AssetsIndexRouteImport.update({
+  id: '/assets/',
+  path: '/assets/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AssetsAssetIdRoute = AssetsAssetIdRouteImport.update({
+  id: '/assets/$assetId',
+  path: '/assets/$assetId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
@@ -51,16 +63,20 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
   '/audit': typeof AuditRoute
+  '/assets/$assetId': typeof AssetsAssetIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/assets/': typeof AssetsIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
   '/audit': typeof AuditRoute
+  '/assets/$assetId': typeof AssetsAssetIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/assets': typeof AssetsIndexRoute
   '/incidents': typeof IncidentsIndexRoute
 }
 export interface FileRoutesById {
@@ -68,8 +84,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
   '/audit': typeof AuditRoute
+  '/assets/$assetId': typeof AssetsAssetIdRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/incidents/$incidentId': typeof IncidentsIncidentIdRoute
+  '/assets/': typeof AssetsIndexRoute
   '/incidents/': typeof IncidentsIndexRoute
 }
 export interface FileRouteTypes {
@@ -78,24 +96,30 @@ export interface FileRouteTypes {
     | '/'
     | '/anomaly'
     | '/audit'
+    | '/assets/$assetId'
     | '/auth/callback'
     | '/incidents/$incidentId'
+    | '/assets/'
     | '/incidents/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/anomaly'
     | '/audit'
+    | '/assets/$assetId'
     | '/auth/callback'
     | '/incidents/$incidentId'
+    | '/assets'
     | '/incidents'
   id:
     | '__root__'
     | '/'
     | '/anomaly'
     | '/audit'
+    | '/assets/$assetId'
     | '/auth/callback'
     | '/incidents/$incidentId'
+    | '/assets/'
     | '/incidents/'
   fileRoutesById: FileRoutesById
 }
@@ -103,8 +127,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnomalyRoute: typeof AnomalyRoute
   AuditRoute: typeof AuditRoute
+  AssetsAssetIdRoute: typeof AssetsAssetIdRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   IncidentsIncidentIdRoute: typeof IncidentsIncidentIdRoute
+  AssetsIndexRoute: typeof AssetsIndexRoute
   IncidentsIndexRoute: typeof IncidentsIndexRoute
 }
 
@@ -129,6 +155,20 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assets/': {
+      id: '/assets/'
+      path: '/assets'
+      fullPath: '/assets/'
+      preLoaderRoute: typeof AssetsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/assets/$assetId': {
+      id: '/assets/$assetId'
+      path: '/assets/$assetId'
+      fullPath: '/assets/$assetId'
+      preLoaderRoute: typeof AssetsAssetIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/callback': {
@@ -159,8 +199,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnomalyRoute: AnomalyRoute,
   AuditRoute: AuditRoute,
+  AssetsAssetIdRoute: AssetsAssetIdRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   IncidentsIncidentIdRoute: IncidentsIncidentIdRoute,
+  AssetsIndexRoute: AssetsIndexRoute,
   IncidentsIndexRoute: IncidentsIndexRoute,
 }
 export const routeTree = rootRouteImport

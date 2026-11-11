@@ -1,5 +1,19 @@
-"""Canonical shared FactoryMind CDT domain contracts across anomaly, evidence, RCA, and API."""
+"""Canonical FactoryMind CDT domain contracts across assets, anomaly, evidence, RCA, and API."""
 
+from factorymind.contracts.assets import (
+    AssetDetailResponse,
+    AssetListResponse,
+    AssetPassport,
+    AssetPassportSummary,
+    DataLineageStep,
+    DatasetListResponse,
+    DatasetQualitySummary,
+    FailureModeSpec,
+    ModelApplicabilityEntry,
+    QualityCheckItem,
+    SensorPassport,
+    SourceDatasetRecord,
+)
 from factorymind.contracts.events import (
     ContradictionRecord,
     DerivedFeatureSummary,
@@ -29,7 +43,14 @@ from factorymind.contracts.rca import (
 )
 
 __all__ = [
+    "AssetDetailResponse",
+    "AssetListResponse",
+    "AssetPassport",
+    "AssetPassportSummary",
     "ContradictionRecord",
+    "DataLineageStep",
+    "DatasetListResponse",
+    "DatasetQualitySummary",
     "DerivedFeatureSummary",
     "EventEvidencePackage",
     "EventPhaseName",
@@ -38,17 +59,22 @@ __all__ = [
     "EvidenceQualityAssessment",
     "EvidenceQualityStatus",
     "EvidenceReference",
+    "FailureModeSpec",
     "HumanObservationCategory",
     "HumanObservationOut",
+    "ModelApplicabilityEntry",
     "NeighboringEventSummary",
     "ObservedSignalSummary",
     "PhaseEvidenceSummary",
     "ProvenanceRecord",
+    "QualityCheckItem",
     "RankedHypothesis",
     "RcaAssessment",
     "RcaConfidenceBand",
     "RcaHypothesisCategory",
     "RelativeSupport",
+    "SensorPassport",
+    "SourceDatasetRecord",
     "TimelineCategory",
     "TimelineEntry",
     "VerificationStep",
