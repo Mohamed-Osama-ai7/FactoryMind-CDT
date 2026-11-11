@@ -68,6 +68,44 @@ DEFAULT_EVAL_CASES: Final[tuple[RetrievalBenchmarkCase, ...]] = (
         asset_id="ai4i-milling-bench",
         relevant_chunk_prefixes=("m3-wp1",),
     ),
+    RetrievalBenchmarkCase(
+        query="compressor duty limit",
+        asset_id="metropt3-apu-1",
+        relevant_chunk_prefixes=(
+            "passport:mode-air_leakage",
+            "passport:mode-abnormal_high_demand",
+            "passport:mode-telemetry_inconsistency",
+            "passport:model-duty_rule",
+        ),
+    ),
+    RetrievalBenchmarkCase(
+        query="tp3 pressure limits",
+        asset_id="metropt3-apu-1",
+        relevant_chunk_prefixes=(
+            "passport:mode-air_leakage",
+            "passport:metropt3-sensors",
+            "m2-wp4",
+            "m1-anomaly-detection",
+        ),
+    ),
+    RetrievalBenchmarkCase(
+        query="Explain pca_spe warning limits",
+        asset_id="metropt3-apu-1",
+        relevant_chunk_prefixes=("m2-wp2", "passport:model-pca_spe"),
+    ),
+)
+
+DEFAULT_OOS_EVAL_QUERIES: Final[tuple[str, ...]] = (
+    "What is the capital of France?",
+    "Chocolate cake recipe",
+    "What is the price of oil and air?",
+    "Recipe for oil pressure",
+    "What is 3 + 7?",
+    "Give me 1 chocolate",
+    "Description of banana",
+    "Capital of compressor",
+    "Write a Python binary search algorithm.",
+    "What is the turbine blade temperature limit?",
 )
 
 
@@ -155,7 +193,34 @@ def evaluate_retrieval_modes(
         corpus_chunks=len(scoped_chunks),
         modes=results,
         notes=(
-            "Controlled retrieval ablation evaluated strictly across chunks authorized for the "
-            "caller's asset grants."
+            f"Controlled retrieval ablation across {len(cases)} benchmark queries "
+            "evaluated strictly across chunks authorized for the caller's asset grants."
         ),
     )
+
+
+def evaluate_abstention_rate(
+    index: HybridRagIndex,
+    *,
+    tenant_id: str,
+    allowed_asset_ids: set[str],
+    queries: tuple[str, ...] = DEFAULT_OOS_EVAL_QUERIES,
+) -> dict[SearchMode, float]:
+    """Measure out-of-scope abstention rate (1.0 == zero spurious hits) across search modes."""
+    modes: tuple[SearchMode, ...] = ("bm25_only", "dense_svd_only", "hybrid_rrf")
+    rates: dict[SearchMode, float] = {}
+    total = len(queries) or 1
+    for mode in modes:
+        abstained = sum(
+            1
+            for q in queries
+            if not index.search(
+                q,
+                tenant_id=tenant_id,
+                allowed_asset_ids=allowed_asset_ids,
+                top_k=5,
+                mode=mode,
+            ).items
+        )
+        rates[mode] = round(abstained / total, 4)
+    return rates

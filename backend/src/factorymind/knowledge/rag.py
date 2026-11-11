@@ -7,7 +7,7 @@ import re
 import threading
 from collections import Counter
 from collections.abc import Sequence
-from typing import Literal
+from typing import Final, Literal
 
 import numpy as np
 from sklearn.decomposition import TruncatedSVD
@@ -23,24 +23,194 @@ from factorymind.knowledge.kg import IndustrialKnowledgeGraph, infer_linked_kg_n
 
 SearchMode = Literal["bm25_only", "dense_svd_only", "hybrid_rrf"]
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
+_CONTRACTION_NOT_RE = re.compile(r"\b([a-z0-9_]+)n['\u2019]t\b")
+_CONTRACTION_SUFFIX_RE = re.compile(r"(?<=[a-z0-9_])['\u2019](?:s|re|ve|ll|d|m)\b")
+
+# Grammatical function words, interrogatives, and generic request framing excluded from scoring
+# and relevance gating. Domain state/polarity tokens (e.g. ``off``, ``on``, ``no``, ``not``,
+# ``below``, ``above``, ``low``, ``high``) are intentionally kept as content tokens.
+_STOPWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "am",
+        "do",
+        "does",
+        "did",
+        "have",
+        "has",
+        "had",
+        "having",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "where",
+        "when",
+        "why",
+        "how",
+        "of",
+        "in",
+        "to",
+        "for",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "about",
+        "between",
+        "during",
+        "under",
+        "over",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "he",
+        "she",
+        "they",
+        "them",
+        "their",
+        "we",
+        "us",
+        "our",
+        "you",
+        "your",
+        "i",
+        "me",
+        "my",
+        "and",
+        "or",
+        "but",
+        "if",
+        "so",
+        "then",
+        "than",
+        "nor",
+        "too",
+        "very",
+        "just",
+        "can",
+        "cannot",
+        "could",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "should",
+        "will",
+        "would",
+        "please",
+        "tell",
+        "explain",
+        "summarize",
+        "describe",
+        "give",
+        "show",
+        "list",
+        "find",
+        "get",
+        "now",
+        "today",
+        "tomorrow",
+        "yesterday",
+        "vs",
+    }
+)
+
+# Minimum IDF-weighted query coverage thresholds derived from Okapi BM25 / OOV IDF balance:
+# - Raw RRF is strictly rank-based in (0, 2/(rrf_k+1)] (~0.0328 for rrf_k=60), and TruncatedSVD
+#   cosine drops OOV query terms before L2-normalizing, so neither detects out-of-scope queries.
+# - Weighting every query content token (including OOV tokens using BM25 df=0 IDF) measures how
+#   much of the user's substantive information need is actually covered by an authorized chunk.
+_MIN_MULTI_TERM_IDF_COV: Final[float] = 0.25
+_MIN_OOV_MULTI_TERM_IDF_COV: Final[float] = 0.45
+_MIN_SINGLE_HIT_TWO_TERM_IDF_COV: Final[float] = 0.45
+_MIN_TAIL_HIT_IDF_COV: Final[float] = 0.15
+
+
+def _has_alpha(token: str) -> bool:
+    return any(ch.isalpha() for ch in token)
 
 
 def _tokenize(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
+    norm = re.sub(r"\bcan['\u2019]t\b", "cannot", text.lower())
+    norm = re.sub(r"\bwon['\u2019]t\b", "will not", norm)
+    norm = _CONTRACTION_NOT_RE.sub(r"\1 not", norm)
+    norm = _CONTRACTION_SUFFIX_RE.sub("", norm)
+    return _TOKEN_RE.findall(norm)
+
+
+def extract_content_tokens(text: str) -> list[str]:
+    """Return lowercase tokens excluding grammatical stopwords and contraction fragments."""
+    return [tok for tok in _tokenize(text) if tok not in _STOPWORDS]
+
+
+def _chunk_passes_relevance_gate(
+    *,
+    n_matched: int,
+    has_alpha_match: bool,
+    has_alpha_oov: bool,
+    q_len: int,
+    tok_cov: float,
+    idf_cov: float,
+    n_docs: int,
+) -> bool:
+    """Decide whether one chunk provides substantive non-stopword support for a query.
+
+    Limitations:
+    - Exact token matching only (no stemming or neural synonyms), so queries phrased entirely in
+      unindexed synonyms or inflections will abstain conservatively.
+    """
+    if q_len <= 0 or n_matched <= 0 or not has_alpha_match:
+        return False
+    if q_len == 1:
+        return True
+    if n_docs <= 2:
+        if q_len == 2:
+            return n_matched >= 2
+        return n_matched >= 2 and tok_cov >= 0.30
+    min_multi_idf = (
+        _MIN_OOV_MULTI_TERM_IDF_COV
+        if (has_alpha_oov and n_matched == 2)
+        else _MIN_MULTI_TERM_IDF_COV
+    )
+    if n_matched >= 2 and idf_cov >= min_multi_idf:
+        return True
+    return tok_cov >= 0.5 and idf_cov >= _MIN_SINGLE_HIT_TWO_TERM_IDF_COV
 
 
 def _snippet_around(text: str, query_tokens: Sequence[str], max_len: int = 280) -> str:
     if len(text) <= max_len:
         return text
     lower = text.lower()
-    pos = -1
-    for tok in query_tokens:
-        idx = lower.find(tok)
-        if idx >= 0 and (pos < 0 or idx < pos):
-            pos = idx
-    if pos < 0:
+    candidates = [idx for tok in query_tokens if (idx := lower.find(tok)) >= 0]
+    if not candidates:
         return text[:max_len].rstrip() + "…"
-    start = max(0, pos - 70)
+    best_pos = candidates[0]
+    best_cov = -1
+    for cand in candidates:
+        start_c = max(0, cand - 70)
+        end_c = min(len(text), start_c + max_len)
+        window = lower[start_c:end_c]
+        cov = sum(1 for tok in query_tokens if tok in window)
+        if cov > best_cov or (cov == best_cov and cand < best_pos):
+            best_cov = cov
+            best_pos = cand
+    start = max(0, best_pos - 70)
     end = min(len(text), start + max_len)
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
@@ -61,7 +231,7 @@ class _ScopedSliceIndex:
         self._k1 = k1
         self._b = b
         self._doc_tokens: list[list[str]] = [
-            _tokenize(f"{c.title} {c.section} {c.text}") for c in self.chunks
+            extract_content_tokens(f"{c.title} {c.section} {c.text}") for c in self.chunks
         ]
         self._doc_tf: list[Counter[str]] = [Counter(toks) for toks in self._doc_tokens]
         self._doc_lens: list[int] = [len(toks) for toks in self._doc_tokens]
@@ -76,6 +246,7 @@ class _ScopedSliceIndex:
         self._idf: dict[str, float] = {
             tok: math.log(1.0 + (n_docs - freq + 0.5) / (freq + 0.5)) for tok, freq in df.items()
         }
+        self._idf_oov: float = math.log(1.0 + (n_docs + 0.5) / 0.5) if n_docs > 0 else 0.0
 
         self._vectorizer: TfidfVectorizer | None = None
         self._svd: TruncatedSVD | None = None
@@ -83,7 +254,7 @@ class _ScopedSliceIndex:
         if n_docs >= 1 and df:
             corpus_texts = [f"{c.title} {c.section} {c.text}" for c in self.chunks]
             vec = TfidfVectorizer(
-                tokenizer=_tokenize,
+                tokenizer=extract_content_tokens,
                 token_pattern=None,
                 ngram_range=(1, 2),
                 sublinear_tf=True,
@@ -102,6 +273,30 @@ class _ScopedSliceIndex:
                 self._dense_matrix = np.asarray(
                     normalize(tfidf.toarray(), norm="l2"), dtype="float64"
                 )
+
+    def has_alpha_oov(self, unique_q: Sequence[str]) -> bool:
+        return any(_has_alpha(tok) and tok not in self._idf for tok in unique_q)
+
+    def chunk_coverages(self, unique_q: Sequence[str]) -> list[tuple[int, float, float, bool]]:
+        """Return ``(n_matched, tok_cov, idf_cov, has_alpha_match)`` per chunk (incl. OOV)."""
+        q_len = len(unique_q)
+        if q_len == 0 or not self.chunks:
+            return [(0, 0.0, 0.0, False) for _ in self.chunks]
+        weights = {tok: self._idf.get(tok, self._idf_oov) for tok in unique_q}
+        total_w = sum(weights.values()) or 1.0
+        out: list[tuple[int, float, float, bool]] = []
+        for tf in self._doc_tf:
+            matched_w = 0.0
+            n_m = 0
+            alpha_match = False
+            for tok in unique_q:
+                if tf.get(tok, 0) > 0:
+                    n_m += 1
+                    matched_w += weights[tok]
+                    if _has_alpha(tok):
+                        alpha_match = True
+            out.append((n_m, n_m / q_len, matched_w / total_w, alpha_match))
+        return out
 
     def bm25_scores(self, q_tokens: Sequence[str]) -> list[float]:
         unique_q = list(dict.fromkeys(q_tokens))
@@ -201,7 +396,7 @@ class HybridRagIndex:
     ) -> HybridSearchResponse:
         slice_index = self._partition(tenant_id=tenant_id, allowed_asset_ids=allowed_asset_ids)
         scoped = slice_index.chunks
-        q_tokens = _tokenize(query)
+        q_tokens = list(dict.fromkeys(extract_content_tokens(query)))
         if not scoped or not q_tokens:
             return HybridSearchResponse(
                 query=query,
@@ -217,8 +412,36 @@ class HybridRagIndex:
 
         bm25 = slice_index.bm25_scores(q_tokens)
         dense = slice_index.dense_scores(query)
-        indices = list(range(len(scoped)))
+        coverages = slice_index.chunk_coverages(q_tokens)
+        has_oov = slice_index.has_alpha_oov(q_tokens)
+        n_docs = len(scoped)
+        q_len = len(q_tokens)
+        any_passes = any(
+            _chunk_passes_relevance_gate(
+                n_matched=n_m,
+                has_alpha_match=alpha_m,
+                has_alpha_oov=has_oov,
+                q_len=q_len,
+                tok_cov=tok_c,
+                idf_cov=idf_c,
+                n_docs=n_docs,
+            )
+            for n_m, tok_c, idf_c, alpha_m in coverages
+        )
+        if not any_passes:
+            return HybridSearchResponse(
+                query=query,
+                total_indexed_chunks=n_docs,
+                accessible_chunks=n_docs,
+                items=[],
+                related_kg_edges=[],
+                safety_note=(
+                    "Query did not meet the minimum content relevance gate for verified "
+                    "documentation; abstained instead of returning unrelated matches."
+                ),
+            )
 
+        indices = list(range(n_docs))
         bm25_ranked = sorted(indices, key=lambda idx: (-bm25[idx], scoped[idx].chunk_id))
         dense_ranked = sorted(indices, key=lambda idx: (-dense[idx], scoped[idx].chunk_id))
         bm25_pos = {idx: pos for pos, idx in enumerate(bm25_ranked, start=1)}
@@ -239,7 +462,19 @@ class HybridRagIndex:
             indices,
             key=lambda idx: (-rrf_scores[idx], -bm25[idx], scoped[idx].chunk_id),
         )
-        non_empty = [idx for idx in ordered if rrf_scores[idx] > 0.0][: max(1, min(top_k, 20))]
+        limit = max(1, min(top_k, 20))
+        non_empty: list[int] = []
+        for idx in ordered:
+            if rrf_scores[idx] <= 0.0:
+                continue
+            n_m, _tok_c, idf_c, alpha_m = coverages[idx]
+            if bm25[idx] <= 0.0 or not alpha_m:
+                continue
+            if n_docs >= 3 and n_m < 2 and idf_c < _MIN_TAIL_HIT_IDF_COV:
+                continue
+            non_empty.append(idx)
+            if len(non_empty) >= limit:
+                break
 
         hits: list[HybridSearchHit] = []
         linked_all: list[str] = []
