@@ -67,6 +67,23 @@ def window_labels(
     return labels
 
 
+def is_outside_report_windows(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    reports: Sequence[FailureReport],
+    *,
+    early_horizon: pd.Timedelta,
+    post_tolerance: pd.Timedelta,
+) -> bool:
+    """Return True when ``[start, end)`` falls outside all padded failure report windows."""
+    for r in reports:
+        lo = pd.Timestamp(r.start) - early_horizon
+        hi = pd.Timestamp(r.end) + post_tolerance
+        if start <= hi and end >= lo:
+            return False
+    return True
+
+
 def evaluate(
     starts: pd.DatetimeIndex,
     scores: np.ndarray,
@@ -118,15 +135,17 @@ def evaluate(
         else:
             events.append(EventResult(r.report_id, False, None))
 
-    def is_false(ep: Episode) -> bool:
-        for r in reports:
-            lo = pd.Timestamp(r.start) - early_horizon
-            hi = pd.Timestamp(r.end) + post_tolerance
-            if ep.start <= hi and ep.end >= lo:
-                return False
-        return True
-
-    false_eps = sum(1 for ep in eps if is_false(ep))
+    false_eps = sum(
+        1
+        for ep in eps
+        if is_outside_report_windows(
+            ep.start,
+            ep.end,
+            reports,
+            early_horizon=early_horizon,
+            post_tolerance=post_tolerance,
+        )
+    )
     valid_days = len(starts) * window.total_seconds() / 86400.0
     operating_windows = (
         int((~np.asarray(suppress, dtype=bool)).sum()) if suppress is not None else len(starts)
