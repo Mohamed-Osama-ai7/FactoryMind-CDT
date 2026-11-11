@@ -9,6 +9,7 @@ and explicit abstention when evidence is insufficient.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import Final
 
@@ -34,27 +35,22 @@ _DUTY_RISE_THRESHOLD: Final = 0.15
 _LEAK_DECAY_SLOPE_MAX: Final = -0.05  # bar/min when unloaded
 _LOW_PRESSURE_BAR: Final = 8.0
 _WARM_OIL_DELTA_C: Final = 4.0
+_MIN_DIAGNOSTIC_SUPPORT: Final = 0.25
 
-_LEAK_NOTE_KEYWORDS: Final[tuple[str, ...]] = (
-    "leak",
-    "hiss",
-    "purge",
-    "hose",
-    "fitting",
-    "coupling",
-    "seal",
-    "exhaust",
+_CONTINUOUS_CORE_SENSORS: Final[frozenset[str]] = frozenset(
+    {"TP3", "TP2", "Reservoirs", "Motor_current", "Oil_temperature"}
 )
-_SENSOR_NOTE_KEYWORDS: Final[tuple[str, ...]] = (
-    "frozen",
-    "stuck",
-    "calibration",
-    "sensor",
-    "transducer",
-    "wiring",
-    "switch",
-    "offset",
-    "gauge",
+_NEGATION_RE: Final = re.compile(
+    r"\b(?:no|not|without|never|neither|intact|normal|ok|cleared|negative|none|passed)\b"
+)
+_LEAK_POSITIVE_RE: Final = re.compile(
+    r"\b(?:air\s*leak(?:age)?|leaking|leak|hiss(?:ing)?|purge\s+line|soap\s+test|blow[- ]?by)\b"
+)
+_SENSOR_POSITIVE_RE: Final = re.compile(
+    r"\b(?:frozen|stuck|offset|drifted?|out[- ]of[- ]range|out\s+of\s+calibration|"
+    r"calibration\s+(?:error|drift|fault)|wiring\s+fault|"
+    r"(?:sensor|transducer|gauge|switch)\s+(?:fault|fail(?:ed|ure)?|stuck|frozen|bad|offline)|"
+    r"bad\s+(?:sensor|transducer|gauge|switch))\b"
 )
 
 
@@ -67,6 +63,8 @@ class _ExtractedSignals:
     peak_duty: float | None
     base_duty: float | None
     duty_delta: float | None
+    non_stale_valid_windows: int
+    duty_trusted: bool
     peak_unloaded_slope: float | None
     base_unloaded_slope: float | None
     peak_loaded_rise: float | None
@@ -82,9 +80,9 @@ class _ExtractedSignals:
     primary_score: float | None
     warning_score: float | None
     warning_active_total: int
+    has_primary_exceedance: bool
     has_concurrent_leak_alarm: bool
     has_concurrent_pca_warning: bool
-    has_concurrent_integrity_warning: bool
     valve_contradiction_count: int
     motor_mismatch_count: int
     starting_present: bool
@@ -120,6 +118,11 @@ def _sig_mean(phase: PhaseEvidenceSummary | None, name: str) -> float | None:
     if item is None or item.sample_count == 0:
         return None
     return item.mean if item.mean is not None else item.active_fraction
+
+
+def _sig_frozen(phase: PhaseEvidenceSummary | None, name: str) -> bool:
+    item = _signal(phase, name)
+    return bool(item and item.frozen)
 
 
 def _best_focus_phase(by_phase: dict[EventPhaseName, PhaseEvidenceSummary]) -> PhaseEvidenceSummary:
@@ -178,11 +181,16 @@ def _extract_signals(pkg: EventEvidencePackage) -> _ExtractedSignals:
         and t.phase in ("onset", "evolution", "peak")
         for t in pkg.timeline
     )
-    has_integ_warn = pkg.quality.stale_windows_count > 0 or any(
-        n.kind == "sensor_consistency_warning"
-        and n.relationship == "concurrent"
-        and n.detector_or_source == "signal_integrity"
-        for n in pkg.neighboring_events
+    non_stale_valid = max(0, pkg.quality.valid_event_windows - pkg.quality.stale_windows_count)
+    focus_motor_frozen = _sig_frozen(focus, "Motor_current")
+    duty_trusted = (
+        non_stale_valid > 0
+        and not focus_motor_frozen
+        and "Motor_current" not in pkg.quality.out_of_range_signals
+    )
+    has_primary_exc = any(
+        p.primary_min_exceedance is not None and p.primary_min_exceedance <= 0.05
+        for p in core_phases
     )
     valve_cnt = sum(1 for c in pkg.quality.contradictions if c.kind == "valve_contradiction")
     motor_cnt = sum(1 for c in pkg.quality.contradictions if c.kind == "motor_valve_mismatch")
@@ -196,6 +204,8 @@ def _extract_signals(pkg: EventEvidencePackage) -> _ExtractedSignals:
         peak_duty=peak_duty,
         base_duty=base_duty,
         duty_delta=duty_delta,
+        non_stale_valid_windows=non_stale_valid,
+        duty_trusted=duty_trusted,
         peak_unloaded_slope=peak_slope,
         base_unloaded_slope=base_slope,
         peak_loaded_rise=peak_rise,
@@ -211,9 +221,9 @@ def _extract_signals(pkg: EventEvidencePackage) -> _ExtractedSignals:
         primary_score=max(p_scores) if p_scores else None,
         warning_score=max(w_scores) if w_scores else None,
         warning_active_total=warn_total,
+        has_primary_exceedance=has_primary_exc,
         has_concurrent_leak_alarm=has_leak_alarm,
         has_concurrent_pca_warning=has_pca_warn,
-        has_concurrent_integrity_warning=has_integ_warn,
         valve_contradiction_count=valve_cnt,
         motor_mismatch_count=motor_cnt,
         starting_present=starting_present,
@@ -249,11 +259,20 @@ def _confidence_band(
 def _human_obs_signals(
     pkg: EventEvidencePackage,
 ) -> tuple[list[EvidenceReference], list[EvidenceReference]]:
-    """Classify human observations cleanly while preserving ``human_observation`` origin."""
+    """Classify human observations using negation-aware clause matching."""
     leak_refs: list[EvidenceReference] = []
     sensor_refs: list[EvidenceReference] = []
     for idx, obs in enumerate(pkg.human_observations, start=1):
-        low = obs.note.lower()
+        clauses = [c.strip() for c in re.split(r"[,.;!?\n:]+", obs.note.lower()) if c.strip()]
+        matched_leak = False
+        matched_sensor = False
+        for clause in clauses:
+            if _NEGATION_RE.search(clause):
+                continue
+            if _LEAK_POSITIVE_RE.search(clause):
+                matched_leak = True
+            if _SENSOR_POSITIVE_RE.search(clause):
+                matched_sensor = True
         ref = EvidenceReference(
             ref_id=f"human_obs:{idx}",
             origin="human_observation",
@@ -261,11 +280,23 @@ def _human_obs_signals(
             signal_or_feature=obs.category,
             statement=f"Operator/engineer note ({obs.actor_id}): {obs.note}",
         )
-        if any(kw in low for kw in _LEAK_NOTE_KEYWORDS):
+        if matched_leak:
             leak_refs.append(ref)
-        if any(kw in low for kw in _SENSOR_NOTE_KEYWORDS):
+        if matched_sensor:
             sensor_refs.append(ref)
     return leak_refs, sensor_refs
+
+
+def _phase_for_contradiction(
+    pkg: EventEvidencePackage, kind: str, fallback: EventPhaseName
+) -> EventPhaseName:
+    for c in pkg.quality.contradictions:
+        if c.kind == kind:
+            for p in pkg.phases:
+                if p.phase != "peak" and p.start <= c.timestamp < p.end:
+                    return p.phase
+            return fallback
+    return fallback
 
 
 def _common_missing_refs(
@@ -279,8 +310,7 @@ def _common_missing_refs(
             signal_or_feature="air_demand_flowmeter",
             statement=(
                 "No independent pneumatic downstream air-demand flowmeter exists; elevated "
-                "compressor"
-                "duty can reflect either leakage or sustained high pneumatic demand."
+                "compressor duty can reflect either leakage or sustained high pneumatic demand."
             ),
         )
     ]
@@ -324,6 +354,18 @@ def _common_missing_refs(
     return refs
 
 
+def _duty_elevated(ex: _ExtractedSignals) -> bool:
+    if not ex.duty_trusted or ex.peak_duty is None:
+        return False
+    if ex.peak_duty >= _HIGH_DUTY_THRESHOLD:
+        return True
+    return bool(
+        ex.duty_delta is not None
+        and ex.duty_delta >= _DUTY_RISE_THRESHOLD
+        and (ex.has_concurrent_leak_alarm or ex.has_primary_exceedance)
+    )
+
+
 def _build_air_leakage_hypothesis(
     pkg: EventEvidencePackage,
     ex: _ExtractedSignals,
@@ -337,7 +379,8 @@ def _build_air_leakage_hypothesis(
     score = 0.0
 
     focus_phase = ex.focus.phase
-    if ex.peak_duty is not None and ex.peak_duty >= _HIGH_DUTY_THRESHOLD:
+    duty_elevated = _duty_elevated(ex)
+    if duty_elevated and ex.peak_duty is not None:
         pts = 0.36 if ex.peak_duty >= _SEVERE_DUTY_THRESHOLD else 0.24
         score += pts
         sup.append(
@@ -347,13 +390,27 @@ def _build_air_leakage_hypothesis(
                 phase=focus_phase,
                 signal_or_feature="load_duty",
                 statement=(
-                    f"Sustained compressor load duty reached {ex.peak_duty:.3f} "
-                    f"(>= {_HIGH_DUTY_THRESHOLD:.2f})"
+                    f"Sustained compressor load duty reached {ex.peak_duty:.3f}"
                     + (f" vs baseline {ex.base_duty:.3f}." if ex.base_duty is not None else ".")
                 ),
                 observed_value=ex.peak_duty,
                 unit="fraction",
                 baseline_value=ex.base_duty,
+            )
+        )
+    elif not ex.duty_trusted and ex.peak_duty is not None and ex.peak_duty >= _HIGH_DUTY_THRESHOLD:
+        con.append(
+            EvidenceReference(
+                ref_id="leak:untrusted_duty",
+                origin="observed",
+                phase=focus_phase,
+                signal_or_feature="Motor_current",
+                statement=(
+                    f"Apparent load duty ({ex.peak_duty:.3f}) is untrusted because Motor_current "
+                    "was frozen, out of range, or all event windows were stale."
+                ),
+                observed_value=ex.peak_duty,
+                unit="fraction",
             )
         )
     elif ex.peak_duty is not None:
@@ -373,7 +430,11 @@ def _build_air_leakage_hypothesis(
             )
         )
 
-    if ex.has_concurrent_leak_alarm or (ex.primary_score is not None and ex.primary_score >= 0.7):
+    if ex.duty_trusted and (
+        ex.has_concurrent_leak_alarm
+        or ex.has_primary_exceedance
+        or (ex.primary_score is not None and ex.primary_score >= 0.7)
+    ):
         score += 0.16
         sup.append(
             EvidenceReference(
@@ -430,7 +491,7 @@ def _build_air_leakage_hypothesis(
                     baseline_value=ex.base_unloaded_slope,
                 )
             )
-    elif ex.peak_duty is not None and ex.peak_duty >= _HIGH_DUTY_THRESHOLD:
+    elif duty_elevated and ex.peak_duty is not None:
         missing.append(
             EvidenceReference(
                 ref_id="leak:unobservable_unloaded_slope",
@@ -450,13 +511,18 @@ def _build_air_leakage_hypothesis(
         or (ex.base_tp3_mean is not None and ex.tp3_mean < ex.base_tp3_mean - 0.4)
     ):
         score += 0.1
+        delta_txt = (
+            f" ({ex.tp3_mean - ex.base_tp3_mean:+.2f} bar vs baseline)"
+            if ex.base_tp3_mean is not None
+            else " (below 8.0 bar nominal target)"
+        )
         sup.append(
             EvidenceReference(
                 ref_id="leak:tp3_depression",
                 origin="observed",
                 phase=focus_phase,
                 signal_or_feature="TP3",
-                statement=f"Mean panel pressure TP3 dropped to {ex.tp3_mean:.2f} bar under load.",
+                statement=f"Mean panel pressure TP3 measured {ex.tp3_mean:.2f} bar{delta_txt}.",
                 observed_value=ex.tp3_mean,
                 unit="bar",
                 baseline_value=ex.base_tp3_mean,
@@ -524,14 +590,21 @@ def _build_air_leakage_hypothesis(
         or ex.motor_mismatch_count > 0
     ):
         score *= 0.45
+        if pkg.quality.stale_windows_count > 0:
+            conflict_sig = "stale_telemetry"
+            conflict_phase = _phase_for_contradiction(pkg, "sensor_freeze", focus_phase)
+        elif ex.valve_contradiction_count > 0:
+            conflict_sig = "valve_contradiction"
+            conflict_phase = _phase_for_contradiction(pkg, "valve_contradiction", focus_phase)
+        else:
+            conflict_sig = "motor_valve_mismatch"
+            conflict_phase = _phase_for_contradiction(pkg, "motor_valve_mismatch", focus_phase)
         con.append(
             EvidenceReference(
                 ref_id="leak:integrity_conflict",
                 origin="derived",
-                phase=focus_phase,
-                signal_or_feature="stale_telemetry"
-                if pkg.quality.stale_windows_count > 0
-                else "valve_contradiction",
+                phase=conflict_phase,
+                signal_or_feature=conflict_sig,
                 statement=(
                     "Co-occurring stale/frozen telemetry or valve contradictions weaken isolated "
                     "pneumatic air-leak attribution."
@@ -539,28 +612,44 @@ def _build_air_leakage_hypothesis(
             )
         )
     if pkg.quality.frozen_sensors:
-        frozen_pressure = [
-            s for s in pkg.quality.frozen_sensors if s in {"TP3", "TP2", "Reservoirs"}
+        frozen_core = [
+            s
+            for s in pkg.quality.frozen_sensors
+            if s in {"TP3", "TP2", "Reservoirs", "Motor_current"}
         ]
-        if frozen_pressure and pkg.quality.stale_windows_count == 0:
-            score *= 0.6
+        if frozen_core and pkg.quality.stale_windows_count == 0:
+            score *= 0.45 if "Motor_current" in frozen_core else 0.6
             con.append(
                 EvidenceReference(
-                    ref_id="leak:frozen_pressure",
+                    ref_id="leak:frozen_channel",
                     origin="observed",
-                    phase=focus_phase,
-                    signal_or_feature=frozen_pressure[0],
+                    phase=_phase_for_contradiction(pkg, "sensor_freeze", focus_phase),
+                    signal_or_feature=frozen_core[0],
                     statement=(
-                        f"Pressure channel(s) {', '.join(frozen_pressure)} remained constant, "
-                        "preventing reliable pressure-decay corroboration for an air leak."
+                        f"Channel(s) {', '.join(frozen_core)} remained constant, preventing "
+                        "reliable physical corroboration for an air leak."
                     ),
                 )
             )
+    if pkg.quality.out_of_range_signals:
+        score *= 0.4
+        con.append(
+            EvidenceReference(
+                ref_id="leak:oor_channel",
+                origin="observed",
+                phase=_phase_for_contradiction(pkg, "out_of_range", focus_phase),
+                signal_or_feature=pkg.quality.out_of_range_signals[0],
+                statement=(
+                    f"Channel(s) {', '.join(pkg.quality.out_of_range_signals)} reported "
+                    "out-of-range raw telemetry."
+                ),
+            )
+        )
     if human_sensor_refs:
         con.extend(human_sensor_refs)
 
-    # If peak load duty was not elevated at all, cap raw air_leakage low
-    if ex.peak_duty is None or ex.peak_duty < _HIGH_DUTY_THRESHOLD:
+    # If peak load duty was not reliably elevated, cap raw air_leakage low
+    if not duty_elevated:
         score = min(score, 0.2)
 
     score = round(
@@ -593,8 +682,8 @@ def _build_air_leakage_hypothesis(
                 priority="immediate",
                 action=(
                     "During safe stationary inspection, check flexible hoses, air-dryer purge "
-                    "line,"
-                    "check valves, and bogie suspension couplings with ultrasonic/soap leak test."
+                    "line, check valves, and bogie suspension couplings with ultrasonic/soap "
+                    "leak test."
                 ),
                 expected_if_confirmed=(
                     "Audible/ultrasonic hiss or rapid TP3 pressure drop when isolated."
@@ -634,57 +723,64 @@ def _build_sensor_malfunction_hypothesis(
     focus_phase = ex.focus.phase
 
     if pkg.quality.frozen_sensors and pkg.quality.stale_windows_count == 0:
-        score += 0.45
+        core_frozen = [s for s in pkg.quality.frozen_sensors if s in _CONTINUOUS_CORE_SENSORS]
+        score += 0.52 if core_frozen else 0.34
+        freeze_phase = _phase_for_contradiction(pkg, "sensor_freeze", focus_phase)
         for s in pkg.quality.frozen_sensors[:4]:
             sup.append(
                 EvidenceReference(
                     ref_id=f"sensor:freeze:{s}",
                     origin="observed",
-                    phase=focus_phase,
+                    phase=freeze_phase,
                     signal_or_feature=s,
                     statement=f"Channel {s} stayed constant (std <= 1e-12) across an event phase.",
                 )
             )
     elif pkg.quality.frozen_sensors:
-        # Whole-feed freeze plus extra frozen channels
         extra = [s for s in pkg.quality.frozen_sensors if s not in {"TP3", "TP2", "Motor_current"}]
         if extra:
             score += 0.22
+            freeze_phase = _phase_for_contradiction(pkg, "sensor_freeze", focus_phase)
             for s in extra[:3]:
                 sup.append(
                     EvidenceReference(
                         ref_id=f"sensor:extra_freeze:{s}",
                         origin="observed",
-                        phase=focus_phase,
+                        phase=freeze_phase,
                         signal_or_feature=s,
                         statement=f"Channel {s} remained constant alongside whole-feed freeze.",
                     )
                 )
 
     if pkg.quality.out_of_range_signals:
-        score += 0.42
+        score += 0.45
+        oor_phase = _phase_for_contradiction(pkg, "out_of_range", focus_phase)
         for s in pkg.quality.out_of_range_signals:
             sup.append(
                 EvidenceReference(
                     ref_id=f"sensor:oor:{s}",
                     origin="observed",
-                    phase=focus_phase,
+                    phase=oor_phase,
                     signal_or_feature=s,
                     statement=f"Channel {s} breached physical VALID_RANGES limits.",
                 )
             )
 
-    if ex.has_concurrent_pca_warning or ex.warning_active_total > 0:
-        pts = 0.38 if (ex.peak_duty is None or ex.peak_duty < _HIGH_DUTY_THRESHOLD) else 0.14
+    if ex.has_concurrent_pca_warning and pkg.provenance.warning_detector is not None:
+        pts = (
+            0.38
+            if (not ex.duty_trusted or ex.peak_duty is None or ex.peak_duty < _HIGH_DUTY_THRESHOLD)
+            else 0.14
+        )
         score += pts
         sup.append(
             EvidenceReference(
                 ref_id="sensor:pca_spe",
                 origin="statistical_inference",
                 phase=focus_phase,
-                signal_or_feature=pkg.provenance.warning_detector or "pca_spe",
+                signal_or_feature=pkg.provenance.warning_detector,
                 statement=(
-                    f"Multivariate {pkg.provenance.warning_detector or 'pca_spe'} detected "
+                    f"Multivariate {pkg.provenance.warning_detector} detected "
                     f"cross-sensor structure departure ({ex.warning_active_total} active "
                     "warning window(s))."
                 ),
@@ -713,7 +809,8 @@ def _build_sensor_malfunction_hypothesis(
         sup.extend(human_sensor_refs)
 
     if (
-        ex.peak_duty is not None
+        ex.duty_trusted
+        and ex.peak_duty is not None
         and ex.peak_duty >= _SEVERE_DUTY_THRESHOLD
         and ex.has_concurrent_leak_alarm
     ):
@@ -746,8 +843,8 @@ def _build_sensor_malfunction_hypothesis(
         confidence_band="low",
         physical_mechanism=(
             "Faulty pressure transducer, oil thermistor, or current clamp produces frozen "
-            "readings,"
-            "calibration offset, drift, or physical cross-sensor decoupling flagged by PCA SPE."
+            "readings, calibration offset, drift, or physical cross-sensor decoupling flagged "
+            "by PCA SPE."
         ),
         supporting_evidence=sup,
         contradicting_evidence=con,
@@ -763,8 +860,7 @@ def _build_sensor_malfunction_hypothesis(
                 priority="high",
                 action=(
                     "Compare TP3, TP2, and Reservoirs readings against local mechanical "
-                    "manifold gauges"
-                    "during static hold and verify oil thermistor resistance."
+                    "manifold gauges during static hold and verify oil thermistor resistance."
                 ),
                 expected_if_confirmed=(
                     "Panel reading stays fixed or offset from mechanical manifold gauge."
@@ -899,7 +995,7 @@ def _build_high_demand_hypothesis(
     score = 0.0
     focus_phase = ex.focus.phase
 
-    if ex.peak_duty is not None and ex.peak_duty >= _HIGH_DUTY_THRESHOLD:
+    if _duty_elevated(ex) and ex.peak_duty is not None:
         score += 0.25
         sup.append(
             EvidenceReference(
@@ -916,36 +1012,36 @@ def _build_high_demand_hypothesis(
                 baseline_value=ex.base_duty,
             )
         )
-    if ex.peak_load_starts is not None and ex.peak_load_starts >= 2.0:
-        score += 0.1
-        sup.append(
-            EvidenceReference(
-                ref_id="demand:starts",
-                origin="derived",
-                phase=focus_phase,
-                signal_or_feature="load_starts",
-                statement=(
-                    f"Frequent compressor load starts ({ex.peak_load_starts:.1f}) match "
-                    "intermittent consumer demand."
-                ),
-                observed_value=ex.peak_load_starts,
-                unit="cycles/window",
+        if ex.peak_load_starts is not None and ex.peak_load_starts >= 2.0:
+            score += 0.1
+            sup.append(
+                EvidenceReference(
+                    ref_id="demand:starts",
+                    origin="derived",
+                    phase=focus_phase,
+                    signal_or_feature="load_starts",
+                    statement=(
+                        f"Frequent compressor load starts ({ex.peak_load_starts:.1f}) match "
+                        "intermittent consumer demand."
+                    ),
+                    observed_value=ex.peak_load_starts,
+                    unit="cycles/window",
+                )
             )
-        )
-    if pkg.quality.recovery_status == "recovered":
-        score += 0.12
-        sup.append(
-            EvidenceReference(
-                ref_id="demand:recovered",
-                origin="derived",
-                phase="recovery_or_persistence",
-                signal_or_feature="recovery_or_persistence",
-                statement=(
-                    "Duty returned to normal post-event, consistent with temporary peak "
-                    "passenger/operational load."
-                ),
+        if pkg.quality.recovery_status == "recovered":
+            score += 0.12
+            sup.append(
+                EvidenceReference(
+                    ref_id="demand:recovered",
+                    origin="derived",
+                    phase="recovery_or_persistence",
+                    signal_or_feature="recovery_or_persistence",
+                    statement=(
+                        "Duty returned to normal post-event, consistent with temporary peak "
+                        "passenger/operational load."
+                    ),
+                )
             )
-        )
     if ex.peak_unloaded_slope is not None and ex.peak_unloaded_slope <= _LEAK_DECAY_SLOPE_MAX:
         score -= 0.08
         con.append(
@@ -1038,14 +1134,22 @@ def _build_concurrent_hypothesis(
     sup: list[EvidenceReference] = []
     con: list[EvidenceReference] = []
     score = 0.0
-    leak_present = ex.peak_duty is not None and ex.peak_duty >= _HIGH_DUTY_THRESHOLD
-    # Only genuine instrumentation/integrity contradictions constitute a second independent fault;
-    # PCA SPE naturally co-fires during valid air-leak regimes when telemetry is consistent.
+    leak_present = (
+        _duty_elevated(ex)
+        and ex.peak_duty is not None
+        and (
+            ex.has_concurrent_leak_alarm
+            or ex.has_primary_exceedance
+            or ex.peak_duty >= _SEVERE_DUTY_THRESHOLD
+        )
+    )
+    # Only genuine instrumentation/integrity contradictions (excluding naturally flat
+    # 0-bar DP sensors like DV_pressure/H1 under continuous load) constitute a second fault.
     integrity_present = (
         pkg.quality.stale_windows_count > 0
         or ex.valve_contradiction_count > 0
         or ex.motor_mismatch_count > 0
-        or len(pkg.quality.frozen_sensors) > 0
+        or any(s in _CONTINUOUS_CORE_SENSORS for s in pkg.quality.frozen_sensors)
         or len(pkg.quality.out_of_range_signals) > 0
         or len(human_sensor_refs) > 0
     )
@@ -1061,8 +1165,16 @@ def _build_concurrent_hypothesis(
                 / 1.15,
             ),
         )
-        sup.extend(leak_hyp.supporting_evidence[:2])
-        sup.extend((integ_hyp.supporting_evidence or sensor_hyp.supporting_evidence)[:2])
+        raw_sup = [
+            *leak_hyp.supporting_evidence[:2],
+            *(integ_hyp.supporting_evidence or sensor_hyp.supporting_evidence)[:2],
+        ]
+        seen_refs: set[tuple[str, str, str]] = set()
+        for ref in raw_sup:
+            key = (ref.ref_id, ref.signal_or_feature, ref.statement)
+            if key not in seen_refs:
+                seen_refs.add(key)
+                sup.append(ref)
     else:
         con.append(
             EvidenceReference(
@@ -1088,8 +1200,7 @@ def _build_concurrent_hypothesis(
         confidence_band="low",
         physical_mechanism=(
             "A genuine air leak or heavy demand period overlaps with a transient DAQ freeze, "
-            "frozen"
-            "transducer channel, or discrete valve wiring fault."
+            "frozen transducer channel, or discrete valve wiring fault."
         ),
         supporting_evidence=sup,
         contradicting_evidence=con,
@@ -1124,20 +1235,11 @@ def analyze_event_evidence(pkg: EventEvidencePackage) -> RcaAssessment:
     human_leak_refs, human_sensor_refs = _human_obs_signals(pkg)
     common_missing = _common_missing_refs(pkg, ex)
 
-    abstained = (
+    quality_abstained = (
         pkg.quality.overall_status == "insufficient"
-        or pkg.quality.valid_event_windows == 0
+        or ex.non_stale_valid_windows == 0
         or all(not p.available for k in ("onset", "evolution", "peak") if (p := ex.by_phase.get(k)))
     )
-    abstention_reason: str | None = None
-    if abstained:
-        abstention_reason = (
-            "Insufficient evidence for reliable root-cause ranking: "
-            f"overall_status={pkg.quality.overall_status}, "
-            f"valid_event_windows={pkg.quality.valid_event_windows}/"
-            f"{pkg.quality.expected_event_windows}, "
-            f"coverage_ratio={pkg.quality.coverage_ratio:.2f}."
-        )
 
     leak_hyp = _build_air_leakage_hypothesis(
         pkg, ex, human_leak_refs, human_sensor_refs, common_missing
@@ -1149,8 +1251,21 @@ def analyze_event_evidence(pkg: EventEvidencePackage) -> RcaAssessment:
         pkg, ex, leak_hyp, sensor_hyp, integ_hyp, human_sensor_refs, common_missing
     )
 
+    candidates = [leak_hyp, sensor_hyp, integ_hyp, demand_hyp, concurrent_hyp]
+    max_fault_score = max(h.support_score for h in candidates)
+    nominal_abstained = (not quality_abstained) and (max_fault_score < _MIN_DIAGNOSTIC_SUPPORT)
+    abstained = quality_abstained or nominal_abstained
+
+    abstention_reason: str | None = None
     insufficient_sup: list[EvidenceReference] = []
-    if abstained:
+    if quality_abstained:
+        abstention_reason = (
+            "Insufficient evidence for reliable root-cause ranking: "
+            f"overall_status={pkg.quality.overall_status}, "
+            f"non_stale_valid_windows={ex.non_stale_valid_windows}/"
+            f"{pkg.quality.expected_event_windows}, "
+            f"coverage_ratio={pkg.quality.coverage_ratio:.2f}."
+        )
         insufficient_sup.append(
             EvidenceReference(
                 ref_id="abstain:coverage",
@@ -1158,28 +1273,55 @@ def analyze_event_evidence(pkg: EventEvidencePackage) -> RcaAssessment:
                 phase=ex.focus.phase,
                 signal_or_feature="coverage_ratio",
                 statement=(
-                    f"Event coverage {pkg.quality.valid_event_windows}/"
-                    f"{pkg.quality.expected_event_windows} windows "
-                    f"({pkg.quality.coverage_ratio:.2f}) with stale_windows="
-                    f"{pkg.quality.stale_windows_count} fails diagnostic completeness bar."
+                    f"Event had {ex.non_stale_valid_windows}/"
+                    f"{pkg.quality.expected_event_windows} non-stale valid windows "
+                    f"(coverage={pkg.quality.coverage_ratio:.2f}, stale_windows="
+                    f"{pkg.quality.stale_windows_count}), failing reliability requirements."
                 ),
                 observed_value=pkg.quality.coverage_ratio,
             )
         )
+    elif nominal_abstained:
+        abstention_reason = (
+            "No active fault or anomalous physical deviation reached diagnostic threshold "
+            f"(top support={max_fault_score:.2f} < {_MIN_DIAGNOSTIC_SUPPORT:.2f}); telemetry "
+            "reflects nominal operation or lacks identifiable fault evidence."
+        )
+        insufficient_sup.append(
+            EvidenceReference(
+                ref_id="abstain:nominal",
+                origin="derived",
+                phase=ex.focus.phase,
+                signal_or_feature="coverage_ratio",
+                statement=abstention_reason,
+                observed_value=pkg.quality.coverage_ratio,
+            )
+        )
+
+    insuff_score = (
+        round(min(1.0, max(0.78, 1.0 - pkg.quality.completeness_score + 0.35)), 4)
+        if quality_abstained
+        else (
+            round(min(0.85, max(0.6, 1.0 - max_fault_score)), 4)
+            if nominal_abstained
+            else round(min(0.24, max(0.0, 0.3 * (1.0 - pkg.quality.completeness_score))), 4)
+        )
+    )
     insuff_hyp = RankedHypothesis(
         hypothesis_id="hyp:insufficient_evidence",
         category="insufficient_evidence",
-        title="Insufficient evidence to establish root cause",
+        title=(
+            "No actionable root cause identified (nominal or insufficient signal)"
+            if nominal_abstained
+            else "Insufficient evidence to establish root cause"
+        ),
         rank=1 if abstained else 6,
         relative_support="primary" if abstained else "ruled_out",
-        support_score=round(min(1.0, max(0.65, 1.0 - pkg.quality.completeness_score + 0.35)), 4)
-        if abstained
-        else round(max(0.0, 1.0 - pkg.quality.completeness_score) * 0.4, 4),
+        support_score=insuff_score,
         confidence_band="abstained" if abstained else "low",
         physical_mechanism=(
-            "Gaps, missing phase windows, or pervasive stale telemetry prevent separating "
-            "compressor"
-            "faults from normal operation or instrumentation glitches."
+            "Gaps, missing phase windows, pervasive stale telemetry, or absence of physical "
+            "fault signatures prevent attributing compressor faults."
         ),
         supporting_evidence=insufficient_sup,
         contradicting_evidence=[],
@@ -1206,14 +1348,18 @@ def analyze_event_evidence(pkg: EventEvidencePackage) -> RcaAssessment:
         ],
     )
 
-    candidates = [leak_hyp, sensor_hyp, integ_hyp, demand_hyp, concurrent_hyp]
     if abstained:
-        sorted_rest = sorted(candidates, key=lambda h: (-h.support_score, h.hypothesis_id))
+        cap = round(max(0.0, insuff_hyp.support_score - 0.05), 4)
+        capped = [
+            h.model_copy(update={"support_score": min(h.support_score, cap)}) for h in candidates
+        ]
+        sorted_rest = sorted(capped, key=lambda h: (-h.support_score, h.hypothesis_id))
         ordered = [insuff_hyp, *sorted_rest]
     else:
-        ordered = sorted(candidates, key=lambda h: (-h.support_score, h.hypothesis_id))
+        pool = list(candidates)
         if pkg.quality.overall_status == "degraded":
-            ordered.append(insuff_hyp)
+            pool.append(insuff_hyp)
+        ordered = sorted(pool, key=lambda h: (-h.support_score, h.hypothesis_id))
 
     ranked: list[RankedHypothesis] = []
     top_score = ordered[0].support_score

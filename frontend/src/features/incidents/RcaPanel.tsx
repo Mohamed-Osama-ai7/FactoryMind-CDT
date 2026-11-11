@@ -35,7 +35,7 @@ function EvidenceRefList({ title, refs }: { title: string; refs: EvidenceReferen
       <p className="text-xs font-medium text-ink">{title}</p>
       <ul className="mt-1 space-y-1 text-xs text-muted">
         {refs.map((r) => (
-          <li key={`${r.ref_id}-${r.signal_or_feature}-${r.statement}`}>
+          <li key={`${r.ref_id}-${r.signal_or_feature}-${r.phase ?? 'none'}-${r.statement}`}>
             <span className="rounded border border-border px-1 py-0.5 text-[11px] text-ink">
               {ORIGIN_LABELS[r.origin] ?? r.origin}
             </span>{' '}
@@ -87,6 +87,7 @@ function HypothesisCard({ hyp, defaultOpen }: { hyp: RankedHypothesis; defaultOp
           <button
             type="button"
             aria-expanded={open}
+            aria-label={`${open ? 'Hide' : 'Show'} details for ${hyp.title}`}
             onClick={() => setOpen((v) => !v)}
             className="text-accent underline"
           >
@@ -185,4 +186,3 @@ export function RcaPanel({ rca, headingLevel = 'h2' }: RcaPanelProps) {
     </section>
   )
 }
-

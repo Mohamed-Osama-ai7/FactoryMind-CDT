@@ -104,4 +104,3 @@ class RcaAssessment(BaseModel):
         "Advisory root-cause hypotheses for human engineering review. Grounded strictly in the "
         "associated EventEvidencePackage; FactoryMind never actuates or controls equipment."
     )
-

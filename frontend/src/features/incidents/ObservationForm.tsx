@@ -4,6 +4,7 @@ import { describeApiError } from '../../api/errors'
 import {
   getGetIncidentEvidencePackageQueryKey,
   getGetIncidentQueryKey,
+  getGetIncidentRcaQueryKey,
   useCreateObservation,
   useMe,
 } from '../../api/generated/incidents/incidents'
@@ -38,6 +39,7 @@ export function ObservationForm({ incidentId, defaultTimestamp }: ObservationFor
         void queryClient.invalidateQueries({
           queryKey: getGetIncidentEvidencePackageQueryKey(incidentId),
         })
+        void queryClient.invalidateQueries({ queryKey: getGetIncidentRcaQueryKey(incidentId) })
       },
     },
   })

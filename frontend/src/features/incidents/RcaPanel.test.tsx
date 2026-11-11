@@ -109,11 +109,13 @@ describe('RcaPanel', () => {
     expect(screen.getByText(/Check flexible hoses/)).toBeInTheDocument()
 
     // Collapse rank #2 hypothesis details cleanly
-    const toggleButtons = screen.getAllByRole('button', { name: 'Hide details' })
+    const toggleButtons = screen.getAllByRole('button', { name: /Hide details/ })
     const secondToggle = toggleButtons[1]
     if (!secondToggle) throw new Error('Expected second hypothesis toggle button')
     await userEvent.click(secondToggle)
-    expect(screen.getByRole('button', { name: 'Show details' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /Show details for Sustained downstream/ }),
+    ).toBeInTheDocument()
 
     // Abstained view renders abstention banner cleanly
     render(

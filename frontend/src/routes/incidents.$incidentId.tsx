@@ -122,14 +122,14 @@ function IncidentInvestigationPage() {
           Evidence package unavailable: {describeApiError(evidenceQuery.error)}
         </p>
       )}
-      {pkg && <EventEvidencePackageView key={pkg.package_id} pkg={pkg} />}
+      {pkg && <EventEvidencePackageView key={`${incidentId}-${pkg.package_id}`} pkg={pkg} />}
       {rcaQuery.isPending && <p role="status">Computing explainable RCA hypotheses…</p>}
       {rcaQuery.isError && (
         <p role="alert" className="rounded border border-critical p-3 text-sm">
           RCA unavailable: {describeApiError(rcaQuery.error)}
         </p>
       )}
-      {rca && <RcaPanel key={rca.rca_id} rca={rca} />}
+      {rca && <RcaPanel key={`${incidentId}-${rca.rca_id}`} rca={rca} />}
     </section>
   )
 }

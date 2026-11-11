@@ -51,18 +51,24 @@ Executed on real processed MetroPT-3 data with trained `20261111-f069042373` bun
   - `F3`: `air_leakage` (`top_support_score=0.6093`, `confidence_band=low` due to degraded coverage across multi-day gapped telemetry).
   - `F4`: `air_leakage` (`top_support_score=0.5656`, `confidence_band=moderate`, alternative `abnormal_high_demand`).
 
-### Real Unlabeled Warning Sample (`2020-04-10` to `2020-04-17`)
+### Real Unlabeled Warning & Nominal Evaluation (`2020-04-01` to `2020-09-02`)
 
-- `W2_stale_telemetry`: `abstained=True` (`primary_category=insufficient_evidence`, `confidence_band=abstained`, `citations_grounded=True`).
-- `W1_multivariate_sensor_drift`: surfaced `air_leakage` (`0.57`, `moderate`) alongside `abnormal_high_demand` due to elevated duty and negative slope in that April transient window (`citations_grounded=True`, never falsely claiming malfunction when duty and pressure shifted).
+- **Full evaluation period (`34` real warning episodes via `evaluate_unlabeled_warning_slice`):**
+  - `evidence_citation_grounding_rate`: `1.0`
+  - `correlation_disclaimer_rate`: `1.0`
+  - `non_leak_primary_rate`: `0.6765` (`23/34`; the remaining `11` multivariate `pca_spe` warnings co-occurred with elevated high-duty intervals / sustained leaks where `duty_rule` and pressure indicators supported `air_leakage`, never fabricated `sensor_malfunction` without channel isolation).
+- **April sample highlights (`2020-04-10` to `2020-04-17`) & nominal baseline check (`2020-04-05 00:00..03:00`):**
+  - `W2_stale_telemetry`: `abstained=True` (`primary_category=insufficient_evidence`, `confidence_band=abstained`, `citations_grounded=True`).
+  - `W1_multivariate_sensor_drift`: surfaced `air_leakage` (`0.57`, `moderate`) alongside `abnormal_high_demand` (`citations_grounded=True`).
+  - `2020-04-05` normal operating slice: `abstained=True` (`primary_category=insufficient_evidence`, refusing to promote low/nominal scores as a fault cause).
 
 ### Synthetic & API Verification
 
-- **Backend:** `ruff format --check src tests` (`67 files`), `ruff check src tests`, `mypy src` (`0` issues across `39` source files), `pytest -q` -> **`450 passed`** (`test_rca_foundation.py`, `test_auth_routes.py`, `test_safety_boundary.py`, `test_openapi_contract.py`).
-- **Frontend:** `npm run generate:api` cleanly synced, `npm run lint` (`biome check .`, `42` files), `npm run typecheck` (`tsc -b`), `npm run test` -> **`8` files / `32` passed** (including `RcaPanel.test.tsx`), `npm run build` (`tsc -b && vite build`).
-- **Synthetic stress cases (`test_rca_foundation.py`):** Clean synthetic leak, single-sensor `TP3` freeze + `COMP`/`DV_eletric` valve contradiction (`telemetry_inconsistency`/`sensor_malfunction` primary, `air_leakage` downgraded), `< 50 %` gapped coverage (mandatory abstention), and human-observation corroboration.
+- **Backend:** `ruff format --check .` (`68` files), `ruff check .`, `mypy` (`0` issues across `39` source files), `pytest -q` -> **`451 passed`** (`test_rca_foundation.py`, `test_auth_routes.py`, `test_safety_boundary.py`, `test_openapi_contract.py`).
+- **Frontend:** `npm run generate:api` cleanly synced, `npm run lint` (`biome check .`, `42` files), `npm run typecheck` (`tsc -b`), `npm run test` -> **`8` files / `32` passed** (including `RcaPanel.test.tsx` and `EventEvidencePackageView.test.tsx`), `npm run build` (`tsc -b && vite build`).
+- **Synthetic stress & regression cases (`test_rca_foundation.py`):** Clean synthetic leak, single-sensor `TP3` freeze + `COMP`/`DV_eletric` valve contradiction, single-sensor `Motor_current` freeze at `7.0 A` (`sensor_malfunction` primary rather than spurious leak), mixed stale + gapped zero non-stale windows (mandatory abstention + monotonic ranks), `warning_bundle=None` non-fabrication, negated human inspection notes (`no leak found, hose intact`), nominal abstention, and human-observation corroboration.
 - **API & UI integration:**
   - `GET /api/v1/incidents/{incident_id}/rca` (`incident:read`, `cost=5`, tenant & asset isolated)
   - `GET /api/v1/anomaly/rca` (`anomaly:read`, `cost=5`, naive timestamps)
-  - React `RcaPanel.tsx` integrated on `/incidents/$incidentId` and on-demand inside `ReplayPanel` event inspection; OpenAPI & Orval client synchronized.
+  - React `RcaPanel.tsx` integrated on `/incidents/$incidentId` (with `ObservationForm` invalidating `getGetIncidentRcaQueryKey`) and on-demand inside `ReplayPanel` event inspection; OpenAPI & Orval client synchronized.
 
