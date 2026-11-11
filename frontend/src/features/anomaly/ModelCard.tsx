@@ -4,6 +4,7 @@ import type {
   LoeoSummary,
   ModelInfo,
   ReferenceHoldoutCheck,
+  Wp2EvaluationSummary,
 } from '../../api/generated/model'
 
 function minutes(value: number | null | undefined): string {
@@ -110,6 +111,155 @@ function CalibrationCheck({
   )
 }
 
+function Wp2RegimesAndWarnings({ wp2 }: { wp2: Wp2EvaluationSummary }) {
+  const sep = wp2.event_separation
+  const regimeKeys = ['loaded', 'unloaded', 'starting', 'stopped', 'insufficient_evidence']
+  const ablations = [
+    ['wp0_stopped_only', 'WP0 baseline (stopped suppressed)'],
+    ['wp2_integrity_gated', 'WP2 integrity-gated (stopped + stale + inconsistent)'],
+    ['starting_suppressed_ablation', 'Ablation: also suppress starting'],
+  ] as const
+
+  return (
+    <div className="mt-4 flex flex-col gap-4 rounded border border-border p-3 text-sm">
+      <div>
+        <h3 className="font-medium">Operating-regime &amp; warning separation (WP2)</h3>
+        <p className="mt-1 text-muted">
+          Primary leak alarms ({wp2.primary_detector}) abstain on frozen or contradictory telemetry:{' '}
+          <span className="font-medium text-ink">
+            {sep.integrity_suppressed_leak_episodes} false leak episode
+            {sep.integrity_suppressed_leak_episodes === 1 ? '' : 's'} prevented
+          </span>{' '}
+          ({sep.gated_false_alarm_episodes_wp2} gated vs {sep.baseline_false_alarm_episodes_wp0} WP0
+          false alarms). Consistency warnings ({wp2.warning_detector ?? 'signal integrity'}):{' '}
+          <span className="font-medium text-ink">
+            {sep.sensor_consistency_warning_episodes} episode
+            {sep.sensor_consistency_warning_episodes === 1 ? '' : 's'}
+          </span>{' '}
+          ({sep.warnings_per_day.toFixed(3)} / valid day, {sep.warning_only_episodes} standalone,{' '}
+          {sep.warning_overlapping_leak_episodes} overlapping leak episodes).
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <caption className="mb-1 text-left text-xs text-muted">
+            Per-regime evaluation across valid windows (independent primary air-leak vs consistency
+            warning rates)
+          </caption>
+          <thead>
+            <tr className="text-left text-muted">
+              <th scope="col" className="pr-3 font-normal">
+                Regime
+              </th>
+              <th scope="col" className="pr-3 font-normal">
+                Windows
+              </th>
+              <th scope="col" className="pr-3 font-normal">
+                Primary exceedances
+              </th>
+              <th scope="col" className="pr-3 font-normal">
+                Leak FA episodes
+              </th>
+              <th scope="col" className="font-normal">
+                Warning exceedances / episodes
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {regimeKeys.map((key) => {
+              const row = wp2.per_regime_metrics[key]
+              if (!row) return null
+              return (
+                <tr key={key} className="border-t border-border">
+                  <th scope="row" className="py-1 pr-3 text-left font-normal">
+                    {key}
+                  </th>
+                  <td className="py-1 pr-3">
+                    {row.windows} ({pct(row.share)})
+                  </td>
+                  <td className="py-1 pr-3">
+                    {row.primary.scored_windows > 0
+                      ? `${row.primary.exceedance_windows}/${row.primary.scored_windows} (${pct(row.primary.exceedance_rate)})`
+                      : 'abstained'}
+                  </td>
+                  <td className="py-1 pr-3">
+                    {row.primary.false_alarm_episodes} (
+                    {row.primary.overlapping_false_alarm_episodes} overlapping)
+                  </td>
+                  <td className="py-1">
+                    {row.warning
+                      ? `${row.warning.exceedance_windows}/${row.warning.scored_windows} (${pct(row.warning.exceedance_rate)}) · ${row.warning.warning_episodes} ep`
+                      : 'n/a'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <caption className="mb-1 text-left text-xs text-muted">
+            LOEO regime-gating ablations on {wp2.primary_detector}
+          </caption>
+          <thead>
+            <tr className="text-left text-muted">
+              <th scope="col" className="pr-3 font-normal">
+                Policy
+              </th>
+              <th scope="col" className="pr-3 font-normal">
+                LOEO leaks
+              </th>
+              <th scope="col" className="pr-3 font-normal">
+                FA / valid day
+              </th>
+              <th scope="col" className="pr-3 font-normal">
+                FA / op day
+              </th>
+              <th scope="col" className="font-normal">
+                Note
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {ablations.map(([key, label]) => {
+              const abl = wp2.regime_gating_ablations[key]
+              if (!abl) return null
+              return (
+                <tr key={key} className="border-t border-border align-top">
+                  <th scope="row" className="py-1 pr-3 text-left font-normal">
+                    {label}
+                  </th>
+                  <td className="py-1 pr-3">
+                    {abl.events_detected}/{abl.events_total}
+                  </td>
+                  <td className="py-1 pr-3">{abl.mean_false_alarms_per_day.toFixed(3)}</td>
+                  <td className="py-1 pr-3">
+                    {abl.mean_operating_false_alarms_per_day.toFixed(3)}
+                  </td>
+                  <td className="py-1 text-xs text-muted">{abl.note}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-xs text-muted">
+        {wp2.simulated_fault_separation.note}{' '}
+        {Object.entries(wp2.simulated_fault_separation.detectors)
+          .map(
+            ([det, d]) =>
+              `${det}: ${d.detected}/${d.cases} gross, ctrl ${d.control_detected}/${d.cases}, clean sens ${pct(d.clean_control_sensitivity)}, lift ${d.incremental_lift === null || d.incremental_lift === undefined ? 'n/a' : `${d.incremental_lift >= 0 ? '+' : ''}${(d.incremental_lift * 100).toFixed(1)} pp`}`,
+          )
+          .join(' · ')}
+      </p>
+    </div>
+  )
+}
+
 /** Summary of the deployed model: provenance, alarm policy and held-out evaluation. */
 export function ModelCard({ model }: { model: ModelInfo }) {
   return (
@@ -146,6 +296,7 @@ export function ModelCard({ model }: { model: ModelInfo }) {
         </dd>
       </dl>
       <Loeo loeo={model.loeo} />
+      {model.wp2 && <Wp2RegimesAndWarnings wp2={model.wp2} />}
       {model.fault_injection && <Faults faults={model.fault_injection} />}
       <CalibrationCheck
         holdout={model.reference_holdout_check}

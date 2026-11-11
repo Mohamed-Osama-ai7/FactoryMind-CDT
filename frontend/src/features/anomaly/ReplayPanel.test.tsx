@@ -244,4 +244,75 @@ describe('ReplayPanel', () => {
     expect(screen.getByText('never varied in training')).toBeInTheDocument()
     expect(screen.getByText('Protection switches')).toBeInTheDocument()
   })
+
+  it('separates consistency warnings and insufficient-evidence causes from air-leak alarms', async () => {
+    const staleWindow = {
+      ...replay.windows[1],
+      event_class: 'sensor_consistency_warning' as const,
+      event_meaning: 'Frozen telemetry detected.',
+      warning_active: true,
+      warning_score: 48.2,
+      warning_exceedance: 0.002,
+      warning_detector: 'pca_spe+signal_integrity',
+      warning_reasons: ['stale_telemetry', 'pca_spe_exceedance'],
+      warning_evidence: [
+        {
+          group: 'pressure_level',
+          group_label: 'Pressure level',
+          feature: 'TP3_std',
+          value: 0,
+          training_median: 0.4,
+          robust_z: -2.0,
+          novel: false,
+          meaning: 'Zero pressure spread indicates frozen reading.',
+        },
+      ],
+      regime: {
+        regime: 'insufficient_evidence' as const,
+        confidence: 'insufficient_evidence' as const,
+        reason: 'stale_telemetry',
+        summary: 'TP3, TP2 and Motor_current are simultaneously constant.',
+        quality_flags: ['stale_telemetry'],
+        missing_signals: ['valid_non_stale_telemetry'],
+        stale_telemetry: true,
+      },
+    }
+    respond({
+      ...replay,
+      windows: [replay.windows[0], staleWindow],
+      episodes: [],
+      warnings: [
+        {
+          start: staleWindow.window_start,
+          end: staleWindow.window_end,
+          raised_at: staleWindow.window_end,
+          peak_score: 48.2,
+          peak_exceedance: 0.002,
+          detector_name: 'pca_spe+signal_integrity',
+          warning_kind: 'stale_telemetry',
+          sources: ['pca_spe', 'stale_telemetry'],
+          truncated: false,
+          ongoing: false,
+          event_class: 'sensor_consistency_warning',
+          hypothesis:
+            'Frozen sensor/PLC feed confirmed by simultaneous zero-variance TP3/TP2/Motor_current.',
+          uncertainty_note: 'Primary air-leak evaluation abstained.',
+          dominant_regime: 'insufficient_evidence',
+          regime_breakdown: { insufficient_evidence: 1 },
+        },
+      ],
+    })
+    renderPanel()
+    expect(
+      await screen.findByText(/sensor_consistency_warning \(not an air leak\)/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Unloaded: 1/)).toBeInTheDocument()
+    expect(screen.getByText(/insufficient-evidence causes: stale_telemetry/)).toBeInTheDocument()
+    expect(screen.getByText('No air-leak alarms raised in this range.')).toBeInTheDocument()
+    expect(screen.getByText('Frozen / stale telemetry feed')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Create incident/i })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show warning evidence' }))
+    expect(screen.getByText('TP3_std')).toBeInTheDocument()
+  })
 })

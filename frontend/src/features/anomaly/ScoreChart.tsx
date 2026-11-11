@@ -1,4 +1,4 @@
-import { LineChart } from 'echarts/charts'
+import { LineChart, ScatterChart } from 'echarts/charts'
 import {
   DataZoomComponent,
   GridComponent,
@@ -9,11 +9,17 @@ import {
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useEffect, useRef } from 'react'
-import type { AlarmEpisode, OperatorReport, WindowResult } from '../../api/generated/model'
+import type {
+  AlarmEpisode,
+  OperatorReport,
+  WarningEpisode,
+  WindowResult,
+} from '../../api/generated/model'
 import { formatNaive, toEpochMs } from '../../lib/naiveTime'
 
 echarts.use([
   LineChart,
+  ScatterChart,
   GridComponent,
   TooltipComponent,
   DataZoomComponent,
@@ -27,20 +33,36 @@ export interface ScoreChartProps {
   threshold: number
   episodes: AlarmEpisode[]
   reports: OperatorReport[]
+  warnings?: WarningEpisode[]
 }
 
 const COLORS = {
   line: '#3b82f6',
   threshold: '#f59e0b',
-  alarm: 'rgba(239, 68, 68, 0.18)',
+  alarm: 'rgba(239, 68, 68, 0.22)',
+  warning: 'rgba(56, 189, 248, 0.16)',
+  warningPoint: '#38bdf8',
   report: 'rgba(245, 158, 11, 0.14)',
   axis: '#8a96ad',
   grid: '#1f2a40',
 }
 
-/** Anomaly score per window vs threshold, with alarm episodes and operator reports shaded.
- * Missing windows are left as gaps (never interpolated). */
-export function ScoreChart({ windows, threshold, episodes, reports }: ScoreChartProps) {
+const EVENT_CLASS_LABELS: Record<string, string> = {
+  air_leak_alarm: 'Air-leak alarm',
+  sensor_consistency_warning: 'Sensor-consistency warning',
+  informational: 'Informational',
+  insufficient_evidence: 'Insufficient evidence',
+}
+
+/** Anomaly score per window vs threshold, separating leak alarms from consistency warnings.
+ * Missing or integrity-abstained windows leave gaps on the score line (never interpolated). */
+export function ScoreChart({
+  windows,
+  threshold,
+  episodes,
+  reports,
+  warnings = [],
+}: ScoreChartProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -60,6 +82,13 @@ export function ScoreChart({ windows, threshold, episodes, reports }: ScoreChart
     if (!element) return
     const chart = echarts.getInstanceByDom(element)
     if (!chart) return
+    const windowByEpoch = new Map<number, WindowResult>(
+      windows.map((w) => [toEpochMs(w.window_start), w]),
+    )
+    const warningPoints = windows
+      .filter((w) => w.warning_active)
+      .map((w) => [toEpochMs(w.window_start), w.score ?? threshold])
+
     chart.setOption(
       {
         animation: false,
@@ -72,7 +101,30 @@ export function ScoreChart({ windows, threshold, episodes, reports }: ScoreChart
                 formatNaive(new Date(Number(p.value)).toISOString()),
             },
           },
-          valueFormatter: (v: unknown) => (typeof v === 'number' ? v.toFixed(3) : 'no data'),
+          formatter: (params: unknown) => {
+            const first = Array.isArray(params) ? params[0] : params
+            const datum =
+              first && typeof first === 'object' && 'value' in first
+                ? (first as { value?: unknown }).value
+                : undefined
+            const ts = Array.isArray(datum) ? Number(datum[0]) : Number.NaN
+            const win = Number.isFinite(ts) ? windowByEpoch.get(ts) : undefined
+            if (!win) return ''
+            const scoreStr = win.score === null ? 'abstained / n/a' : win.score.toFixed(3)
+            const eventLabel = EVENT_CLASS_LABELS[win.event_class] ?? win.event_class
+            const regLine = `${win.regime.regime} (${win.regime.confidence})`
+            const lines = [
+              `<strong>${formatNaive(win.window_start)}</strong>`,
+              `Duty score: ${scoreStr}`,
+              `Event class: ${eventLabel}`,
+              `Regime: ${regLine}`,
+            ]
+            if (win.warning_active) {
+              const reasonText = win.warning_reasons?.join(', ') || win.regime.reason
+              lines.push(`Warning: ${reasonText}`)
+            }
+            return lines.join('<br/>')
+          },
         },
         xAxis: {
           type: 'time',
@@ -87,7 +139,7 @@ export function ScoreChart({ windows, threshold, episodes, reports }: ScoreChart
         },
         yAxis: {
           type: 'value',
-          name: 'anomaly score',
+          name: 'duty score',
           nameTextStyle: { color: COLORS.axis },
           axisLabel: { color: COLORS.axis },
           splitLine: { lineStyle: { color: COLORS.grid } },
@@ -113,6 +165,13 @@ export function ScoreChart({ windows, threshold, episodes, reports }: ScoreChart
             markArea: {
               silent: true,
               data: [
+                ...warnings.map((w) => [
+                  {
+                    xAxis: toEpochMs(w.start),
+                    itemStyle: { color: COLORS.warning },
+                  },
+                  { xAxis: toEpochMs(w.end) },
+                ]),
                 ...episodes.map((e) => [
                   { xAxis: toEpochMs(e.start), itemStyle: { color: COLORS.alarm } },
                   { xAxis: toEpochMs(e.end) },
@@ -128,18 +187,34 @@ export function ScoreChart({ windows, threshold, episodes, reports }: ScoreChart
               ],
             },
           },
+          {
+            name: 'consistency warning',
+            type: 'scatter',
+            symbol: 'diamond',
+            symbolSize: 8,
+            itemStyle: { color: COLORS.warningPoint },
+            data: warningPoints,
+          },
         ],
       },
       { notMerge: true },
     )
-  }, [windows, threshold, episodes, reports])
+  }, [windows, threshold, episodes, warnings, reports])
 
   return (
-    <div
-      ref={ref}
-      role="img"
-      aria-label="Anomaly score over time against the alarm threshold, with alarm episodes in red and operator failure reports in amber"
-      className="h-72 w-full"
-    />
+    <figure className="flex flex-col gap-2">
+      <div
+        ref={ref}
+        role="img"
+        aria-label="Compressor duty score over time against the alarm threshold, with air-leak alarm episodes shaded red, sensor-consistency warnings marked in cyan, and operator failure reports shaded amber"
+        className="h-72 w-full"
+      />
+      <figcaption className="flex flex-wrap gap-4 text-xs text-muted">
+        <span>Blue line: primary duty score (gaps indicate abstained/invalid telemetry)</span>
+        <span className="text-critical">Red band: air-leak alarm episode</span>
+        <span>Cyan marker/band: sensor-consistency warning (not an air leak)</span>
+        <span className="text-warn">Amber band: operator failure report</span>
+      </figcaption>
+    </figure>
   )
 }
