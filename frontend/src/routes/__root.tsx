@@ -39,6 +39,11 @@ function Shell() {
               Knowledge &amp; KG
             </Link>
           )}
+          {permissions.has('asset:read') && (
+            <Link to="/twin" className={LINK} activeProps={ACTIVE}>
+              Digital Twin
+            </Link>
+          )}
           {permissions.has('anomaly:read') && (
             <Link to="/anomaly" className={LINK} activeProps={ACTIVE}>
               Anomaly monitor

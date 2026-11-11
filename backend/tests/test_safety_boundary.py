@@ -14,6 +14,7 @@ ALLOWED_MUTATING_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/api/v1/anomaly/score"),  # stateless scoring of submitted samples
         ("POST", "/api/v1/ml/predict"),  # stateless prediction & OOD/uncertainty gate
+        ("POST", "/api/v1/twin/simulate"),  # stateless counterfactual digital-twin simulation
         ("POST", "/api/v1/incidents"),  # records an incident re-detected by the server
         ("POST", "/api/v1/incidents/{incident_id}/decisions"),  # human review record
         ("POST", "/api/v1/incidents/{incident_id}/observations"),  # human field observation
