@@ -84,6 +84,238 @@
         "title": "AlarmEpisode",
         "type": "object"
       },
+      "AssetDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDatasetRecord"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "passport": {
+            "$ref": "#/components/schemas/AssetPassport"
+          },
+          "runtime_model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Model Version"
+          }
+        },
+        "required": [
+          "passport",
+          "datasets"
+        ],
+        "title": "AssetDetailResponse",
+        "type": "object"
+      },
+      "AssetListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssetPassportSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AssetListResponse",
+        "type": "object"
+      },
+      "AssetPassport": {
+        "additionalProperties": false,
+        "description": "Industrial Asset Digital Passport describing physics, sensors, failure modes, and models.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "connected_dataset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Connected Dataset Ids",
+            "type": "array"
+          },
+          "deployment_scope_note": {
+            "title": "Deployment Scope Note",
+            "type": "string"
+          },
+          "failure_modes": {
+            "items": {
+              "$ref": "#/components/schemas/FailureModeSpec"
+            },
+            "title": "Failure Modes",
+            "type": "array"
+          },
+          "model_applicability": {
+            "items": {
+              "$ref": "#/components/schemas/ModelApplicabilityEntry"
+            },
+            "title": "Model Applicability",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "nominal_sampling_period_s": {
+            "exclusiveMinimum": 0.0,
+            "title": "Nominal Sampling Period S",
+            "type": "number"
+          },
+          "operating_envelopes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Operating Envelopes",
+            "type": "object"
+          },
+          "operating_regimes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Operating Regimes",
+            "type": "array"
+          },
+          "safety_boundary": {
+            "const": "advisory-read-only",
+            "default": "advisory-read-only",
+            "title": "Safety Boundary",
+            "type": "string"
+          },
+          "sensors": {
+            "items": {
+              "$ref": "#/components/schemas/SensorPassport"
+            },
+            "title": "Sensors",
+            "type": "array"
+          },
+          "site_or_domain": {
+            "title": "Site Or Domain",
+            "type": "string"
+          },
+          "system_context": {
+            "title": "System Context",
+            "type": "string"
+          },
+          "unobserved_quantities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unobserved Quantities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "name",
+          "asset_type",
+          "system_context",
+          "site_or_domain",
+          "deployment_scope_note",
+          "nominal_sampling_period_s",
+          "operating_regimes",
+          "operating_envelopes",
+          "sensors",
+          "failure_modes",
+          "connected_dataset_ids",
+          "model_applicability",
+          "unobserved_quantities"
+        ],
+        "title": "AssetPassport",
+        "type": "object"
+      },
+      "AssetPassportSummary": {
+        "additionalProperties": false,
+        "description": "Concise summary row for the /assets registry index.",
+        "properties": {
+          "active_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Models",
+            "type": "array"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "connected_dataset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Connected Dataset Ids",
+            "type": "array"
+          },
+          "failure_mode_count": {
+            "minimum": 0.0,
+            "title": "Failure Mode Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "runtime_model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Model Version"
+          },
+          "safety_boundary": {
+            "const": "advisory-read-only",
+            "default": "advisory-read-only",
+            "title": "Safety Boundary",
+            "type": "string"
+          },
+          "sensor_count": {
+            "minimum": 0.0,
+            "title": "Sensor Count",
+            "type": "integer"
+          },
+          "telemetry_available": {
+            "title": "Telemetry Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asset_id",
+          "name",
+          "asset_type",
+          "sensor_count",
+          "failure_mode_count",
+          "connected_dataset_ids",
+          "active_models",
+          "telemetry_available"
+        ],
+        "title": "AssetPassportSummary",
+        "type": "object"
+      },
       "AuditEventOut": {
         "properties": {
           "action": {
@@ -264,6 +496,140 @@
           "description"
         ],
         "title": "ContradictionRecord",
+        "type": "object"
+      },
+      "DataLineageStep": {
+        "additionalProperties": false,
+        "description": "One non-destructive transformation stage linking raw archive to normalized parquet.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "preserves_raw_source": {
+            "default": true,
+            "title": "Preserves Raw Source",
+            "type": "boolean"
+          },
+          "step": {
+            "minimum": 1.0,
+            "title": "Step",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step",
+          "operation",
+          "description"
+        ],
+        "title": "DataLineageStep",
+        "type": "object"
+      },
+      "DatasetListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDatasetRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "DatasetListResponse",
+        "type": "object"
+      },
+      "DatasetQualitySummary": {
+        "additionalProperties": false,
+        "description": "Observed quality metrics recorded during non-destructive dataset preparation.",
+        "properties": {
+          "duplicate_timestamps": {
+            "minimum": 0.0,
+            "title": "Duplicate Timestamps",
+            "type": "integer"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "gap_hours": {
+            "minimum": 0.0,
+            "title": "Gap Hours",
+            "type": "number"
+          },
+          "gap_policy": {
+            "title": "Gap Policy",
+            "type": "string"
+          },
+          "gaps_over_60s": {
+            "minimum": 0.0,
+            "title": "Gaps Over 60S",
+            "type": "integer"
+          },
+          "median_period_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Period S"
+          },
+          "non_binary_digital": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Non Binary Digital",
+            "type": "object"
+          },
+          "null_values": {
+            "minimum": 0.0,
+            "title": "Null Values",
+            "type": "integer"
+          },
+          "out_of_range": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Out Of Range",
+            "type": "object"
+          },
+          "rows_cleaned": {
+            "minimum": 0.0,
+            "title": "Rows Cleaned",
+            "type": "integer"
+          },
+          "rows_raw": {
+            "minimum": 0.0,
+            "title": "Rows Raw",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rows_raw",
+          "rows_cleaned",
+          "start",
+          "end",
+          "duplicate_timestamps",
+          "null_values",
+          "gaps_over_60s",
+          "gap_hours",
+          "gap_policy"
+        ],
+        "title": "DatasetQualitySummary",
         "type": "object"
       },
       "DecisionCreate": {
@@ -981,6 +1347,55 @@
         "title": "ExceedanceCheck",
         "type": "object"
       },
+      "FailureModeSpec": {
+        "additionalProperties": false,
+        "description": "Domain failure or instrumentation mode documented in an asset passport.",
+        "properties": {
+          "competing_explanations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Competing Explanations",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "mode_id": {
+            "title": "Mode Id",
+            "type": "string"
+          },
+          "primary_signatures": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Primary Signatures",
+            "type": "array"
+          },
+          "recommended_checks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recommended Checks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode_id",
+          "display_name",
+          "description",
+          "primary_signatures",
+          "competing_explanations",
+          "recommended_checks"
+        ],
+        "title": "FailureModeSpec",
+        "type": "object"
+      },
       "FaultSummary": {
         "properties": {
           "cases": {
@@ -1623,6 +2038,44 @@
           "asset_ids"
         ],
         "title": "MeResponse",
+        "type": "object"
+      },
+      "ModelApplicabilityEntry": {
+        "additionalProperties": false,
+        "description": "Governing applicability and boundary status for a model family on this asset.",
+        "properties": {
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          },
+          "scope_note": {
+            "title": "Scope Note",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "experimental",
+              "not_calibrated"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "status",
+          "scope_note",
+          "limitations"
+        ],
+        "title": "ModelApplicabilityEntry",
         "type": "object"
       },
       "ModelInfo": {
@@ -2414,6 +2867,36 @@
         "title": "ProvenanceRecord",
         "type": "object"
       },
+      "QualityCheckItem": {
+        "additionalProperties": false,
+        "description": "Result of one automated dataset provenance or structural quality verification.",
+        "properties": {
+          "check_id": {
+            "title": "Check Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "warn",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_id",
+          "status",
+          "summary"
+        ],
+        "title": "QualityCheckItem",
+        "type": "object"
+      },
       "RankedHypothesis": {
         "description": "Candidate physical or data-integrity explanation ranked by structured evidence.",
         "properties": {
@@ -3160,6 +3643,190 @@
           "result"
         ],
         "title": "ScoreResponse",
+        "type": "object"
+      },
+      "SensorPassport": {
+        "additionalProperties": false,
+        "description": "Specification and observability contract for one physical or logical sensor.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "analog",
+              "digital"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "nominal_envelope": {
+            "title": "Nominal Envelope",
+            "type": "string"
+          },
+          "physical_role": {
+            "title": "Physical Role",
+            "type": "string"
+          },
+          "sensor_id": {
+            "title": "Sensor Id",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "unobservability_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unobservability Note"
+          },
+          "valid_range": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Valid Range",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sensor_id",
+          "display_name",
+          "kind",
+          "unit",
+          "physical_role",
+          "valid_range",
+          "nominal_envelope"
+        ],
+        "title": "SensorPassport",
+        "type": "object"
+      },
+      "SourceDatasetRecord": {
+        "additionalProperties": false,
+        "description": "Provenance, integrity, quality, and non-destructive lineage for a dataset.",
+        "properties": {
+          "archive_sha256": {
+            "title": "Archive Sha256",
+            "type": "string"
+          },
+          "artifact_status": {
+            "enum": [
+              "verified",
+              "partial",
+              "catalog_only"
+            ],
+            "title": "Artifact Status",
+            "type": "string"
+          },
+          "asset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Asset Ids",
+            "type": "array"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "failure_report_count": {
+            "minimum": 0.0,
+            "title": "Failure Report Count",
+            "type": "integer"
+          },
+          "license": {
+            "title": "License",
+            "type": "string"
+          },
+          "lineage": {
+            "items": {
+              "$ref": "#/components/schemas/DataLineageStep"
+            },
+            "title": "Lineage",
+            "type": "array"
+          },
+          "manifest_present": {
+            "title": "Manifest Present",
+            "type": "boolean"
+          },
+          "provenance_origin": {
+            "default": "observed",
+            "enum": [
+              "observed",
+              "derived"
+            ],
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetQualitySummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quality_checks": {
+            "items": {
+              "$ref": "#/components/schemas/QualityCheckItem"
+            },
+            "title": "Quality Checks",
+            "type": "array"
+          },
+          "raw_preserved": {
+            "title": "Raw Preserved",
+            "type": "boolean"
+          },
+          "source_page": {
+            "title": "Source Page",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "telemetry_present": {
+            "title": "Telemetry Present",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "title",
+          "asset_ids",
+          "source_url",
+          "source_page",
+          "license",
+          "archive_sha256",
+          "raw_preserved",
+          "manifest_present",
+          "telemetry_present",
+          "artifact_status",
+          "failure_report_count",
+          "quality_checks",
+          "lineage"
+        ],
+        "title": "SourceDatasetRecord",
         "type": "object"
       },
       "TimelineEntry": {
@@ -4393,6 +5060,69 @@
         ]
       }
     },
+    "/api/v1/assets": {
+      "get": {
+        "operationId": "list_assets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Assets",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
+    "/api/v1/assets/{asset_id}": {
+      "get": {
+        "operationId": "get_asset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Asset",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
     "/api/v1/audit/events": {
       "get": {
         "operationId": "audit_events",
@@ -4486,6 +5216,56 @@
         "summary": "Audit Verify",
         "tags": [
           "incidents"
+        ]
+      }
+    },
+    "/api/v1/datasets": {
+      "get": {
+        "operationId": "list_datasets",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Datasets",
+        "tags": [
+          "assets"
         ]
       }
     },

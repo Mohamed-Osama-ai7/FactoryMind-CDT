@@ -15,7 +15,7 @@ HEALTH = "/api/v1/health"
 
 
 def fill(path: str) -> str:
-    return path.replace("{incident_id}", ZERO_ID)
+    return path.replace("{incident_id}", ZERO_ID).replace("{asset_id}", ASSET)
 
 
 def audit_rows(client: TestClient, tenant: str) -> list[AuditEvent]:
@@ -108,6 +108,9 @@ OUTCOME = {
 
 MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
     ("GET", "/api/v1/anomaly/model", None, VIEW_ROLES),
+    ("GET", "/api/v1/assets", None, VIEW_ROLES),
+    ("GET", f"/api/v1/assets/{ASSET}", None, VIEW_ROLES),
+    ("GET", "/api/v1/datasets", None, VIEW_ROLES),
     (
         "GET",
         "/api/v1/anomaly/replay?start=2020-01-09T00:00:00&end=2020-01-09T01:00:00",
