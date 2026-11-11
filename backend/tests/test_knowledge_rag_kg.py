@@ -15,7 +15,7 @@ from factorymind.knowledge.corpus import (
     build_verified_corpus,
     extract_pdf_chunks,
 )
-from factorymind.knowledge.eval import evaluate_retrieval_modes
+from factorymind.knowledge.eval import evaluate_abstention_rate, evaluate_retrieval_modes
 from factorymind.knowledge.kg import IndustrialKnowledgeGraph, infer_linked_kg_nodes
 from factorymind.knowledge.rag import HybridRagIndex
 from tests.auth_helpers import ASSET, AuthKit, make_client
@@ -330,6 +330,13 @@ def test_knowledge_eval_subset_and_api_endpoints(kit: AuthKit) -> None:
 def test_hybrid_rag_relevance_gate_rejects_out_of_scope_and_preserves_in_scope(
     kit: AuthKit,
 ) -> None:
+    pdf_dir = kit.root / "data" / "raw" / "metropt3"
+    pdf_dir.mkdir(parents=True)
+    (pdf_dir / "Data Description_Metro.pdf").write_bytes(
+        _minimal_text_pdf(
+            "MPG starts compressor under load below 8.2 bar and LPS triggers below 7 bar."
+        )
+    )
     chunks = build_verified_corpus(kit.root / "data" / "raw")
     index = HybridRagIndex(chunks)
     empty_index = HybridRagIndex([])
@@ -344,6 +351,7 @@ def test_hybrid_rag_relevance_gate_rejects_out_of_scope_and_preserves_in_scope(
 
     out_of_scope_queries = (
         "What is the capital of France?",
+        "What's the capital of France?",
         "Chocolate cake recipe",
         "How to bake sourdough bread with yeast and flour?",
         "Who won the FIFA World Cup in 2022?",
@@ -351,6 +359,14 @@ def test_hybrid_rag_relevance_gate_rejects_out_of_scope_and_preserves_in_scope(
         "Write a Python binary search algorithm.",
         "What is the turbine blade temperature limit?",
         "capital of France compressor",
+        "Capital of compressor",
+        "What is 1?",
+        "What is 3?",
+        "What is 3 + 7?",
+        "What is the price of oil and air?",
+        "Recipe for oil pressure",
+        "Give me 1 chocolate",
+        "Description of banana",
         "What is this?",
     )
     for query in out_of_scope_queries:
@@ -365,36 +381,66 @@ def test_hybrid_rag_relevance_gate_rejects_out_of_scope_and_preserves_in_scope(
             assert res.items == [], f"Unexpected hit for {query!r} in mode={mode}: {res.items}"
             assert res.related_kg_edges == []
 
-    # In-scope technical queries preserve grounded citations matching the topic
-    positive_checks = (
-        ("unloaded TP3 air leakage", "air"),
-        ("Explain COMP valve contradiction semantics.", "valve"),
-        ("What is the oil temperature limit?", "oil"),
-        ("pca_spe non-leak statistical warning tier separation", "pca_spe"),
-    )
-    for query, expected_term in positive_checks:
-        res = index.search(
-            query,
-            tenant_id="acme",
-            allowed_asset_ids={ASSET},
-            top_k=3,
-            mode="hybrid_rrf",
+    # Small (2-doc) slice also blocks partial OOV common-word pairs & numeric-only queries
+    two_doc_index = HybridRagIndex(chunks[:2])
+    for small_oos in (
+        "Capital of compressor",
+        "What is 1?",
+        "What is the capital of France for this compressor?",
+        "Chocolate cake recipe",
+    ):
+        assert (
+            two_doc_index.search(small_oos, tenant_id="acme", allowed_asset_ids={ASSET}).items == []
         )
-        assert len(res.items) >= 1, f"Expected hits for in-scope query {query!r}"
-        top = res.items[0]
-        assert expected_term in f"{top.title} {top.section} {top.snippet}".lower()
 
-    # Evaluation metrics remain intact for supported queries
+    # In-scope technical & multi-term queries pass across all modes with zero bm25==0 tail hits
+    positive_checks = (
+        ("unloaded TP3 air leakage", ("air",)),
+        ("Explain COMP valve contradiction semantics.", ("valve",)),
+        ("What is the oil temperature limit?", ("oil",)),
+        ("What's the compressor's oil temperature limit?", ("oil",)),
+        ("pca_spe non-leak statistical warning tier separation", ("pca_spe",)),
+        ("compressor duty limit", ("duty", "limit")),
+        ("tp3 pressure limits", ("pressure",)),
+        ("Explain pca_spe warning limits", ("pca_spe",)),
+        ("What is H1?", ("h1",)),
+        ("Explain cross_asset_transfer", ("cross_asset_transfer",)),
+        ("Summarize unloaded TP3 air leakage risk and compare repair options.", ("air",)),
+    )
+    for query, expected_terms in positive_checks:
+        for mode in ("bm25_only", "dense_svd_only", "hybrid_rrf"):
+            res = index.search(
+                query,
+                tenant_id="acme",
+                allowed_asset_ids={ASSET},
+                top_k=3,
+                mode=mode,  # type: ignore[arg-type]
+            )
+            assert len(res.items) >= 1, f"False negative for {query!r} in mode={mode}"
+            assert all(h.bm25_score > 0.0 for h in res.items), (
+                f"Zero-BM25 tail hit for {query!r} in mode={mode}: {res.items}"
+            )
+            combined = " ".join(f"{h.title} {h.section} {h.snippet}".lower() for h in res.items)
+            assert any(term in combined for term in expected_terms), f"{query!r} -> {combined!r}"
+
+    # Evaluation & OOS abstention metrics remain at 1.0 across all supported modes
     ev_report = evaluate_retrieval_modes(index, tenant_id="acme", allowed_asset_ids={ASSET})
     for m in ev_report.modes:
         assert m.recall_at_5 == 1.0
         assert m.mrr_at_10 == 1.0
+    abstention = evaluate_abstention_rate(index, tenant_id="acme", allowed_asset_ids={ASSET})
+    assert all(rate == 1.0 for rate in abstention.values())
 
     # HTTP /knowledge/search rejects out-of-scope queries cleanly without unrelated hits
     client = make_client(kit)
     client.app.state.knowledge_index = index  # type: ignore[union-attr]
     viewer = kit.headers(roles=["viewer"], assets=[ASSET])
-    for query in ("What is the capital of France?", "Chocolate cake recipe"):
+    for query in (
+        "What is the capital of France?",
+        "Chocolate cake recipe",
+        "What is the price of oil and air?",
+        "What is 3 + 7?",
+    ):
         resp = client.get(
             "/api/v1/knowledge/search",
             params={"q": query, "top_k": 5, "mode": "hybrid_rrf"},

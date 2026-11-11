@@ -34,23 +34,23 @@ M3-WP2 introduces a hardened technical corpus loader (`pypdf` PDF parsing + Asse
 
 ## 3. Controlled Retrieval Ablation (`factorymind.knowledge.eval`)
 
-Live evaluation across verified corpus chunks (including all **3** pages extracted from `Data Description_Metro.pdf`, asset passports, and M1–M3 technical docs):
+Live evaluation across the checked-in verified markdown + asset-passport corpus (`8` keyword-dense + `3` natural multi-term queries = `11` total full-corpus queries; `Data Description_Metro.pdf` adds 3 PDF chunks when placed under `data/raw/`):
 
-### Full Corpus (`metropt3-apu-1` + `ai4i-milling-bench`, `61` chunks, `8` queries)
+### Checked-In Corpus (`metropt3-apu-1` + `ai4i-milling-bench`, `58` chunks, `11` queries)
 
-| Mode | Query Count | Recall@5 | MRR@10 | nDCG@5 |
-| --- | --- | --- | --- | --- |
-| `bm25_only` | `8` | `1.0000` | `1.0000` | `0.7683` |
-| `dense_svd_only` | `8` | `1.0000` | `1.0000` | `0.7494` |
-| `hybrid_rrf` | `8` | `1.0000` | `1.0000` | `0.7683` |
+| Mode | Query Count | Recall@5 | MRR@10 | nDCG@5 | OOS Abstention (`10` queries) |
+| --- | --- | --- | --- | --- | --- |
+| `bm25_only` | `11` | `1.0000` | `1.0000` | `0.8229` | `1.0000` |
+| `dense_svd_only` | `11` | `1.0000` | `1.0000` | `0.7491` | `1.0000` |
+| `hybrid_rrf` | `11` | `1.0000` | `1.0000` | `0.8046` | `1.0000` |
 
-### Default Single-Asset Slice (`metropt3-apu-1`, `57` chunks, `7` queries)
+### Default Single-Asset Slice (`metropt3-apu-1`, `54` chunks, `10` queries)
 
-| Mode | Query Count | Recall@5 | MRR@10 | nDCG@5 |
-| --- | --- | --- | --- | --- |
-| `bm25_only` | `7` | `1.0000` | `1.0000` | `0.7594` |
-| `dense_svd_only` | `7` | `1.0000` | `1.0000` | `0.7103` |
-| `hybrid_rrf` | `7` | `1.0000` | `1.0000` | `0.7352` |
+| Mode | Query Count | Recall@5 | MRR@10 | nDCG@5 | OOS Abstention (`10` queries) |
+| --- | --- | --- | --- | --- | --- |
+| `bm25_only` | `10` | `1.0000` | `1.0000` | `0.8221` | `1.0000` |
+| `dense_svd_only` | `10` | `1.0000` | `1.0000` | `0.7581` | `1.0000` |
+| `hybrid_rrf` | `10` | `1.0000` | `1.0000` | `0.8175` | `1.0000` |
 
 ---
 

@@ -139,6 +139,8 @@ _INCIDENT_DECISION_TERMS: Final[frozenset[str]] = frozenset(
         "abstain",
         "abstained",
         "abstention",
+        "action",
+        "actions",
         "alarm",
         "alarms",
         "alternative",
@@ -150,11 +152,13 @@ _INCIDENT_DECISION_TERMS: Final[frozenset[str]] = frozenset(
         "cause",
         "caused",
         "causes",
+        "check",
         "comp",
         "compare",
         "comparison",
         "compressor",
         "contradiction",
+        "critical",
         "current",
         "decision",
         "demand",
@@ -166,17 +170,29 @@ _INCIDENT_DECISION_TERMS: Final[frozenset[str]] = frozenset(
         "dv_eletric",
         "event",
         "evidence",
+        "explain",
         "fault",
         "faults",
         "failure",
+        "finding",
+        "findings",
         "freeze",
         "frozen",
+        "happen",
+        "happened",
+        "happening",
         "horizon",
         "hypotheses",
         "hypothesis",
         "incident",
         "incidents",
+        "inspect",
+        "inspection",
         "insufficient",
+        "investigate",
+        "investigation",
+        "issue",
+        "issues",
         "leak",
         "leakage",
         "lps",
@@ -188,6 +204,7 @@ _INCIDENT_DECISION_TERMS: Final[frozenset[str]] = frozenset(
         "oil_temperature",
         "option",
         "options",
+        "overview",
         "pca_spe",
         "peak",
         "pressure",
@@ -197,19 +214,27 @@ _INCIDENT_DECISION_TERMS: Final[frozenset[str]] = frozenset(
         "recommended",
         "repair",
         "reservoirs",
+        "risk",
+        "risks",
         "root",
         "schedule",
         "scheduled",
         "score",
         "sensor",
         "sensors",
+        "severity",
         "simulate",
         "simulated",
         "simulation",
         "status",
+        "summary",
         "telemetry",
         "tp2",
         "tp3",
+        "trigger",
+        "triggered",
+        "triggering",
+        "triggers",
         "twin",
         "uncertainty",
         "valve",
@@ -217,7 +242,12 @@ _INCIDENT_DECISION_TERMS: Final[frozenset[str]] = frozenset(
         "verify",
         "warning",
         "warnings",
+        "wrong",
     }
+)
+
+_KG_GENERIC_TOKENS: Final[frozenset[str]] = frozenset(
+    {"data", "description", "document", "page", "pdf", "uci"}
 )
 
 
@@ -237,22 +267,28 @@ def _to_observation_out(obs: HumanObservation) -> HumanObservationOut:
 def _extract_measured_features(
     ev_rows: list[EvidenceRow],
 ) -> tuple[float | None, float | None, float | None, list[str]]:
-    measured_duty: float | None = None
+    load_duty: float | None = None
+    dv_duty: float | None = None
     measured_current: float | None = None
-    measured_oil: float | None = None
+    oil_mean: float | None = None
+    oil_max: float | None = None
     summary_parts: list[str] = []
     for row in ev_rows:
         val = float(row.value)
         if len(summary_parts) < 5 and math.isfinite(val):
             summary_parts.append(f"{row.feature}={val:.3f}")
-        if row.feature == "load_duty" or (
-            row.feature == "DV_eletric_mean" and measured_duty is None
-        ):
-            measured_duty = _finite_in_bounds(val, 0.0, 1.0)
+        if row.feature == "load_duty":
+            load_duty = _finite_in_bounds(val, 0.0, 1.0)
+        elif row.feature == "DV_eletric_mean":
+            dv_duty = _finite_in_bounds(val, 0.0, 1.0)
         elif row.feature == "Motor_current_mean":
             measured_current = _finite_in_bounds(val, 0.0, 20.0)
-        elif row.feature in ("Oil_temperature_mean", "Oil_temperature_max"):
-            measured_oil = _finite_in_bounds(val, -20.0, 150.0)
+        elif row.feature == "Oil_temperature_mean":
+            oil_mean = _finite_in_bounds(val, -20.0, 150.0)
+        elif row.feature == "Oil_temperature_max":
+            oil_max = _finite_in_bounds(val, -20.0, 150.0)
+    measured_duty = load_duty if load_duty is not None else dv_duty
+    measured_oil = oil_mean if oil_mean is not None else oil_max
     return measured_duty, measured_current, measured_oil, summary_parts
 
 
@@ -286,9 +322,10 @@ def _sanitize_untrusted_snippet(text: str) -> str:
 
 
 def _finite_in_bounds(value: float | None, lo: float, hi: float) -> float | None:
-    if value is None or not math.isfinite(value):
+    """Return ``value`` if finite and inside ``[lo, hi]``; drop faulted out-of-range values."""
+    if value is None or not math.isfinite(value) or value < lo or value > hi:
         return None
-    return max(lo, min(hi, value))
+    return value
 
 
 class ControlledCopilot:
@@ -384,9 +421,15 @@ class ControlledCopilot:
         if inc is None:
             return False
         domain_terms = set(_INCIDENT_DECISION_TERMS)
-        domain_terms.update(extract_content_tokens(inc.detector))
+        domain_terms.update(
+            tok for tok in extract_content_tokens(inc.detector) if any(ch.isalpha() for ch in tok)
+        )
         for row in ev_rows:
-            domain_terms.update(extract_content_tokens(row.feature))
+            domain_terms.update(
+                tok
+                for tok in extract_content_tokens(row.feature)
+                if any(ch.isalpha() for ch in tok)
+            )
         if asset_allowed:
             try:
                 sub = self._knowledge.kg.traverse(
@@ -395,11 +438,19 @@ class ControlledCopilot:
                     depth=2,
                 )
                 for node in sub.nodes:
-                    domain_terms.update(extract_content_tokens(node.label))
+                    if node.kind == "document":
+                        continue
+                    domain_terms.update(
+                        tok
+                        for tok in extract_content_tokens(node.label)
+                        if any(ch.isalpha() for ch in tok) and tok not in _KG_GENERIC_TOKENS
+                    )
             except KeyError:
                 pass
-        matched = sum(1 for tok in q_tokens if tok in domain_terms)
-        return matched >= 1 and (matched / len(q_tokens)) >= 0.50
+        matched = sum(
+            1 for tok in q_tokens if tok in domain_terms and any(ch.isalpha() for ch in tok)
+        )
+        return matched >= 1 and (matched / len(q_tokens)) >= 0.70
 
     def _twin_request_for_hypothesis(
         self,
@@ -553,8 +604,12 @@ class ControlledCopilot:
                             record_count=0,
                             summary=(
                                 "No incident_id selected for this query."
-                                if req.incident_id is None or session_factory is None
-                                else "Skipped: question is out of scope for incident evidence."
+                                if req.incident_id is None
+                                else (
+                                    "Incident database session unavailable for this query."
+                                    if session_factory is None
+                                    else "Skipped: question is out of scope for incident evidence."
+                                )
                             ),
                         )
                     )
@@ -690,7 +745,9 @@ class ControlledCopilot:
                     )
                 )
             else:
-                inferred_hypothesis = rca.primary_category
+                inferred_hypothesis = (
+                    "insufficient_evidence" if rca.abstained else rca.primary_category
+                )
                 rca_abstained = rca.abstained
                 rca_abstention_reason = (
                     rca.abstention_reason or "rca_insufficient_evidence" if rca.abstained else None

@@ -6,8 +6,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from fastapi import Request
 
 from factorymind.anomaly.service import AnomalyService
+from factorymind.api.anomaly import get_anomaly_service
 from factorymind.auth.principal import Principal, Role
 from factorymind.contracts.copilot import CopilotQueryRequest
 from factorymind.contracts.events import EventEvidencePackage
@@ -17,8 +19,9 @@ from factorymind.contracts.rca import (
     RcaAssessment,
     VerificationStep,
 )
-from factorymind.copilot.service import ControlledCopilot
+from factorymind.copilot.service import ControlledCopilot, _extract_measured_features
 from factorymind.data import metropt3
+from factorymind.db.models import EvidenceRow
 from factorymind.db.repository import IncidentRepo, NewEvidence
 from factorymind.db.session import Database
 from factorymind.knowledge.corpus import build_verified_corpus
@@ -653,6 +656,11 @@ def test_copilot_abstains_on_out_of_scope_empty_and_weak_retrieval(
         "Describe the cooling water salinity sensor",
         "How is espresso extracted under pressure?",
         "What is the capital of France for this compressor?",
+        "Give me 1 chocolate",
+        "Description of banana",
+        "What is the price of oil and air?",
+        "Recipe for oil pressure",
+        "What is 3 + 7?",
     )
     for q in oos_questions:
         for extra in ({}, {"incident_id": inc_id}):
@@ -706,3 +714,152 @@ def test_copilot_abstains_on_out_of_scope_empty_and_weak_retrieval(
     doc_cits = [c for c in pos_body["citations"] if c["source_type"] == "knowledge_doc"]
     assert len(doc_cits) >= 1
     assert any("valve" in c["detail"].lower() for c in doc_cits)
+
+    # Natural incident phrasings (even when docs do not mention exact phrasing) still run RCA
+    for natural_q in ("What happened?", "Why was this triggered?"):
+        nat_resp = client.post(
+            "/api/v1/copilot/query",
+            json={"question": natural_q, "incident_id": inc_id},
+            headers=viewer,
+        )
+        assert nat_resp.status_code == 200
+        assert nat_resp.json()["abstained"] is False
+        assert any(c["source_type"] == "rca" for c in nat_resp.json()["citations"])
+
+
+def test_copilot_defensive_edges_feature_bounds_custom_abstain_and_request_override(
+    kit: AuthKit,
+    anomaly_service: AnomalyService,
+    tmp_path: Path,
+) -> None:
+    # 1. Oil_temperature_mean beats Oil_temperature_max; out-of-range values drop to None
+    rows = [
+        EvidenceRow(
+            incident_id="a" * 32,
+            group_name="thermal",
+            group_label="Thermal",
+            feature="Oil_temperature_mean",
+            value=68.5,
+            training_median=60.0,
+            robust_z=1.2,
+            novel=False,
+            meaning="Mean oil",
+        ),
+        EvidenceRow(
+            incident_id="a" * 32,
+            group_name="thermal",
+            group_label="Thermal",
+            feature="Oil_temperature_max",
+            value=99.0,
+            training_median=65.0,
+            robust_z=4.0,
+            novel=True,
+            meaning="Max oil",
+        ),
+    ]
+    _duty, _cur, oil, _parts = _extract_measured_features(rows)
+    assert oil == 68.5
+
+    rows_faulted = [
+        EvidenceRow(
+            incident_id="a" * 32,
+            group_name="thermal",
+            group_label="Thermal",
+            feature="Oil_temperature_mean",
+            value=200.0,
+            training_median=60.0,
+            robust_z=12.0,
+            novel=True,
+            meaning="Out of range faulted reading",
+        )
+    ]
+    _duty2, _cur2, oil_faulted, _parts2 = _extract_measured_features(rows_faulted)
+    assert oil_faulted is None
+
+    # 2. Custom rca_fn returning abstained=True with non-'insufficient_evidence' still hardens to it
+    svc_clean, _base, _ = _make_wp_a_service(tmp_path / "custom_abs")
+    db_c = Database(f"sqlite:///{(tmp_path / 'custom_abs.sqlite3').as_posix()}")
+    eng = Principal(
+        actor_id="eng-1",
+        tenant_id="acme",
+        roles=frozenset({Role.ENGINEER}),
+        asset_ids=frozenset({ASSET}),
+    )
+    inc_c = _seed_incident(db_c, eng, datetime(2020, 1, 6, 6, 0), datetime(2020, 1, 6, 9, 0))
+
+    def _abstained_custom_rca(pkg: EventEvidencePackage) -> RcaAssessment:
+        return RcaAssessment(
+            rca_id="abs123",
+            package_id=pkg.package_id,
+            asset_id=pkg.asset_id,
+            incident_id=pkg.incident_id,
+            event_start=pkg.event_start,
+            event_end=pkg.event_end,
+            abstained=True,
+            abstention_reason="custom_low_coverage",
+            primary_category="air_leakage",
+            primary_title="Suppressed hypothesis",
+            summary="Insufficient telemetry coverage.",
+            uncertainty_note="Missing phase coverage.",
+            quality_status=pkg.quality.overall_status,
+            confidence_penalty_factor=pkg.quality.confidence_penalty_factor,
+            ranked_hypotheses=[],
+            correlation_vs_causation_boundary=["Insufficient data."],
+            provenance=pkg.provenance,
+        )
+
+    corpus = HybridRagIndex(build_verified_corpus(tmp_path / "raw"))
+    cp_custom = ControlledCopilot(
+        knowledge_index=corpus,
+        twin=CompressorReservoirTwin(),
+        anomaly_service=svc_clean,
+        rca_fn=_abstained_custom_rca,
+    )
+    abs_res = cp_custom.run_query(
+        CopilotQueryRequest(question="What caused this incident?", incident_id=inc_c),
+        principal=eng,
+        session_factory=db_c.session,
+    )
+    assert abs_res.abstained is True
+    assert abs_res.abstention_reason == "custom_low_coverage"
+    opt_c = next(c for c in abs_res.citations if c.source_type == "maintenance_optimizer")
+    assert "dominant_hypothesis=insufficient_evidence" in opt_c.detail
+
+    # 3. Missing session_factory with incident_id gives accurate unavailability message
+    missing_db_res = cp_custom.run_query(
+        CopilotQueryRequest(question="What is the capital of France?", incident_id=inc_c),
+        principal=eng,
+        session_factory=None,
+    )
+    inc_tool = next(t for t in missing_db_res.tools_executed if t.tool == "get_event_evidence")
+    assert inc_tool.summary == "Incident database session unavailable for this query."
+
+    # 4. api/copilot handles dependency_overrides taking Request
+    client = make_client(kit)
+    client.app.state.knowledge_index = corpus  # type: ignore[union-attr]
+
+    def _svc_override(request: Request) -> AnomalyService:
+        assert request.app is client.app
+        return anomaly_service
+
+    client.app.dependency_overrides[get_anomaly_service] = _svc_override  # type: ignore[attr-defined]
+    eng_h = kit.headers(roles=["engineer"], assets=[ASSET])
+    r_start, r_end = "2020-01-09T00:00:00", "2020-01-09T12:00:00"
+    replay = client.get(f"/api/v1/anomaly/replay?start={r_start}&end={r_end}", headers=eng_h).json()
+    real_inc = client.post(
+        "/api/v1/incidents",
+        json={
+            "asset_id": ASSET,
+            "range_start": r_start,
+            "range_end": r_end,
+            "episode_start": replay["episodes"][0]["start"],
+        },
+        headers=eng_h,
+    ).json()["id"]
+    ok = client.post(
+        "/api/v1/copilot/query",
+        json={"question": "What caused this incident?", "incident_id": real_inc},
+        headers=eng_h,
+    )
+    assert ok.status_code == 200
+    assert any(c["source_type"] == "rca" for c in ok.json()["citations"])

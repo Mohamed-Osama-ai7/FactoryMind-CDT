@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -44,6 +45,8 @@ def _get_copilot(
         overrides = getattr(request.app, "dependency_overrides", {})
         override = overrides.get(get_anomaly_service)
         if override is not None:
+            if len(inspect.signature(override).parameters) >= 1:
+                return cast(AnomalyService, override(request))
             return cast(AnomalyService, override())
         try:
             return get_anomaly_service(request)

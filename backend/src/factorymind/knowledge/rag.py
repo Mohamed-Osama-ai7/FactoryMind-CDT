@@ -23,6 +23,8 @@ from factorymind.knowledge.kg import IndustrialKnowledgeGraph, infer_linked_kg_n
 
 SearchMode = Literal["bm25_only", "dense_svd_only", "hybrid_rrf"]
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
+_CONTRACTION_NOT_RE = re.compile(r"\b([a-z0-9_]+)n['\u2019]t\b")
+_CONTRACTION_SUFFIX_RE = re.compile(r"(?<=[a-z0-9_])['\u2019](?:s|re|ve|ll|d|m)\b")
 
 # Grammatical function words, interrogatives, and generic request framing excluded from scoring
 # and relevance gating. Domain state/polarity tokens (e.g. ``off``, ``on``, ``no``, ``not``,
@@ -134,22 +136,32 @@ _STOPWORDS: Final[frozenset[str]] = frozenset(
 # - Weighting every query content token (including OOV tokens using BM25 df=0 IDF) measures how
 #   much of the user's substantive information need is actually covered by an authorized chunk.
 _MIN_MULTI_TERM_IDF_COV: Final[float] = 0.25
+_MIN_OOV_MULTI_TERM_IDF_COV: Final[float] = 0.45
 _MIN_SINGLE_HIT_TWO_TERM_IDF_COV: Final[float] = 0.45
 _MIN_TAIL_HIT_IDF_COV: Final[float] = 0.15
 
 
+def _has_alpha(token: str) -> bool:
+    return any(ch.isalpha() for ch in token)
+
+
 def _tokenize(text: str) -> list[str]:
-    return _TOKEN_RE.findall(text.lower())
+    norm = re.sub(r"\bwon['\u2019]t\b", "will not", text.lower())
+    norm = _CONTRACTION_NOT_RE.sub(r"\1 not", norm)
+    norm = _CONTRACTION_SUFFIX_RE.sub("", norm)
+    return _TOKEN_RE.findall(norm)
 
 
 def extract_content_tokens(text: str) -> list[str]:
-    """Return lowercase tokens excluding grammatical stopwords."""
+    """Return lowercase tokens excluding grammatical stopwords and contraction fragments."""
     return [tok for tok in _tokenize(text) if tok not in _STOPWORDS]
 
 
 def _chunk_passes_relevance_gate(
     *,
     n_matched: int,
+    has_alpha_match: bool,
+    has_alpha_oov: bool,
     q_len: int,
     tok_cov: float,
     idf_cov: float,
@@ -161,15 +173,20 @@ def _chunk_passes_relevance_gate(
     - Exact token matching only (no stemming or neural synonyms), so queries phrased entirely in
       unindexed synonyms or inflections will abstain conservatively.
     """
-    if q_len <= 0 or n_matched <= 0:
+    if q_len <= 0 or n_matched <= 0 or not has_alpha_match:
         return False
     if q_len == 1:
         return True
     if n_docs <= 2:
-        # In tiny 1-2 doc slices, in-vocab IDF compresses relative to OOV IDF; require >=2 terms
-        # or at least half of query content tokens matched.
-        return n_matched >= 2 or tok_cov >= 0.5
-    if n_matched >= 2 and idf_cov >= _MIN_MULTI_TERM_IDF_COV:
+        if q_len == 2:
+            return n_matched >= 2
+        return n_matched >= 2 and tok_cov >= 0.30
+    min_multi_idf = (
+        _MIN_OOV_MULTI_TERM_IDF_COV
+        if (has_alpha_oov and n_matched == 2)
+        else _MIN_MULTI_TERM_IDF_COV
+    )
+    if n_matched >= 2 and idf_cov >= min_multi_idf:
         return True
     return tok_cov >= 0.5 and idf_cov >= _MIN_SINGLE_HIT_TWO_TERM_IDF_COV
 
@@ -178,14 +195,20 @@ def _snippet_around(text: str, query_tokens: Sequence[str], max_len: int = 280) 
     if len(text) <= max_len:
         return text
     lower = text.lower()
-    pos = -1
-    for tok in query_tokens:
-        idx = lower.find(tok)
-        if idx >= 0 and (pos < 0 or idx < pos):
-            pos = idx
-    if pos < 0:
+    candidates = [idx for tok in query_tokens if (idx := lower.find(tok)) >= 0]
+    if not candidates:
         return text[:max_len].rstrip() + "…"
-    start = max(0, pos - 70)
+    best_pos = candidates[0]
+    best_cov = -1
+    for cand in candidates:
+        start_c = max(0, cand - 70)
+        end_c = min(len(text), start_c + max_len)
+        window = lower[start_c:end_c]
+        cov = sum(1 for tok in query_tokens if tok in window)
+        if cov > best_cov or (cov == best_cov and cand < best_pos):
+            best_cov = cov
+            best_pos = cand
+    start = max(0, best_pos - 70)
     end = min(len(text), start + max_len)
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
@@ -249,22 +272,28 @@ class _ScopedSliceIndex:
                     normalize(tfidf.toarray(), norm="l2"), dtype="float64"
                 )
 
-    def chunk_coverages(self, unique_q: Sequence[str]) -> list[tuple[int, float, float]]:
-        """Return ``(n_matched, tok_cov, idf_cov)`` per chunk using full query terms (incl. OOV)."""
+    def has_alpha_oov(self, unique_q: Sequence[str]) -> bool:
+        return any(_has_alpha(tok) and tok not in self._idf for tok in unique_q)
+
+    def chunk_coverages(self, unique_q: Sequence[str]) -> list[tuple[int, float, float, bool]]:
+        """Return ``(n_matched, tok_cov, idf_cov, has_alpha_match)`` per chunk (incl. OOV)."""
         q_len = len(unique_q)
         if q_len == 0 or not self.chunks:
-            return [(0, 0.0, 0.0) for _ in self.chunks]
+            return [(0, 0.0, 0.0, False) for _ in self.chunks]
         weights = {tok: self._idf.get(tok, self._idf_oov) for tok in unique_q}
         total_w = sum(weights.values()) or 1.0
-        out: list[tuple[int, float, float]] = []
+        out: list[tuple[int, float, float, bool]] = []
         for tf in self._doc_tf:
             matched_w = 0.0
             n_m = 0
+            alpha_match = False
             for tok in unique_q:
                 if tf.get(tok, 0) > 0:
                     n_m += 1
                     matched_w += weights[tok]
-            out.append((n_m, n_m / q_len, matched_w / total_w))
+                    if _has_alpha(tok):
+                        alpha_match = True
+            out.append((n_m, n_m / q_len, matched_w / total_w, alpha_match))
         return out
 
     def bm25_scores(self, q_tokens: Sequence[str]) -> list[float]:
@@ -382,20 +411,22 @@ class HybridRagIndex:
         bm25 = slice_index.bm25_scores(q_tokens)
         dense = slice_index.dense_scores(query)
         coverages = slice_index.chunk_coverages(q_tokens)
+        has_oov = slice_index.has_alpha_oov(q_tokens)
         n_docs = len(scoped)
         q_len = len(q_tokens)
-        best_cov_idx = max(
-            range(n_docs),
-            key=lambda idx: (coverages[idx][2], bm25[idx], dense[idx]),
+        any_passes = any(
+            _chunk_passes_relevance_gate(
+                n_matched=n_m,
+                has_alpha_match=alpha_m,
+                has_alpha_oov=has_oov,
+                q_len=q_len,
+                tok_cov=tok_c,
+                idf_cov=idf_c,
+                n_docs=n_docs,
+            )
+            for n_m, tok_c, idf_c, alpha_m in coverages
         )
-        best_n_m, best_tok_cov, best_idf_cov = coverages[best_cov_idx]
-        if not _chunk_passes_relevance_gate(
-            n_matched=best_n_m,
-            q_len=q_len,
-            tok_cov=best_tok_cov,
-            idf_cov=best_idf_cov,
-            n_docs=n_docs,
-        ):
+        if not any_passes:
             return HybridSearchResponse(
                 query=query,
                 total_indexed_chunks=n_docs,
@@ -434,12 +465,11 @@ class HybridRagIndex:
         for idx in ordered:
             if rrf_scores[idx] <= 0.0:
                 continue
-            n_m, _tok_c, idf_c = coverages[idx]
-            if mode != "dense_svd_only":
-                if bm25[idx] <= 0.0:
-                    continue
-                if n_docs >= 3 and n_m < 2 and idf_c < _MIN_TAIL_HIT_IDF_COV:
-                    continue
+            n_m, _tok_c, idf_c, alpha_m = coverages[idx]
+            if bm25[idx] <= 0.0 or not alpha_m:
+                continue
+            if n_docs >= 3 and n_m < 2 and idf_c < _MIN_TAIL_HIT_IDF_COV:
+                continue
             non_empty.append(idx)
             if len(non_empty) >= limit:
                 break
