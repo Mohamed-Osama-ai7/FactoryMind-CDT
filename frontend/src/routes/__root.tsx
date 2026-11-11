@@ -44,6 +44,11 @@ function Shell() {
               Digital Twin
             </Link>
           )}
+          {permissions.has('asset:read') && (
+            <Link to="/copilot" className={LINK} activeProps={ACTIVE}>
+              Copilot
+            </Link>
+          )}
           {permissions.has('anomaly:read') && (
             <Link to="/anomaly" className={LINK} activeProps={ACTIVE}>
               Anomaly monitor

@@ -569,6 +569,318 @@
         "title": "ContradictionRecord",
         "type": "object"
       },
+      "CopilotCitation": {
+        "additionalProperties": false,
+        "description": "Verified evidence/doc/KG/twin citation supporting statements in the Copilot reply.",
+        "properties": {
+          "citation_id": {
+            "title": "Citation Id",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "provenance_origin": {
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "source_type": {
+            "enum": [
+              "incident_evidence",
+              "rca",
+              "knowledge_doc",
+              "knowledge_graph",
+              "digital_twin",
+              "maintenance_optimizer"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "citation_id",
+          "source_type",
+          "title",
+          "provenance_origin",
+          "detail"
+        ],
+        "title": "CopilotCitation",
+        "type": "object"
+      },
+      "CopilotQueryRequest": {
+        "additionalProperties": false,
+        "description": "Bounded read-only question to the Industrial Copilot orchestrator.",
+        "properties": {
+          "asset_id": {
+            "default": "metropt3-apu-1",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "leak_rate_bar_per_min": {
+            "default": 0.35,
+            "maximum": 1.5,
+            "minimum": 0.0,
+            "title": "Leak Rate Bar Per Min",
+            "type": "number"
+          },
+          "planning_horizon_hours": {
+            "default": 8.0,
+            "maximum": 72.0,
+            "minimum": 1.0,
+            "title": "Planning Horizon Hours",
+            "type": "number"
+          },
+          "question": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "use_llm_adapter": {
+            "default": false,
+            "title": "Use Llm Adapter",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "CopilotQueryRequest",
+        "type": "object"
+      },
+      "CopilotQueryResponse": {
+        "additionalProperties": false,
+        "description": "Citation-grounded, red-team-checked Copilot advisory briefing.",
+        "properties": {
+          "abstained": {
+            "default": false,
+            "title": "Abstained",
+            "type": "boolean"
+          },
+          "abstention_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abstention Reason"
+          },
+          "advisory_disclaimer": {
+            "default": "Strictly advisory decision support. Copilot possesses zero actuating or PLC write tools.",
+            "title": "Advisory Disclaimer",
+            "type": "string"
+          },
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "causal_vs_correlation_note": {
+            "title": "Causal Vs Correlation Note",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/CopilotCitation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
+          },
+          "red_team_flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Red Team Flags",
+            "type": "array"
+          },
+          "safety_refusal_triggered": {
+            "default": false,
+            "title": "Safety Refusal Triggered",
+            "type": "boolean"
+          },
+          "synthesis_mode": {
+            "enum": [
+              "deterministic_grounded",
+              "configured_llm_verified"
+            ],
+            "title": "Synthesis Mode",
+            "type": "string"
+          },
+          "tools_executed": {
+            "items": {
+              "$ref": "#/components/schemas/CopilotToolInvocation"
+            },
+            "title": "Tools Executed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "answer",
+          "synthesis_mode",
+          "tools_executed",
+          "citations",
+          "causal_vs_correlation_note"
+        ],
+        "title": "CopilotQueryResponse",
+        "type": "object"
+      },
+      "CopilotToolInvocation": {
+        "additionalProperties": false,
+        "description": "Execution audit trace for one Copilot tool invocation.",
+        "properties": {
+          "permitted": {
+            "title": "Permitted",
+            "type": "boolean"
+          },
+          "record_count": {
+            "minimum": 0.0,
+            "title": "Record Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "executed",
+              "denied_permission",
+              "unavailable",
+              "skipped",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "tool": {
+            "enum": [
+              "get_event_evidence",
+              "get_rca_hypotheses",
+              "search_docs",
+              "query_kg",
+              "simulate_scenario",
+              "compare_options"
+            ],
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "permitted",
+          "status",
+          "record_count",
+          "summary"
+        ],
+        "title": "CopilotToolInvocation",
+        "type": "object"
+      },
+      "CopilotToolSpec": {
+        "additionalProperties": false,
+        "description": "Metadata describing one permission-scoped read-only Copilot tool.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "permitted_for_caller": {
+            "title": "Permitted For Caller",
+            "type": "boolean"
+          },
+          "read_only": {
+            "const": true,
+            "default": true,
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "required_permission": {
+            "title": "Required Permission",
+            "type": "string"
+          },
+          "tool": {
+            "enum": [
+              "get_event_evidence",
+              "get_rca_hypotheses",
+              "search_docs",
+              "query_kg",
+              "simulate_scenario",
+              "compare_options"
+            ],
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "required_permission",
+          "permitted_for_caller",
+          "description"
+        ],
+        "title": "CopilotToolSpec",
+        "type": "object"
+      },
+      "CopilotToolsResponse": {
+        "additionalProperties": false,
+        "description": "Catalog of read-only tools visible to the authenticated principal.",
+        "properties": {
+          "read_only_enforced": {
+            "const": true,
+            "default": true,
+            "title": "Read Only Enforced",
+            "type": "boolean"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/CopilotToolSpec"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools"
+        ],
+        "title": "CopilotToolsResponse",
+        "type": "object"
+      },
       "DataLineageStep": {
         "additionalProperties": false,
         "description": "One non-destructive transformation stage linking raw archive to normalized parquet.",
@@ -7071,6 +7383,68 @@
         "summary": "Audit Verify",
         "tags": [
           "incidents"
+        ]
+      }
+    },
+    "/api/v1/copilot/query": {
+      "post": {
+        "operationId": "query_copilot",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopilotQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopilotQueryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Query Copilot",
+        "tags": [
+          "copilot"
+        ]
+      }
+    },
+    "/api/v1/copilot/tools": {
+      "get": {
+        "operationId": "list_copilot_tools",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopilotToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Copilot Tools",
+        "tags": [
+          "copilot"
         ]
       }
     },

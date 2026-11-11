@@ -117,6 +117,8 @@ MATRIX: list[tuple[str, str, dict[str, Any] | None, set[str]]] = [
     ("GET", "/api/v1/twin/model", None, VIEW_ROLES),
     ("POST", "/api/v1/twin/simulate", {}, VIEW_ROLES),
     ("POST", "/api/v1/optimization/compare", {}, VIEW_ROLES),
+    ("GET", "/api/v1/copilot/tools", None, VIEW_ROLES),
+    ("POST", "/api/v1/copilot/query", {}, VIEW_ROLES),
     ("GET", "/api/v1/ml/catalog", None, VIEW_ROLES),
     ("GET", "/api/v1/ml/benchmarks/ai4i2020", None, VIEW_ROLES),
     ("POST", "/api/v1/ml/predict", {}, VIEW_ROLES),

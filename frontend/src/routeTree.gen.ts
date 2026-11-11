@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnomalyRouteImport } from './routes/anomaly'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as CopilotRouteImport } from './routes/copilot'
 import { Route as KnowledgeRouteImport } from './routes/knowledge'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as TwinRouteImport } from './routes/twin'
@@ -34,6 +35,11 @@ const AnomalyRoute = AnomalyRouteImport.update({
 const AuditRoute = AuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CopilotRoute = CopilotRouteImport.update({
+  id: '/copilot',
+  path: '/copilot',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KnowledgeRoute = KnowledgeRouteImport.update({
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
   '/audit': typeof AuditRoute
+  '/copilot': typeof CopilotRoute
   '/knowledge': typeof KnowledgeRoute
   '/models': typeof ModelsRoute
   '/twin': typeof TwinRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
   '/audit': typeof AuditRoute
+  '/copilot': typeof CopilotRoute
   '/knowledge': typeof KnowledgeRoute
   '/models': typeof ModelsRoute
   '/twin': typeof TwinRoute
@@ -108,6 +116,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/anomaly': typeof AnomalyRoute
   '/audit': typeof AuditRoute
+  '/copilot': typeof CopilotRoute
   '/knowledge': typeof KnowledgeRoute
   '/models': typeof ModelsRoute
   '/twin': typeof TwinRoute
@@ -123,6 +132,7 @@ export interface FileRouteTypes {
     | '/'
     | '/anomaly'
     | '/audit'
+    | '/copilot'
     | '/knowledge'
     | '/models'
     | '/twin'
@@ -136,6 +146,7 @@ export interface FileRouteTypes {
     | '/'
     | '/anomaly'
     | '/audit'
+    | '/copilot'
     | '/knowledge'
     | '/models'
     | '/twin'
@@ -149,6 +160,7 @@ export interface FileRouteTypes {
     | '/'
     | '/anomaly'
     | '/audit'
+    | '/copilot'
     | '/knowledge'
     | '/models'
     | '/twin'
@@ -163,6 +175,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnomalyRoute: typeof AnomalyRoute
   AuditRoute: typeof AuditRoute
+  CopilotRoute: typeof CopilotRoute
   KnowledgeRoute: typeof KnowledgeRoute
   ModelsRoute: typeof ModelsRoute
   TwinRoute: typeof TwinRoute
@@ -194,6 +207,13 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/copilot': {
+      id: '/copilot'
+      path: '/copilot'
+      fullPath: '/copilot'
+      preLoaderRoute: typeof CopilotRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/knowledge': {
@@ -259,6 +279,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnomalyRoute: AnomalyRoute,
   AuditRoute: AuditRoute,
+  CopilotRoute: CopilotRoute,
   KnowledgeRoute: KnowledgeRoute,
   ModelsRoute: ModelsRoute,
   TwinRoute: TwinRoute,
