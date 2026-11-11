@@ -45,7 +45,54 @@ describe('CopilotWorkspace', () => {
     expect(await screen.findByText(/do not hold the/)).toBeInTheDocument()
   })
 
-  it('validates form inputs, submits grounded query, and renders citations + safety refusals', async () => {
+  it('displays error alerts for failed permission check, tool catalog, and query requests', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: 'Auth error' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    )
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { unmount } = render(
+      <QueryClientProvider client={client}>
+        <CopilotWorkspace />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Could not verify copilot permissions/,
+    )
+    unmount()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (String(url).startsWith('/api/v1/me')) return Promise.resolve(mockMeOk())
+        return Promise.resolve(
+          new Response(JSON.stringify({ detail: 'Copilot backend offline' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    const client2 = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client2}>
+        <CopilotWorkspace />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByText(/Could not load Copilot tool catalog/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Ask Copilot' }))
+    expect(await screen.findByText(/Copilot query failed/)).toBeInTheDocument()
+  })
+
+  it('validates form inputs, submits valid incident hex, and renders citations + safety refusals', async () => {
+    const seenPayloads: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -70,13 +117,15 @@ describe('CopilotWorkspace', () => {
             ),
           )
         }
-        const body = JSON.parse(String(init?.body ?? '{}'))
+        const raw = String(init?.body ?? '{}')
+        seenPayloads.push(raw)
+        const body = JSON.parse(raw)
         const isInjection = String(body.question).toLowerCase().includes('plc')
         return Promise.resolve(
           new Response(
             JSON.stringify({
               asset_id: 'metropt3-apu-1',
-              incident_id: null,
+              incident_id: body.incident_id ?? null,
               answer: isInjection
                 ? 'Blocked: strictly read-only.'
                 : 'Verified advisory briefing citing [C1].',
@@ -122,15 +171,37 @@ describe('CopilotWorkspace', () => {
 
     expect(await screen.findByText('search_docs')).toBeInTheDocument()
 
+    // Empty question check
     const qBox = screen.getByLabelText('Engineering question')
     await userEvent.clear(qBox)
     await userEvent.click(screen.getByRole('button', { name: 'Ask Copilot' }))
     expect(screen.getByRole('alert')).toHaveTextContent(/non-empty engineering question/)
+    expect(qBox).toHaveAttribute('aria-invalid', 'true')
 
+    // Invalid incident hex sets aria-invalid on incident field
     await userEvent.type(qBox, 'Summarize leak diagnostics')
+    const incBox = screen.getByLabelText('Optional incident ID (32-char hex)')
+    await userEvent.type(incBox, 'bad-hex')
+    await userEvent.click(screen.getByRole('button', { name: 'Ask Copilot' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/32-character lowercase hex/)
+    expect(incBox).toHaveAttribute('aria-invalid', 'true')
+
+    // Out-of-range leak rate sets aria-invalid cleanly
+    await userEvent.clear(incBox)
+    const validHex = 'a'.repeat(32)
+    await userEvent.type(incBox, validHex)
+    const leakBox = screen.getByLabelText('Simulated leak rate (bar/min)')
+    await userEvent.clear(leakBox)
+    await userEvent.type(leakBox, '9.5')
+    await userEvent.click(screen.getByRole('button', { name: 'Ask Copilot' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/between 0 and 1.5/)
+    expect(leakBox).toHaveAttribute('aria-invalid', 'true')
+
+    await userEvent.clear(leakBox)
+    await userEvent.type(leakBox, '0.4')
     await userEvent.click(screen.getByRole('button', { name: 'Ask Copilot' }))
     expect(await screen.findByText(/Grounded citations \(1\)/)).toBeInTheDocument()
-    expect(screen.getByText(/\[C1\] M2-WP4 Physical RCA/)).toBeInTheDocument()
+    expect(seenPayloads.some((p) => p.includes(validHex))).toBe(true)
 
     // Red-team refusal rendering
     await userEvent.clear(qBox)

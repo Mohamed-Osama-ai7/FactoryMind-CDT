@@ -10,7 +10,7 @@ Every tool enforces principal permissions + tenant/asset grants before execution
 
 - `get_event_evidence` & `get_rca_hypotheses`: `Permission.INCIDENT_READ` + `IncidentRepo` tenant/asset scoping.
 - `search_docs`: `Permission.ASSET_READ` + partition-isolated `HybridRagIndex`.
-- `query_kg`: `Permission.ASSET_READ` + typed `IndustrialKnowledgeGraph` (causal vs correlational distinction).
+- `query_kg`: `Permission.ASSET_READ` + typed `IndustrialKnowledgeGraph` (depth=3 traversing physical, causal hypothesis, and correlational edges).
 - `simulate_scenario`: `Permission.ASSET_READ` (`metropt3-apu-1` APU digital twin, `simulated_projection`).
 - `compare_options`: `Permission.ASSET_READ` (`repair_now` vs `schedule` vs `monitor` under safety constraints).
 

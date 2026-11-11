@@ -4,6 +4,7 @@ import { useListCopilotTools, useQueryCopilot } from '../../api/generated/copilo
 import { useMe } from '../../api/generated/incidents/incidents'
 
 const INCIDENT_HEX_RE = /^[a-f0-9]{32}$/
+type ValidationField = 'question' | 'incidentId' | 'leakRate' | 'horizonHours'
 
 function parseFiniteBounded(
   raw: string,
@@ -34,7 +35,10 @@ export function CopilotWorkspace() {
   const [incidentId, setIncidentId] = useState('')
   const [leakRate, setLeakRate] = useState('0.35')
   const [horizonHours, setHorizonHours] = useState('8')
-  const [validationError, setValidationError] = useState<string | null>(null)
+  const [validation, setValidation] = useState<{
+    field: ValidationField
+    message: string
+  } | null>(null)
 
   const toolsQuery = useListCopilotTools({ query: { enabled: canRead } })
   const mutation = useQueryCopilot()
@@ -73,26 +77,29 @@ export function CopilotWorkspace() {
     e.preventDefault()
     const cleanQ = question.trim()
     if (!cleanQ) {
-      setValidationError('Enter a non-empty engineering question.')
+      setValidation({ field: 'question', message: 'Enter a non-empty engineering question.' })
       return
     }
     const cleanInc = incidentId.trim()
     if (cleanInc && !INCIDENT_HEX_RE.test(cleanInc)) {
-      setValidationError('Incident ID must be blank or a 32-character lowercase hex identifier.')
+      setValidation({
+        field: 'incidentId',
+        message: 'Incident ID must be blank or a 32-character lowercase hex identifier.',
+      })
       return
     }
     const leak = parseFiniteBounded(leakRate, 'Leak loss rate (bar/min)', 0, 1.5)
     if (leak.value === null) {
-      setValidationError(leak.error)
+      setValidation({ field: 'leakRate', message: leak.error })
       return
     }
     const horizon = parseFiniteBounded(horizonHours, 'Horizon (hours)', 1, 72)
     if (horizon.value === null) {
-      setValidationError(horizon.error)
+      setValidation({ field: 'horizonHours', message: horizon.error })
       return
     }
 
-    setValidationError(null)
+    setValidation(null)
     mutation.mutate({
       data: {
         question: cleanQ,
@@ -128,7 +135,7 @@ export function CopilotWorkspace() {
         <form
           noValidate
           onSubmit={onSubmit}
-          aria-describedby={validationError ? errorAlertId : undefined}
+          aria-describedby={validation ? errorAlertId : undefined}
           className="flex flex-col gap-3 rounded-lg border border-border bg-panel p-4 text-xs"
         >
           <label htmlFor={`${idPrefix}-q`} className="flex flex-col gap-1">
@@ -138,10 +145,10 @@ export function CopilotWorkspace() {
               rows={2}
               maxLength={1000}
               value={question}
-              aria-invalid={validationError ? true : undefined}
+              aria-invalid={validation?.field === 'question' ? true : undefined}
               onChange={(e) => {
                 setQuestion(e.target.value)
-                if (validationError) setValidationError(null)
+                if (validation) setValidation(null)
               }}
               className="rounded border border-border bg-surface p-2 text-ink"
             />
@@ -154,9 +161,10 @@ export function CopilotWorkspace() {
                 id={`${idPrefix}-inc`}
                 type="text"
                 value={incidentId}
+                aria-invalid={validation?.field === 'incidentId' ? true : undefined}
                 onChange={(e) => {
                   setIncidentId(e.target.value)
-                  if (validationError) setValidationError(null)
+                  if (validation) setValidation(null)
                 }}
                 placeholder="Leave blank for asset overview"
                 className="rounded border border-border bg-surface px-2 py-1.5 font-mono text-ink"
@@ -169,9 +177,10 @@ export function CopilotWorkspace() {
                 type="number"
                 step="any"
                 value={leakRate}
+                aria-invalid={validation?.field === 'leakRate' ? true : undefined}
                 onChange={(e) => {
                   setLeakRate(e.target.value)
-                  if (validationError) setValidationError(null)
+                  if (validation) setValidation(null)
                 }}
                 className="rounded border border-border bg-surface px-2 py-1.5 text-ink"
               />
@@ -183,9 +192,10 @@ export function CopilotWorkspace() {
                 type="number"
                 step="any"
                 value={horizonHours}
+                aria-invalid={validation?.field === 'horizonHours' ? true : undefined}
                 onChange={(e) => {
                   setHorizonHours(e.target.value)
-                  if (validationError) setValidationError(null)
+                  if (validation) setValidation(null)
                 }}
                 className="rounded border border-border bg-surface px-2 py-1.5 text-ink"
               />
@@ -205,9 +215,9 @@ export function CopilotWorkspace() {
             </span>
           </div>
 
-          {validationError && (
+          {validation && (
             <p id={errorAlertId} role="alert" className="text-critical">
-              {validationError}
+              {validation.message}
             </p>
           )}
         </form>
@@ -228,6 +238,16 @@ export function CopilotWorkspace() {
                 {reply.safety_refusal_triggered && (
                   <span className="rounded border border-critical/60 bg-critical/10 px-2 py-0.5 text-critical">
                     SAFETY REFUSAL ({(reply.red_team_flags ?? []).join(', ')})
+                  </span>
+                )}
+                {reply.abstained && !reply.safety_refusal_triggered && (
+                  <span className="rounded border border-warn/60 bg-warn/10 px-2 py-0.5 text-warn">
+                    ABSTAINED ({reply.abstention_reason ?? 'insufficient_evidence'})
+                  </span>
+                )}
+                {!reply.safety_refusal_triggered && (reply.red_team_flags ?? []).length > 0 && (
+                  <span className="rounded border border-warn/60 bg-warn/10 px-2 py-0.5 text-warn">
+                    FLAGS: {(reply.red_team_flags ?? []).join(', ')}
                   </span>
                 )}
               </div>
