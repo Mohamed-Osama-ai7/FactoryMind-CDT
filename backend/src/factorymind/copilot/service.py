@@ -13,10 +13,14 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
-from typing import Final, Literal, Protocol
+from typing import Final, Literal, Protocol, cast
 
+import pandas as pd
 from sqlalchemy.orm import Session
 
+from factorymind.anomaly.evidence_package import build_event_evidence_package
+from factorymind.anomaly.rca import analyze_event_evidence
+from factorymind.anomaly.service import AnomalyService, DataUnavailableError, ModelUnavailableError
 from factorymind.auth.principal import Permission, Principal
 from factorymind.contracts.copilot import (
     CopilotCitation,
@@ -27,15 +31,21 @@ from factorymind.contracts.copilot import (
     CopilotToolSpec,
 )
 from factorymind.contracts.digital_twin import TwinSimulationRequest
+from factorymind.contracts.events import (
+    EventEvidencePackage,
+    HumanObservationCategory,
+    HumanObservationOut,
+)
 from factorymind.contracts.optimization import (
     EconomicAssumptions,
     MaintenanceDecisionRequest,
 )
-from factorymind.contracts.rca import RcaHypothesisCategory
+from factorymind.contracts.rca import RcaAssessment, RcaHypothesisCategory
+from factorymind.db.models import EvidenceRow, HumanObservation, Incident
 from factorymind.db.repository import IncidentRepo
 from factorymind.decision.optimizer import compare_maintenance_options
 from factorymind.knowledge.kg import EPISTEMIC_LEGEND
-from factorymind.knowledge.rag import HybridRagIndex
+from factorymind.knowledge.rag import HybridRagIndex, extract_content_tokens
 from factorymind.twin.physics import CompressorReservoirTwin
 
 _ZERO_WIDTH_RE: Final = re.compile(r"[\u200b-\u200f\ufeff\x00-\x1f]")
@@ -121,6 +131,130 @@ _ASSET_TOOLS: Final[tuple[CopilotToolName, ...]] = (
     "compare_options",
 )
 
+# Domain/decision vocabulary used strictly when an authorized incident_id is queried so valid
+# diagnostic/maintenance questions (e.g. "What caused this incident and should we repair now?")
+# pass even if exact phrasing misses static docs, while unrelated questions still abstain.
+_INCIDENT_DECISION_TERMS: Final[frozenset[str]] = frozenset(
+    {
+        "abstain",
+        "abstained",
+        "abstention",
+        "alarm",
+        "alarms",
+        "alternative",
+        "alternatives",
+        "anomalous",
+        "anomaly",
+        "apu",
+        "baseline",
+        "cause",
+        "caused",
+        "causes",
+        "comp",
+        "compare",
+        "comparison",
+        "compressor",
+        "contradiction",
+        "current",
+        "decision",
+        "demand",
+        "diagnose",
+        "diagnosis",
+        "diagnostic",
+        "diagnostics",
+        "duty",
+        "dv_eletric",
+        "event",
+        "evidence",
+        "fault",
+        "faults",
+        "failure",
+        "freeze",
+        "frozen",
+        "horizon",
+        "hypotheses",
+        "hypothesis",
+        "incident",
+        "incidents",
+        "insufficient",
+        "leak",
+        "leakage",
+        "lps",
+        "maintenance",
+        "monitor",
+        "monitoring",
+        "motor_current",
+        "oil",
+        "oil_temperature",
+        "option",
+        "options",
+        "pca_spe",
+        "peak",
+        "pressure",
+        "rca",
+        "recommend",
+        "recommendation",
+        "recommended",
+        "repair",
+        "reservoirs",
+        "root",
+        "schedule",
+        "scheduled",
+        "score",
+        "sensor",
+        "sensors",
+        "simulate",
+        "simulated",
+        "simulation",
+        "status",
+        "telemetry",
+        "tp2",
+        "tp3",
+        "twin",
+        "uncertainty",
+        "valve",
+        "valves",
+        "verify",
+        "warning",
+        "warnings",
+    }
+)
+
+
+def _to_observation_out(obs: HumanObservation) -> HumanObservationOut:
+    return HumanObservationOut(
+        id=obs.id,
+        incident_id=obs.incident_id,
+        asset_id=obs.asset_id,
+        actor_id=obs.actor_id,
+        category=cast(HumanObservationCategory, obs.category),
+        observed_at=obs.observed_at,
+        note=obs.note,
+        created_at=obs.created_at,
+    )
+
+
+def _extract_measured_features(
+    ev_rows: list[EvidenceRow],
+) -> tuple[float | None, float | None, float | None, list[str]]:
+    measured_duty: float | None = None
+    measured_current: float | None = None
+    measured_oil: float | None = None
+    summary_parts: list[str] = []
+    for row in ev_rows:
+        val = float(row.value)
+        if len(summary_parts) < 5 and math.isfinite(val):
+            summary_parts.append(f"{row.feature}={val:.3f}")
+        if row.feature == "load_duty" or (
+            row.feature == "DV_eletric_mean" and measured_duty is None
+        ):
+            measured_duty = _finite_in_bounds(val, 0.0, 1.0)
+        elif row.feature == "Motor_current_mean":
+            measured_current = _finite_in_bounds(val, 0.0, 20.0)
+        elif row.feature in ("Oil_temperature_mean", "Oil_temperature_max"):
+            measured_oil = _finite_in_bounds(val, -20.0, 150.0)
+    return measured_duty, measured_current, measured_oil, summary_parts
+
 
 class LlmAdapter(Protocol):
     """Optional external LLM adapter protocol requiring strict output grounding checks."""
@@ -158,7 +292,11 @@ def _finite_in_bounds(value: float | None, lo: float, hi: float) -> float | None
 
 
 class ControlledCopilot:
-    """Permission-scoped read-only orchestrator across RAG, KG, Twin, Evidence & Optimizer."""
+    """Permission-scoped read-only orchestrator across RAG, KG, Twin, Evidence & Optimizer.
+
+    Synthesizes answers deterministically from retrieved citations and real engine outputs unless an
+    in-process ``llm_adapter`` callback is explicitly supplied and passes output verification.
+    """
 
     def __init__(
         self,
@@ -166,10 +304,18 @@ class ControlledCopilot:
         knowledge_index: HybridRagIndex,
         twin: CompressorReservoirTwin,
         llm_adapter: LlmAdapter | Callable[[str, str], str] | None = None,
+        anomaly_service: AnomalyService | None = None,
+        anomaly_service_factory: Callable[[str], AnomalyService | None] | None = None,
+        anomaly_asset_id: str = "metropt3-apu-1",
+        rca_fn: Callable[[EventEvidencePackage], RcaAssessment] = analyze_event_evidence,
     ) -> None:
         self._knowledge = knowledge_index
         self._twin = twin
         self._llm = llm_adapter
+        self._anomaly_service = anomaly_service
+        self._anomaly_service_factory = anomaly_service_factory
+        self._anomaly_asset_id = anomaly_asset_id
+        self._rca_fn = rca_fn
 
     def tool_specs(self, principal: Principal) -> list[CopilotToolSpec]:
         return [
@@ -189,6 +335,108 @@ class ControlledCopilot:
         asset_id: str,
     ) -> bool:
         return principal.can(perm) and principal.can_access_asset(asset_id)
+
+    def _resolve_anomaly_service(self, asset_id: str) -> AnomalyService | None:
+        if self._anomaly_service_factory is not None:
+            return self._anomaly_service_factory(asset_id)
+        if self._anomaly_service is not None and asset_id == self._anomaly_asset_id:
+            return self._anomaly_service
+        return None
+
+    def _evaluate_incident_rca(
+        self,
+        inc: Incident,
+        obs_rows: list[HumanObservation],
+    ) -> RcaAssessment | None:
+        service = self._resolve_anomaly_service(inc.asset_id)
+        if service is None or inc.episode_end <= inc.episode_start:
+            return None
+        obs_out = [_to_observation_out(obs) for obs in obs_rows]
+        try:
+            pkg = build_event_evidence_package(
+                service,
+                asset_id=inc.asset_id,
+                event_start=pd.Timestamp(inc.episode_start),
+                event_end=pd.Timestamp(inc.episode_end),
+                raised_at=pd.Timestamp(inc.raised_at),
+                incident_id=inc.id,
+                human_observations=obs_out,
+            )
+        except (DataUnavailableError, ModelUnavailableError, ValueError):
+            return None
+        return self._rca_fn(pkg)
+
+    def _question_supported(
+        self,
+        req: CopilotQueryRequest,
+        *,
+        allowed_assets: set[str],
+        asset_allowed: bool,
+        has_doc_hits: bool,
+        inc: Incident | None,
+        ev_rows: list[EvidenceRow],
+    ) -> bool:
+        q_tokens = list(dict.fromkeys(extract_content_tokens(req.question)))
+        if not q_tokens:
+            return False
+        if has_doc_hits:
+            return True
+        if inc is None:
+            return False
+        domain_terms = set(_INCIDENT_DECISION_TERMS)
+        domain_terms.update(extract_content_tokens(inc.detector))
+        for row in ev_rows:
+            domain_terms.update(extract_content_tokens(row.feature))
+        if asset_allowed:
+            try:
+                sub = self._knowledge.kg.traverse(
+                    allowed_asset_ids=allowed_assets,
+                    center_node_id=f"asset:{req.asset_id}",
+                    depth=2,
+                )
+                for node in sub.nodes:
+                    domain_terms.update(extract_content_tokens(node.label))
+            except KeyError:
+                pass
+        matched = sum(1 for tok in q_tokens if tok in domain_terms)
+        return matched >= 1 and (matched / len(q_tokens)) >= 0.50
+
+    def _twin_request_for_hypothesis(
+        self,
+        req: CopilotQueryRequest,
+        inferred_hypothesis: RcaHypothesisCategory | None,
+        measured_oil: float | None,
+    ) -> TwinSimulationRequest:
+        horizon = min(240.0, req.planning_horizon_hours * 60.0)
+        init_oil = max(20.0, min(115.0, measured_oil)) if measured_oil is not None else 62.0
+        if inferred_hypothesis in (
+            "sensor_malfunction",
+            "telemetry_inconsistency",
+            "insufficient_evidence",
+        ):
+            return TwinSimulationRequest(
+                asset_id=req.asset_id,
+                scenario="baseline",
+                horizon_minutes=horizon,
+                initial_oil_temp_c=init_oil,
+                leak_rate_bar_per_min=0.0,
+            )
+        if inferred_hypothesis == "abnormal_high_demand":
+            return TwinSimulationRequest(
+                asset_id=req.asset_id,
+                scenario="leak",
+                horizon_minutes=horizon,
+                initial_oil_temp_c=init_oil,
+                leak_rate_bar_per_min=0.0,
+                demand_factor=2.2,
+            )
+        return TwinSimulationRequest(
+            asset_id=req.asset_id,
+            scenario="leak" if req.leak_rate_bar_per_min > 0 else "baseline",
+            horizon_minutes=horizon,
+            initial_oil_temp_c=init_oil,
+            leak_rate_bar_per_min=req.leak_rate_bar_per_min,
+        )
 
     def run_query(
         self,
@@ -237,10 +485,141 @@ class ControlledCopilot:
         measured_current: float | None = None
         measured_oil: float | None = None
         inferred_hypothesis: RcaHypothesisCategory | None = None
+        rca_abstained = False
+        rca_abstention_reason: str | None = None
+
         has_asset_grant = principal.can_access_asset(req.asset_id)
+        inc_allowed = principal.can(Permission.INCIDENT_READ) and has_asset_grant
+        asset_allowed = principal.can(Permission.ASSET_READ) and has_asset_grant
+        allowed_assets = {req.asset_id} if asset_allowed else set()
+
+        # Load authorized incident first so nonexistent/cross-tenant incident_ids fail 404
+        # regardless of question phrasing.
+        inc: Incident | None = None
+        ev_rows: list[EvidenceRow] = []
+        obs_rows: list[HumanObservation] = []
+        if inc_allowed and req.incident_id is not None and session_factory is not None:
+            with session_factory() as session:
+                repo = IncidentRepo(session, principal)
+                inc = repo.get(req.incident_id)
+                if inc is None or inc.asset_id != req.asset_id:
+                    raise KeyError(req.incident_id)
+                ev_rows = repo.evidence(inc)
+                obs_rows = repo.observations(inc)
+
+        rag_res = (
+            self._knowledge.search(
+                req.question,
+                tenant_id=principal.tenant_id,
+                allowed_asset_ids=allowed_assets,
+                top_k=3,
+                mode="hybrid_rrf",
+            )
+            if asset_allowed
+            else None
+        )
+        has_doc_hits = rag_res is not None and bool(rag_res.items)
+
+        # Gate downstream synthesis/KG/Twin/Optimizer tools when retrieval is empty/irrelevant and
+        # no authorized incident diagnosis grounds the question.
+        question_supported = self._question_supported(
+            req,
+            allowed_assets=allowed_assets,
+            asset_allowed=asset_allowed,
+            has_doc_hits=has_doc_hits,
+            inc=inc,
+            ev_rows=ev_rows,
+        )
+        if not question_supported:
+            for t_name in _INCIDENT_TOOLS:
+                if not inc_allowed:
+                    invocations.append(
+                        CopilotToolInvocation(
+                            tool=t_name,
+                            permitted=False,
+                            status="denied_permission",
+                            record_count=0,
+                            summary=(
+                                f"Denied: caller lacks '{Permission.INCIDENT_READ.value}' or grant."
+                            ),
+                        )
+                    )
+                else:
+                    invocations.append(
+                        CopilotToolInvocation(
+                            tool=t_name,
+                            permitted=True,
+                            status="skipped",
+                            record_count=0,
+                            summary=(
+                                "No incident_id selected for this query."
+                                if req.incident_id is None or session_factory is None
+                                else "Skipped: question is out of scope for incident evidence."
+                            ),
+                        )
+                    )
+            if not asset_allowed:
+                for t_name in _ASSET_TOOLS:
+                    invocations.append(
+                        CopilotToolInvocation(
+                            tool=t_name,
+                            permitted=False,
+                            status="denied_permission",
+                            record_count=0,
+                            summary=(
+                                f"Denied: caller lacks '{Permission.ASSET_READ.value}' or grant."
+                            ),
+                        )
+                    )
+            else:
+                invocations.append(
+                    CopilotToolInvocation(
+                        tool="search_docs",
+                        permitted=True,
+                        status="executed",
+                        record_count=0,
+                        summary="Retrieved 0 doc chunks meeting minimum relevance threshold.",
+                    )
+                )
+                for t_name in ("query_kg", "simulate_scenario", "compare_options"):
+                    invocations.append(
+                        CopilotToolInvocation(
+                            tool=t_name,
+                            permitted=True,
+                            status="skipped",
+                            record_count=0,
+                            summary=(
+                                "Skipped: no relevant corpus or incident grounding for question."
+                            ),
+                        )
+                    )
+            no_auth = not inc_allowed and not asset_allowed
+            return CopilotQueryResponse(
+                asset_id=req.asset_id,
+                incident_id=req.incident_id,
+                answer=(
+                    "Insufficient authorized evidence available to synthesize a grounded response "
+                    "for the requested scope."
+                    if no_auth or (not asset_allowed and inc is None)
+                    else f"Abstained for '{req.asset_id}': no relevant authorized documentation "
+                    "or incident evidence supports answering this question."
+                ),
+                abstained=True,
+                abstention_reason=(
+                    "no_authorized_citations_available"
+                    if no_auth or (not asset_allowed and inc is None)
+                    else "insufficient_relevant_evidence"
+                ),
+                synthesis_mode="deterministic_grounded",
+                red_team_flags=red_flags,
+                tools_executed=invocations,
+                citations=[],
+                causal_vs_correlation_note=(
+                    "Correlation edges and out-of-scope prompts never ground industrial claims."
+                ),
+            )
 
         # Step 2: Execute get_event_evidence & get_rca_hypotheses (Permission.INCIDENT_READ)
-        inc_allowed = principal.can(Permission.INCIDENT_READ) and has_asset_grant
         if not inc_allowed:
             for t_name in _INCIDENT_TOOLS:
                 invocations.append(
@@ -254,7 +633,7 @@ class ControlledCopilot:
                         ),
                     )
                 )
-        elif req.incident_id is None or session_factory is None:
+        elif inc is None:
             for t_name in _INCIDENT_TOOLS:
                 invocations.append(
                     CopilotToolInvocation(
@@ -266,28 +645,9 @@ class ControlledCopilot:
                     )
                 )
         else:
-            with session_factory() as session:
-                repo = IncidentRepo(session, principal)
-                inc = repo.get(req.incident_id)
-                if inc is None or inc.asset_id != req.asset_id:
-                    raise KeyError(req.incident_id)
-                ev_rows = repo.evidence(inc)
-                obs_rows = repo.observations(inc)
-
-            ev_summary_parts = [
-                f"{r.feature}={r.value:.3f}" for r in ev_rows[:5] if math.isfinite(float(r.value))
-            ]
-            for r in ev_rows:
-                val = float(r.value)
-                if r.feature == "load_duty" or (
-                    r.feature == "DV_eletric_mean" and measured_duty is None
-                ):
-                    measured_duty = _finite_in_bounds(val, 0.0, 1.0)
-                elif r.feature == "Motor_current_mean":
-                    measured_current = _finite_in_bounds(val, 0.0, 20.0)
-                elif r.feature in ("Oil_temperature_mean", "Oil_temperature_max"):
-                    measured_oil = _finite_in_bounds(val, -20.0, 150.0)
-
+            measured_duty, measured_current, measured_oil, ev_summary_parts = (
+                _extract_measured_features(ev_rows)
+            )
             cid_ev = f"C{len(citations) + 1}"
             citations.append(
                 CopilotCitation(
@@ -312,39 +672,72 @@ class ControlledCopilot:
                 )
             )
 
-            inferred_hypothesis = (
-                "air_leakage"
-                if (measured_duty is not None and measured_duty >= 0.6)
-                or inc.detector == "duty_rule"
-                else "insufficient_evidence"
-            )
-            cid_rca = f"C{len(citations) + 1}"
-            citations.append(
-                CopilotCitation(
-                    citation_id=cid_rca,
-                    source_type="rca",
-                    title=f"Diagnostic hypothesis context ({inferred_hypothesis})",
-                    provenance_origin="statistical_inference",
-                    detail=(
-                        f"Detector '{inc.detector}' flagged peak {inc.peak_score:.3f}; "
-                        f"competing high-demand or sensor explanations require field confirmation."
-                    ),
+            rca = self._evaluate_incident_rca(inc, obs_rows)
+            if rca is None:
+                inferred_hypothesis = "insufficient_evidence"
+                rca_abstained = True
+                rca_abstention_reason = "rca_telemetry_unavailable_insufficient_evidence"
+                invocations.append(
+                    CopilotToolInvocation(
+                        tool="get_rca_hypotheses",
+                        permitted=True,
+                        status="unavailable",
+                        record_count=0,
+                        summary=(
+                            "Full telemetry/model unavailable for EventEvidencePackage RCA; "
+                            "optimizer hypothesis defaulted to 'insufficient_evidence'."
+                        ),
+                    )
                 )
-            )
-            invocations.append(
-                CopilotToolInvocation(
-                    tool="get_rca_hypotheses",
-                    permitted=True,
-                    status="executed",
-                    record_count=1,
-                    summary=f"Assessed leading candidate '{inferred_hypothesis}' with caveats.",
+            else:
+                inferred_hypothesis = rca.primary_category
+                rca_abstained = rca.abstained
+                rca_abstention_reason = (
+                    rca.abstention_reason or "rca_insufficient_evidence" if rca.abstained else None
                 )
-            )
+                top_hyp = rca.ranked_hypotheses[0] if rca.ranked_hypotheses else None
+                alts = [
+                    f"{h.category} (score={h.support_score:.2f})"
+                    for h in rca.ranked_hypotheses[1:]
+                    if h.relative_support in ("primary", "plausible_alternative")
+                ]
+                score_txt = (
+                    f"support_score={top_hyp.support_score:.2f}, "
+                    f"confidence={top_hyp.confidence_band}"
+                    if top_hyp is not None
+                    else "no_ranked_hypotheses"
+                )
+                alt_txt = f" Competing explanations: {', '.join(alts)}." if alts else ""
+                citations.append(
+                    CopilotCitation(
+                        citation_id=f"C{len(citations) + 1}",
+                        source_type="rca",
+                        title=f"RCA engine assessment ({rca.primary_category})",
+                        provenance_origin="statistical_inference",
+                        detail=(
+                            f"{rca.primary_title} ({score_txt}, quality={rca.quality_status}, "
+                            f"abstained={rca.abstained}). {rca.summary}{alt_txt} "
+                            f"Uncertainty: {rca.uncertainty_note} "
+                            "Rule-scored evidence-consistency ranking only; not proven causal "
+                            "inference."
+                        ),
+                    )
+                )
+                invocations.append(
+                    CopilotToolInvocation(
+                        tool="get_rca_hypotheses",
+                        permitted=True,
+                        status="executed",
+                        record_count=len(rca.ranked_hypotheses),
+                        summary=(
+                            f"RCA engine evaluated {len(rca.ranked_hypotheses)} hypotheses -> "
+                            f"'{rca.primary_category}' ({score_txt}, abstained={rca.abstained})."
+                        ),
+                    )
+                )
 
         # Step 3: Asset-scoped tools (Permission.ASSET_READ)
-        asset_allowed = principal.can(Permission.ASSET_READ) and has_asset_grant
-        allowed_assets = {req.asset_id} if asset_allowed else set()
-        if not asset_allowed:
+        if not asset_allowed or rag_res is None:
             for t_name in _ASSET_TOOLS:
                 invocations.append(
                     CopilotToolInvocation(
@@ -356,13 +749,6 @@ class ControlledCopilot:
                     )
                 )
         else:
-            rag_res = self._knowledge.search(
-                req.question,
-                tenant_id=principal.tenant_id,
-                allowed_asset_ids=allowed_assets,
-                top_k=3,
-                mode="hybrid_rrf",
-            )
             for hit in rag_res.items:
                 citations.append(
                     CopilotCitation(
@@ -443,12 +829,7 @@ class ControlledCopilot:
                     )
             else:
                 sim_res = self._twin.simulate(
-                    TwinSimulationRequest(
-                        asset_id=req.asset_id,
-                        scenario="leak" if req.leak_rate_bar_per_min > 0 else "baseline",
-                        horizon_minutes=min(240.0, req.planning_horizon_hours * 60.0),
-                        leak_rate_bar_per_min=req.leak_rate_bar_per_min,
-                    )
+                    self._twin_request_for_hypothesis(req, inferred_hypothesis, measured_oil)
                 )
                 citations.append(
                     CopilotCitation(
@@ -488,13 +869,21 @@ class ControlledCopilot:
                     twin=self._twin,
                     incident_id=req.incident_id,
                 )
+                extra_warn = (
+                    f" {opt_res.uncertainty_warnings[-1]}"
+                    if len(opt_res.uncertainty_warnings) > 2
+                    else ""
+                )
                 citations.append(
                     CopilotCitation(
                         citation_id=f"C{len(citations) + 1}",
                         source_type="maintenance_optimizer",
                         title=f"Option Ranking (Advisory: {opt_res.recommended_option})",
                         provenance_origin="advisory_decision_comparison",
-                        detail=opt_res.recommendation_note,
+                        detail=(
+                            f"dominant_hypothesis={inferred_hypothesis or 'none_exploratory'}. "
+                            f"{opt_res.recommendation_note}{extra_warn}"
+                        ),
                     )
                 )
                 invocations.append(
@@ -503,18 +892,26 @@ class ControlledCopilot:
                         permitted=True,
                         status="executed",
                         record_count=len(opt_res.options),
-                        summary=f"Ranked options -> {opt_res.recommended_option}.",
+                        summary=(
+                            f"Ranked options (hypothesis={inferred_hypothesis or 'none'}) -> "
+                            f"{opt_res.recommended_option}."
+                        ),
                     )
                 )
 
         # Step 4: Citation-grounded deterministic synthesis + optional strict-verified LLM adapter
-        det_answer = self._synthesize_deterministic(req, citations, invocations)
+        det_answer = self._synthesize_deterministic(
+            req,
+            citations,
+            invocations,
+            rca_abstention=rca_abstention_reason if rca_abstained else None,
+        )
         synthesis_mode: Literal["deterministic_grounded", "configured_llm_verified"] = (
             "deterministic_grounded"
         )
         answer = det_answer
 
-        if req.use_llm_adapter and self._llm is not None and citations:
+        if req.use_llm_adapter and self._llm is not None and citations and not rca_abstained:
             sys_prompt = (
                 "You are FactoryMind CDT's read-only industrial engineering advisor. "
                 "Synthesize strictly from the numbered citations [C1..Cn]. Preserve causal vs "
@@ -575,7 +972,8 @@ class ControlledCopilot:
             asset_id=req.asset_id,
             incident_id=req.incident_id,
             answer=answer,
-            abstained=False,
+            abstained=rca_abstained,
+            abstention_reason=rca_abstention_reason if rca_abstained else None,
             synthesis_mode=synthesis_mode,
             safety_refusal_triggered=False,
             red_team_flags=red_flags,
@@ -583,7 +981,8 @@ class ControlledCopilot:
             citations=citations,
             causal_vs_correlation_note=(
                 "Correlational indicators (e.g., thermal oil rise) are separated from physical "
-                "mechanisms and simulated projections; verify hypotheses before maintenance."
+                "mechanisms and simulated projections; rule-scored RCA does not establish "
+                "proven causal inference without field verification."
             ),
         )
 
@@ -592,12 +991,19 @@ class ControlledCopilot:
         req: CopilotQueryRequest,
         citations: list[CopilotCitation],
         invocations: list[CopilotToolInvocation],
+        *,
+        rca_abstention: str | None = None,
     ) -> str:
         if not citations:
             return "Insufficient authorized sources to ground a response."
         lines = [
             f"Advisory briefing for '{req.asset_id}' addressing: {req.question}",
         ]
+        if rca_abstention is not None:
+            lines.append(
+                f"Abstention notice: root-cause attribution abstained ({rca_abstention}); "
+                "downstream comparisons default conservatively to 'insufficient_evidence'."
+            )
         for c in citations:
             lines.append(f"- [{c.citation_id}] {c.title} ({c.provenance_origin}): {c.detail}")
         denied = [i.tool for i in invocations if i.status == "denied_permission"]

@@ -4,22 +4,23 @@ M4-WP2 adds a permission-scoped, strictly read-only **Controlled Industrial Copi
 
 ---
 
-## 1. Read-Only Tool Orchestration & Strict Schemas (`factorymind.copilot.service`)
+## 1. Read-Only Tool Orchestration & Real RCA Integration (`factorymind.copilot.service`)
 
 Every tool enforces principal permissions + tenant/asset grants before execution and prohibits physical actuation:
 
-- `get_event_evidence` & `get_rca_hypotheses`: `Permission.INCIDENT_READ` + `IncidentRepo` tenant/asset scoping.
-- `search_docs`: `Permission.ASSET_READ` + partition-isolated `HybridRagIndex`.
+- `get_event_evidence` & `get_rca_hypotheses`: `Permission.INCIDENT_READ` + `IncidentRepo` tenant/asset scoping; `get_rca_hypotheses` builds a multi-phase `EventEvidencePackage` (incorporating recorded `HumanObservation` rows) and runs the real deterministic `analyze_event_evidence` RCA engine rather than fixed detector shortcuts. If full telemetry/model artifacts are unavailable (`status="unavailable"`), Copilot abstains conservatively and passes `"insufficient_evidence"` to downstream tools. Rule-scored consistency hypotheses are explicitly reported as heuristic evidence rankings, not proven causal inference.
+- `search_docs`: `Permission.ASSET_READ` + partition-isolated `HybridRagIndex` with stopword exclusion and IDF-weighted minimum relevance gating.
 - `query_kg`: `Permission.ASSET_READ` + typed `IndustrialKnowledgeGraph` (depth=3 traversing physical, causal hypothesis, and correlational edges).
-- `simulate_scenario`: `Permission.ASSET_READ` (`metropt3-apu-1` APU digital twin, `simulated_projection`).
-- `compare_options`: `Permission.ASSET_READ` (`repair_now` vs `schedule` vs `monitor` under safety constraints).
+- `simulate_scenario`: `Permission.ASSET_READ` (`metropt3-apu-1` APU digital twin, `simulated_projection`, shaped by the supported RCA hypothesis).
+- `compare_options`: `Permission.ASSET_READ` (`repair_now` vs `schedule` vs `monitor` receiving the real RCA `dominant_hypothesis`).
 
 ---
 
-## 2. Offline Citation Grounding & Red-Team Firewall
+## 2. Deterministic Grounded Synthesis, Abstention & Red-Team Firewall
 
+- **Relevance-Gated Abstention:** Out-of-scope, unsupported, or empty-retrieval queries (or incidents where the RCA engine abstains or telemetry is missing) set `abstained=True` with an explicit `abstention_reason`. KG, Digital Twin, and Optimizer tools are skipped rather than emitting unrelated filler citations for ungrounded questions.
 - **Input Red-Team Firewall (`detect_safety_or_injection_risk`):** Immediately refuses PLC write / valve actuation commands and prompt-injection attempts (`safety_refusal_triggered=True`, `abstained=True`, all tools skipped).
-- **Prompt Sanitization & Output Verification:** Strips suspicious instruction directives from corpus/user text before optional LLM invocation and falls back deterministically (`synthesis_mode="deterministic_grounded"`) if an external LLM output omits verified citations `[C1..Cn]` or emits unsafe actuation phrasing.
+- **Deterministic Grounded Synthesizer:** The deployed API always runs deterministic grounded synthesis (`synthesis_mode="deterministic_grounded"`, `llm_adapter=None`); no external LLM provider integration is implemented. An in-Python `LlmAdapter` callback protocol hook exists strictly with input/snippet directive redaction and citation-subset fallback (`[C1..Cn]`).
 
 ---
 

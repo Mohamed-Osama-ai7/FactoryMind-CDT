@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
+import pandas as pd
+
+from factorymind.anomaly.service import AnomalyService
 from factorymind.auth.principal import Principal, Role
 from factorymind.contracts.copilot import CopilotQueryRequest
+from factorymind.contracts.events import EventEvidencePackage
 from factorymind.contracts.knowledge import KnowledgeDocumentChunk
+from factorymind.contracts.rca import (
+    RankedHypothesis,
+    RcaAssessment,
+    VerificationStep,
+)
 from factorymind.copilot.service import ControlledCopilot
+from factorymind.data import metropt3
 from factorymind.db.repository import IncidentRepo, NewEvidence
+from factorymind.db.session import Database
 from factorymind.knowledge.corpus import build_verified_corpus
 from factorymind.knowledge.rag import HybridRagIndex
 from factorymind.twin.physics import CompressorReservoirTwin
 from tests.auth_helpers import ASSET, AuthKit, make_client
+from tests.test_evidence_foundation import _make_wp_a_service
 
 
 def _make_copilot(
@@ -191,9 +204,14 @@ def test_copilot_red_team_evasions_indirect_injection_and_llm_grounding() -> Non
         assert expected_flag in fb.red_team_flags
 
 
-def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(kit: AuthKit) -> None:
-    client = make_client(kit)
+def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(
+    kit: AuthKit,
+    anomaly_service: AnomalyService,
+) -> None:
+    # 1. With real AnomalyService, an actual detected incident executes all 6 tools via real RCA
+    client = make_client(kit, anomaly_service)
     viewer = kit.headers(roles=["viewer"], assets=[ASSET])
+    eng = kit.headers(roles=["engineer"], assets=[ASSET])
 
     client.app.state.knowledge_index = HybridRagIndex(build_verified_corpus(kit.root / "raw"))  # type: ignore[union-attr]
 
@@ -202,15 +220,59 @@ def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(kit: Auth
     assert tools_resp.json()["read_only_enforced"] is True
     assert len(tools_resp.json()["tools"]) == 6
 
-    # Seed an incident containing an out-of-range faulted oil temp (200.0 C) — must NEVER HTTP 500
-    with client.app.state.db.session() as session:  # type: ignore[union-attr]
+    r_start, r_end = "2020-01-09T00:00:00", "2020-01-09T12:00:00"
+    replay = client.get(f"/api/v1/anomaly/replay?start={r_start}&end={r_end}", headers=eng).json()
+    ep_start = replay["episodes"][0]["start"]
+    inc_resp = client.post(
+        "/api/v1/incidents",
+        json={
+            "asset_id": ASSET,
+            "range_start": r_start,
+            "range_end": r_end,
+            "episode_start": ep_start,
+        },
+        headers=eng,
+    )
+    assert inc_resp.status_code in (200, 201)
+    real_inc_id = inc_resp.json()["id"]
+
+    q_resp = client.post(
+        "/api/v1/copilot/query",
+        json={
+            "question": "What caused this incident and should we repair now or schedule?",
+            "incident_id": real_inc_id,
+            "leak_rate_bar_per_min": 0.9,
+        },
+        headers=viewer,
+    )
+    assert q_resp.status_code == 200
+    q_body = q_resp.json()
+    assert q_body["abstained"] is False
+    assert q_body["safety_refusal_triggered"] is False
+    assert q_body["synthesis_mode"] == "deterministic_grounded"
+    assert all(t["status"] == "executed" for t in q_body["tools_executed"])
+    assert any(c["source_type"] == "rca" for c in q_body["citations"])
+    rca_cit = next(c for c in q_body["citations"] if c["source_type"] == "rca")
+    assert "not proven causal inference" in rca_cit["detail"].lower()
+    opt_cit = next(c for c in q_body["citations"] if c["source_type"] == "maintenance_optimizer")
+    assert "dominant_hypothesis=air_leakage" in opt_cit["detail"]
+    for c in q_body["citations"]:
+        assert f"[{c['citation_id']}]" in q_body["answer"]
+
+    # 2. Without AnomalyService/telemetry, DB-only duty_rule + out-of-range oil (200.0 C) must
+    # NEVER HTTP 500 and MUST NOT force air_leakage; must mark RCA unavailable and abstain safely
+    no_svc_client = make_client(kit)
+    no_svc_client.app.state.knowledge_index = HybridRagIndex(  # type: ignore[union-attr]
+        build_verified_corpus(kit.root / "raw")
+    )
+    with no_svc_client.app.state.db.session() as session:  # type: ignore[union-attr]
         creator = Principal(
             actor_id="eng-seed",
             tenant_id="acme",
             roles=frozenset({Role.ENGINEER}),
             asset_ids=frozenset({ASSET}),
         )
-        inc = IncidentRepo(session, creator).create(
+        inc_db = IncidentRepo(session, creator).create(
             asset_id=ASSET,
             detector="duty_rule",
             model_version="m2-wp2",
@@ -241,25 +303,27 @@ def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(kit: Auth
                 ),
             ],
         )
-        inc_id = inc.id
+        db_inc_id = inc_db.id
 
-    q_resp = client.post(
+    missing_tel = no_svc_client.post(
         "/api/v1/copilot/query",
         json={
             "question": "What caused this incident and should we repair now or schedule?",
-            "incident_id": inc_id,
+            "incident_id": db_inc_id,
             "leak_rate_bar_per_min": 0.9,
         },
         headers=viewer,
     )
-    assert q_resp.status_code == 200
-    q_body = q_resp.json()
-    assert q_body["safety_refusal_triggered"] is False
-    assert all(t["status"] == "executed" for t in q_body["tools_executed"])
-    assert len(q_body["citations"]) >= 6
-    # All citations (including Digital Twin [C7] and Optimizer [C8]) appear in synthesized answer
-    for c in q_body["citations"]:
-        assert f"[{c['citation_id']}]" in q_body["answer"]
+    assert missing_tel.status_code == 200
+    m_body = missing_tel.json()
+    assert m_body["abstained"] is True
+    assert m_body["abstention_reason"] == "rca_telemetry_unavailable_insufficient_evidence"
+    m_tools = {t["tool"]: t for t in m_body["tools_executed"]}
+    assert m_tools["get_rca_hypotheses"]["status"] == "unavailable"
+    assert not any(c["source_type"] == "rca" for c in m_body["citations"])
+    m_opt = next(c for c in m_body["citations"] if c["source_type"] == "maintenance_optimizer")
+    assert "dominant_hypothesis=insufficient_evidence" in m_opt["detail"]
+    assert "air_leakage" not in m_opt["detail"]
 
     # Red-team over HTTP
     red_resp = client.post(
@@ -315,3 +379,330 @@ def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(kit: Auth
         ).status_code
         == 403
     )
+
+
+def _seed_incident(db: Database, principal: Principal, start: datetime, end: datetime) -> str:
+    with db.session() as session:
+        inc = IncidentRepo(session, principal).create(
+            asset_id=ASSET,
+            detector="duty_rule",
+            model_version="m2-wp2",
+            episode_start=start,
+            episode_end=end,
+            raised_at=start,
+            peak_score=0.91,
+            evidence=[
+                NewEvidence(
+                    group_name="duty",
+                    group_label="Duty",
+                    feature="load_duty",
+                    value=0.86,
+                    training_median=0.14,
+                    robust_z=5.5,
+                    novel=True,
+                    meaning="High duty feature stored on incident peak row.",
+                )
+            ],
+        )
+        return inc.id
+
+
+def test_copilot_routes_through_real_rca_and_passes_supported_hypothesis_to_optimizer(
+    tmp_path: Path,
+) -> None:
+    svc_clean, base, _ = _make_wp_a_service(tmp_path / "clean")
+    corpus = HybridRagIndex(build_verified_corpus(tmp_path / "raw"))
+    eng = Principal(
+        actor_id="eng-1",
+        tenant_id="acme",
+        roles=frozenset({Role.ENGINEER}),
+        asset_ids=frozenset({ASSET}),
+    )
+
+    # Case A: Clean leak event -> real RCA selects air_leakage -> optimizer sees leak scenario
+    db_a = Database(f"sqlite:///{(tmp_path / 'a.sqlite3').as_posix()}")
+    inc_leak = _seed_incident(db_a, eng, datetime(2020, 1, 6, 6, 0), datetime(2020, 1, 6, 9, 0))
+    cp_clean = ControlledCopilot(
+        knowledge_index=corpus,
+        twin=CompressorReservoirTwin(),
+        anomaly_service=svc_clean,
+    )
+    res_leak = cp_clean.run_query(
+        CopilotQueryRequest(
+            question="Diagnose this incident and compare repair vs schedule.",
+            incident_id=inc_leak,
+            leak_rate_bar_per_min=0.9,
+        ),
+        principal=eng,
+        session_factory=db_a.session,
+    )
+    assert res_leak.abstained is False
+    rca_leak = next(c for c in res_leak.citations if c.source_type == "rca")
+    assert "air_leakage" in rca_leak.title
+    opt_leak = next(c for c in res_leak.citations if c.source_type == "maintenance_optimizer")
+    assert "dominant_hypothesis=air_leakage" in opt_leak.detail
+
+    # Case B: Single-sensor Motor_current freeze at 7.0 A EVEN WITH detector='duty_rule' and
+    # stored load_duty=0.86 MUST NOT force 'air_leakage' -> RCA selects sensor_malfunction
+    frozen_motor = base.copy()
+    m_mask = (frozen_motor.index >= pd.Timestamp("2020-01-04 06:00")) & (
+        frozen_motor.index < pd.Timestamp("2020-01-04 07:00")
+    )
+    frozen_motor.loc[m_mask, "Motor_current"] = 7.0
+    p_freeze = tmp_path / "freeze"
+    (p_freeze / metropt3.DATASET_ID).mkdir(parents=True)
+    frozen_motor.to_parquet(p_freeze / metropt3.DATASET_ID / "telemetry.parquet")
+    svc_freeze = AnomalyService(
+        svc_clean.bundle, svc_clean.card, p_freeze, svc_clean.reports, warning_bundle=None
+    )
+    inc_freeze = _seed_incident(db_a, eng, datetime(2020, 1, 4, 6, 0), datetime(2020, 1, 4, 7, 0))
+    cp_freeze = ControlledCopilot(
+        knowledge_index=corpus,
+        twin=CompressorReservoirTwin(),
+        anomaly_service=svc_freeze,
+    )
+    res_freeze = cp_freeze.run_query(
+        CopilotQueryRequest(
+            question="What caused this incident and should we repair now or monitor?",
+            incident_id=inc_freeze,
+            leak_rate_bar_per_min=0.9,
+        ),
+        principal=eng,
+        session_factory=db_a.session,
+    )
+    assert res_freeze.abstained is False
+    rca_freeze = next(c for c in res_freeze.citations if c.source_type == "rca")
+    assert "sensor_malfunction" in rca_freeze.title
+    assert "air_leakage" not in rca_freeze.title
+    twin_freeze = next(c for c in res_freeze.citations if c.source_type == "digital_twin")
+    assert "(baseline)" in twin_freeze.title
+    opt_freeze = next(c for c in res_freeze.citations if c.source_type == "maintenance_optimizer")
+    assert "dominant_hypothesis=sensor_malfunction" in opt_freeze.detail
+    assert "Advisory: monitor" in opt_freeze.title
+    assert "verify instrumentation/demand" in opt_freeze.detail
+
+    # Case C: Valve contradiction -> RCA selects telemetry_inconsistency (not air_leakage)
+    valve = base.copy()
+    v_mask = (valve.index >= pd.Timestamp("2020-01-04 08:00")) & (
+        valve.index < pd.Timestamp("2020-01-04 08:30")
+    )
+    valve.loc[v_mask, ["COMP", "DV_eletric"]] = 1.0
+    p_valve = tmp_path / "valve"
+    (p_valve / metropt3.DATASET_ID).mkdir(parents=True)
+    valve.to_parquet(p_valve / metropt3.DATASET_ID / "telemetry.parquet")
+    svc_valve = AnomalyService(
+        svc_clean.bundle, svc_clean.card, p_valve, svc_clean.reports, warning_bundle=None
+    )
+    inc_valve = _seed_incident(db_a, eng, datetime(2020, 1, 4, 8, 0), datetime(2020, 1, 4, 8, 30))
+    cp_valve = ControlledCopilot(
+        knowledge_index=corpus,
+        twin=CompressorReservoirTwin(),
+        anomaly_service=svc_valve,
+    )
+    res_valve = cp_valve.run_query(
+        CopilotQueryRequest(question="Diagnose this valve event", incident_id=inc_valve),
+        principal=eng,
+        session_factory=db_a.session,
+    )
+    rca_valve = next(c for c in res_valve.citations if c.source_type == "rca")
+    assert "telemetry_inconsistency" in rca_valve.title
+    opt_valve = next(c for c in res_valve.citations if c.source_type == "maintenance_optimizer")
+    assert "dominant_hypothesis=telemetry_inconsistency" in opt_valve.detail
+
+    # Case D: Nominal/insufficient event -> RCA abstains -> Copilot abstains & passes
+    # insufficient_evidence (NOT air_leakage) to optimizer
+    inc_norm = _seed_incident(db_a, eng, datetime(2020, 1, 3, 6, 0), datetime(2020, 1, 3, 9, 0))
+    res_abstain = cp_clean.run_query(
+        CopilotQueryRequest(
+            question="What caused this incident and should we repair now?",
+            incident_id=inc_norm,
+            leak_rate_bar_per_min=0.9,
+        ),
+        principal=eng,
+        session_factory=db_a.session,
+    )
+    assert res_abstain.abstained is True
+    assert res_abstain.abstention_reason is not None
+    assert "Abstention notice" in res_abstain.answer
+    opt_abs = next(c for c in res_abstain.citations if c.source_type == "maintenance_optimizer")
+    assert "dominant_hypothesis=insufficient_evidence" in opt_abs.detail
+    assert "Advisory: monitor" in opt_abs.title
+
+    # Case E: Custom/alternate RCA outcome (abnormal_high_demand) propagates to optimizer
+    def _demand_rca(pkg: EventEvidencePackage) -> RcaAssessment:
+        hyp = RankedHypothesis(
+            hypothesis_id="hyp:abnormal_high_demand",
+            category="abnormal_high_demand",
+            title="Sustained downstream pneumatic demand",
+            rank=1,
+            relative_support="primary",
+            support_score=0.72,
+            confidence_band="moderate",
+            physical_mechanism="High train braking/door air draw without compressor leak.",
+            correlation_vs_causation_note="Flowmeter absent; requires operational correlation.",
+            verification_steps=[
+                VerificationStep(
+                    step_id="ver:dem",
+                    priority="standard",
+                    action="Cross-check train operational load.",
+                    expected_if_confirmed="Drops when idle.",
+                    expected_if_refuted="Persists when idle.",
+                )
+            ],
+        )
+        return RcaAssessment(
+            rca_id="dem123",
+            package_id=pkg.package_id,
+            asset_id=pkg.asset_id,
+            incident_id=pkg.incident_id,
+            event_start=pkg.event_start,
+            event_end=pkg.event_end,
+            abstained=False,
+            primary_category="abnormal_high_demand",
+            primary_title=hyp.title,
+            summary="Top ranked hypothesis: Sustained downstream pneumatic demand.",
+            uncertainty_note="Flowmeter unmeasured.",
+            quality_status=pkg.quality.overall_status,
+            confidence_penalty_factor=pkg.quality.confidence_penalty_factor,
+            ranked_hypotheses=[hyp],
+            correlation_vs_causation_boundary=["Distributional signal only."],
+            provenance=pkg.provenance,
+        )
+
+    cp_demand = ControlledCopilot(
+        knowledge_index=corpus,
+        twin=CompressorReservoirTwin(),
+        anomaly_service=svc_clean,
+        rca_fn=_demand_rca,
+    )
+    res_dem = cp_demand.run_query(
+        CopilotQueryRequest(question="What caused this incident?", incident_id=inc_leak),
+        principal=eng,
+        session_factory=db_a.session,
+    )
+    assert res_dem.abstained is False
+    opt_dem = next(c for c in res_dem.citations if c.source_type == "maintenance_optimizer")
+    assert "dominant_hypothesis=abnormal_high_demand" in opt_dem.detail
+
+    # Case F: Human observations stored on incident flow into real RCA assessment
+    obs_db = Database(f"sqlite:///{(tmp_path / 'obs.sqlite3').as_posix()}")
+    inc_obs = _seed_incident(obs_db, eng, datetime(2020, 1, 6, 6, 0), datetime(2020, 1, 6, 9, 0))
+    cp_obs = ControlledCopilot(
+        knowledge_index=corpus,
+        twin=CompressorReservoirTwin(),
+        anomaly_service=svc_clean,
+    )
+    before_obs = cp_obs.run_query(
+        CopilotQueryRequest(question="What caused this incident?", incident_id=inc_obs),
+        principal=eng,
+        session_factory=obs_db.session,
+    )
+    before_rca = next(c for c in before_obs.citations if c.source_type == "rca").detail
+    with obs_db.session() as session:
+        repo = IncidentRepo(session, eng)
+        inc_row = repo.get(inc_obs)
+        assert inc_row is not None
+        repo.add_observation(
+            inc_row,
+            category="field_inspection",
+            note="Confirmed ultrasonic air leak hiss near purge coupling.",
+            observed_at=datetime(2020, 1, 6, 7, 0),
+        )
+    after_obs = cp_obs.run_query(
+        CopilotQueryRequest(question="What caused this incident?", incident_id=inc_obs),
+        principal=eng,
+        session_factory=obs_db.session,
+    )
+    after_ev = next(c for c in after_obs.citations if c.source_type == "incident_evidence").detail
+    after_rca = next(c for c in after_obs.citations if c.source_type == "rca").detail
+    assert "human_observations=1" in after_ev
+    assert after_rca != before_rca
+
+
+def test_copilot_abstains_on_out_of_scope_empty_and_weak_retrieval(
+    kit: AuthKit,
+    anomaly_service: AnomalyService,
+) -> None:
+    client = make_client(kit, anomaly_service)
+    corpus = HybridRagIndex(build_verified_corpus(kit.root / "raw"))
+    client.app.state.knowledge_index = corpus  # type: ignore[union-attr]
+    viewer = kit.headers(roles=["viewer"], assets=[ASSET])
+    eng = kit.headers(roles=["engineer"], assets=[ASSET])
+
+    # Create a real incident to also test out-of-scope questions when incident_id IS supplied
+    r_start, r_end = "2020-01-09T00:00:00", "2020-01-09T12:00:00"
+    replay = client.get(f"/api/v1/anomaly/replay?start={r_start}&end={r_end}", headers=eng).json()
+    inc_id = client.post(
+        "/api/v1/incidents",
+        json={
+            "asset_id": ASSET,
+            "range_start": r_start,
+            "range_end": r_end,
+            "episode_start": replay["episodes"][0]["start"],
+        },
+        headers=eng,
+    ).json()["id"]
+
+    oos_questions = (
+        "What is the capital of France?",
+        "Chocolate cake recipe",
+        "Tell me how to make chocolate cake",
+        "Who won the FIFA World Cup in 2022?",
+        "Write a Python binary search algorithm.",
+        "What is the turbine blade temperature limit?",
+        "Describe the cooling water salinity sensor",
+        "How is espresso extracted under pressure?",
+        "What is the capital of France for this compressor?",
+    )
+    for q in oos_questions:
+        for extra in ({}, {"incident_id": inc_id}):
+            resp = client.post(
+                "/api/v1/copilot/query",
+                json={"question": q, **extra},
+                headers=viewer,
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["abstained"] is True, f"Should abstain for OOS {q!r} ({extra})"
+            assert body["citations"] == []
+            assert body["synthesis_mode"] == "deterministic_grounded"
+            by_tool = {t["tool"]: t for t in body["tools_executed"]}
+            assert by_tool["query_kg"]["status"] == "skipped"
+            assert by_tool["simulate_scenario"]["status"] == "skipped"
+            assert by_tool["compare_options"]["status"] == "skipped"
+
+    # Empty corpus without an incident MUST abstain (KG/Twin/Optimizer alone never ground an answer)
+    client.app.state.knowledge_index = HybridRagIndex([])  # type: ignore[union-attr]
+    empty_resp = client.post(
+        "/api/v1/copilot/query",
+        json={"question": "Summarize unloaded TP3 air leakage risk"},
+        headers=viewer,
+    )
+    assert empty_resp.status_code == 200
+    assert empty_resp.json()["abstained"] is True
+    assert empty_resp.json()["citations"] == []
+
+    # Cross-tenant principal still denied even on out-of-scope prompt
+    assert (
+        client.post(
+            "/api/v1/copilot/query",
+            json={"question": "What is the capital of France?", "incident_id": inc_id},
+            headers=kit.headers(tenant="beta", roles=["viewer"]),
+        ).status_code
+        == 403
+    )
+
+    # Restore populated index & verify positive grounded response preserves relevant citations
+    client.app.state.knowledge_index = corpus  # type: ignore[union-attr]
+    pos_resp = client.post(
+        "/api/v1/copilot/query",
+        json={"question": "Explain COMP valve contradiction semantics."},
+        headers=viewer,
+    )
+    assert pos_resp.status_code == 200
+    pos_body = pos_resp.json()
+    assert pos_body["abstained"] is False
+    assert pos_body["synthesis_mode"] == "deterministic_grounded"
+    doc_cits = [c for c in pos_body["citations"] if c["source_type"] == "knowledge_doc"]
+    assert len(doc_cits) >= 1
+    assert any("valve" in c["detail"].lower() for c in doc_cits)
