@@ -1730,6 +1730,140 @@
         "title": "HumanObservationOut",
         "type": "object"
       },
+      "HybridSearchHit": {
+        "additionalProperties": false,
+        "description": "Ranked Hybrid RAG chunk combining BM25, TF-IDF/SVD semantic score, and RRF.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "bm25_score": {
+            "title": "Bm25 Score",
+            "type": "number"
+          },
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "string"
+          },
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "license": {
+            "title": "License",
+            "type": "string"
+          },
+          "linked_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Linked Node Ids",
+            "type": "array"
+          },
+          "provenance_origin": {
+            "enum": [
+              "observed",
+              "derived"
+            ],
+            "title": "Provenance Origin",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 1.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "rrf_score": {
+            "title": "Rrf Score",
+            "type": "number"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "semantic_score": {
+            "title": "Semantic Score",
+            "type": "number"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "source_path": {
+            "title": "Source Path",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rank",
+          "chunk_id",
+          "doc_id",
+          "title",
+          "section",
+          "asset_id",
+          "source_path",
+          "license",
+          "provenance_origin",
+          "snippet",
+          "bm25_score",
+          "semantic_score",
+          "rrf_score"
+        ],
+        "title": "HybridSearchHit",
+        "type": "object"
+      },
+      "HybridSearchResponse": {
+        "additionalProperties": false,
+        "description": "Tenant- and asset-scoped hybrid search result set.",
+        "properties": {
+          "accessible_chunks": {
+            "minimum": 0.0,
+            "title": "Accessible Chunks",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HybridSearchHit"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "related_kg_edges": {
+            "items": {
+              "$ref": "#/components/schemas/KgEdge"
+            },
+            "title": "Related Kg Edges",
+            "type": "array"
+          },
+          "safety_note": {
+            "title": "Safety Note",
+            "type": "string"
+          },
+          "total_indexed_chunks": {
+            "minimum": 0.0,
+            "title": "Total Indexed Chunks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query",
+          "total_indexed_chunks",
+          "accessible_chunks",
+          "items",
+          "safety_note"
+        ],
+        "title": "HybridSearchResponse",
+        "type": "object"
+      },
       "IncidentCreate": {
         "additionalProperties": false,
         "description": "Point at an alarm episode; the server re-detects it and stores the evidence.",
@@ -1987,6 +2121,150 @@
           "created_at"
         ],
         "title": "IncidentOut",
+        "type": "object"
+      },
+      "KgEdge": {
+        "additionalProperties": false,
+        "description": "Typed directed edge preserving causal vs correlational distinction.",
+        "properties": {
+          "epistemic_type": {
+            "enum": [
+              "physical_mechanism",
+              "causal_hypothesis",
+              "correlational_indicator",
+              "structural_membership"
+            ],
+            "title": "Epistemic Type",
+            "type": "string"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "target_id",
+          "relation",
+          "epistemic_type",
+          "rationale"
+        ],
+        "title": "KgEdge",
+        "type": "object"
+      },
+      "KgNode": {
+        "additionalProperties": false,
+        "description": "Typed entity inside the industrial Knowledge Graph.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Attributes",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "asset",
+              "component",
+              "sensor",
+              "regime",
+              "event_class",
+              "failure_mode",
+              "document"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "kind",
+          "label",
+          "asset_id",
+          "summary"
+        ],
+        "title": "KgNode",
+        "type": "object"
+      },
+      "KgSubgraphResponse": {
+        "additionalProperties": false,
+        "description": "Traversed subgraph response with epistemic legend.",
+        "properties": {
+          "center_node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Center Node Id"
+          },
+          "depth": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Depth",
+            "type": "integer"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/KgEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "epistemic_legend": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Epistemic Legend",
+            "type": "object"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/KgNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "depth",
+          "nodes",
+          "edges",
+          "epistemic_legend"
+        ],
+        "title": "KgSubgraphResponse",
         "type": "object"
       },
       "LoeoFold": {
@@ -3940,6 +4218,82 @@
           "operator_reports"
         ],
         "title": "ReplayResponse",
+        "type": "object"
+      },
+      "RetrievalEvalResponse": {
+        "additionalProperties": false,
+        "description": "Controlled ablation comparing sparse BM25, dense TF-IDF/SVD, and Hybrid RRF.",
+        "properties": {
+          "corpus_chunks": {
+            "minimum": 0.0,
+            "title": "Corpus Chunks",
+            "type": "integer"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalModeMetrics"
+            },
+            "title": "Modes",
+            "type": "array"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "corpus_chunks",
+          "modes",
+          "notes"
+        ],
+        "title": "RetrievalEvalResponse",
+        "type": "object"
+      },
+      "RetrievalModeMetrics": {
+        "additionalProperties": false,
+        "description": "Aggregated IR metrics for a single retriever family.",
+        "properties": {
+          "mode": {
+            "enum": [
+              "bm25_only",
+              "dense_svd_only",
+              "hybrid_rrf"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "mrr_at_10": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Mrr At 10",
+            "type": "number"
+          },
+          "ndcg_at_5": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ndcg At 5",
+            "type": "number"
+          },
+          "query_count": {
+            "minimum": 1.0,
+            "title": "Query Count",
+            "type": "integer"
+          },
+          "recall_at_5": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Recall At 5",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mode",
+          "query_count",
+          "recall_at_5",
+          "mrr_at_10",
+          "ndcg_at_5"
+        ],
+        "title": "RetrievalModeMetrics",
         "type": "object"
       },
       "Sample": {
@@ -6360,6 +6714,198 @@
         "summary": "Get Incident Rca",
         "tags": [
           "incidents"
+        ]
+      }
+    },
+    "/api/v1/knowledge/eval": {
+      "get": {
+        "operationId": "evaluate_knowledge_retrieval",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalEvalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Evaluate Knowledge Retrieval",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/v1/knowledge/kg": {
+      "get": {
+        "operationId": "query_knowledge_graph",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "node_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Node Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 2,
+              "maximum": 3,
+              "minimum": 1,
+              "title": "Depth",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "epistemic_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "physical_mechanism",
+                    "causal_hypothesis",
+                    "correlational_indicator",
+                    "structural_membership"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Epistemic Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KgSubgraphResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Query Knowledge Graph",
+        "tags": [
+          "knowledge"
+        ]
+      }
+    },
+    "/api/v1/knowledge/search": {
+      "get": {
+        "operationId": "search_knowledge",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "top_k",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Top K",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "hybrid_rrf",
+              "enum": [
+                "bm25_only",
+                "dense_svd_only",
+                "hybrid_rrf"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HybridSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Knowledge",
+        "tags": [
+          "knowledge"
         ]
       }
     },
