@@ -81,17 +81,20 @@ def evaluate_retrieval_modes(
     tenant_id: str,
     allowed_asset_ids: set[str],
 ) -> RetrievalEvalResponse:
-    """Evaluate Recall@5, MRR@10, and nDCG@5 over caller-accessible benchmark queries."""
+    """Evaluate Recall@5, MRR@10, and nDCG@5 strictly over caller-accessible benchmark cases."""
+    scoped_chunks = index.accessible_chunks(
+        tenant_id=tenant_id, allowed_asset_ids=allowed_asset_ids
+    )
     cases = [c for c in DEFAULT_EVAL_CASES if c.asset_id in allowed_asset_ids]
     if not cases:
-        cases = list(DEFAULT_EVAL_CASES[:1])
-
-    accessible_count = sum(
-        1
-        for chunk in index.chunks
-        if chunk.asset_id in allowed_asset_ids
-        and (chunk.tenant_scope is None or chunk.tenant_scope == tenant_id)
-    )
+        return RetrievalEvalResponse(
+            corpus_chunks=len(scoped_chunks),
+            modes=[],
+            notes=(
+                "No ground-truth retrieval benchmark queries match the caller's authorized "
+                "asset grants."
+            ),
+        )
 
     modes: tuple[SearchMode, ...] = ("bm25_only", "dense_svd_only", "hybrid_rrf")
     results: list[RetrievalModeMetrics] = []
@@ -110,7 +113,10 @@ def evaluate_retrieval_modes(
                 mode=mode,
             )
             rel_flags = [
-                1 if _is_relevant(h.chunk_id, case.relevant_chunk_prefixes) else 0
+                1
+                if h.asset_id == case.asset_id
+                and _is_relevant(h.chunk_id, case.relevant_chunk_prefixes)
+                else 0
                 for h in resp.items
             ]
             top5 = rel_flags[:5]
@@ -126,9 +132,8 @@ def evaluate_retrieval_modes(
             dcg = sum(flag / math.log2(rank + 1) for rank, flag in enumerate(top5, start=1))
             total_rel = sum(
                 1
-                for c in index.chunks
-                if c.asset_id in allowed_asset_ids
-                and (c.tenant_scope is None or c.tenant_scope == tenant_id)
+                for c in scoped_chunks
+                if c.asset_id == case.asset_id
                 and _is_relevant(c.chunk_id, case.relevant_chunk_prefixes)
             )
             ideal_k = min(5, max(total_rel, 1))
@@ -147,7 +152,7 @@ def evaluate_retrieval_modes(
         )
 
     return RetrievalEvalResponse(
-        corpus_chunks=accessible_count,
+        corpus_chunks=len(scoped_chunks),
         modes=results,
         notes=(
             "Controlled retrieval ablation evaluated strictly across chunks authorized for the "

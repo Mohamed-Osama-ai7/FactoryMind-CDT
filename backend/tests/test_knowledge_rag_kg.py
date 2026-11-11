@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from pypdf import PdfWriter
 
 from factorymind.contracts.knowledge import KnowledgeDocumentChunk
-from factorymind.knowledge.corpus import MAX_PDF_BYTES, build_verified_corpus, extract_pdf_chunks
+from factorymind.knowledge.corpus import (
+    MAX_EXTRACTED_CHARS,
+    MAX_PDF_BYTES,
+    MAX_PDF_PAGES,
+    build_verified_corpus,
+    extract_pdf_chunks,
+)
 from factorymind.knowledge.eval import evaluate_retrieval_modes
-from factorymind.knowledge.kg import IndustrialKnowledgeGraph
+from factorymind.knowledge.kg import IndustrialKnowledgeGraph, infer_linked_kg_nodes
 from factorymind.knowledge.rag import HybridRagIndex
 from tests.auth_helpers import ASSET, AuthKit, make_client
 
@@ -49,13 +56,11 @@ def _minimal_text_pdf(text: str) -> bytes:
     return bytes(buf)
 
 
-def test_extract_pdf_chunks_enforces_size_bounds_and_handles_corruption(tmp_path: Path) -> None:
-    # Corrupt bytes degrade cleanly to []
+def test_extract_pdf_chunks_enforces_size_page_and_char_bounds(tmp_path: Path) -> None:
     corrupt = tmp_path / "corrupt.pdf"
     corrupt.write_bytes(b"not a real pdf at all")
     assert extract_pdf_chunks(corrupt) == []
 
-    # Blank / empty page skipped safely
     blank = tmp_path / "blank.pdf"
     writer = PdfWriter()
     writer.add_blank_page(width=200, height=200)
@@ -63,14 +68,35 @@ def test_extract_pdf_chunks_enforces_size_bounds_and_handles_corruption(tmp_path
         writer.write(handle)
     assert extract_pdf_chunks(blank) == []
 
-    # Oversized file (> MAX_PDF_BYTES) skipped cleanly without parsing
+    over_pages = tmp_path / "too_many_pages.pdf"
+    p_writer = PdfWriter()
+    for _ in range(MAX_PDF_PAGES + 1):
+        p_writer.add_blank_page(width=200, height=200)
+    with over_pages.open("wb") as handle:
+        p_writer.write(handle)
+    assert extract_pdf_chunks(over_pages) == []
+
     huge = tmp_path / "huge.pdf"
     with huge.open("wb") as handle:
         handle.seek(MAX_PDF_BYTES + 10)
         handle.write(b"\x00")
     assert extract_pdf_chunks(huge) == []
 
-    # Real PDF with searchable text extracts cleanly with license tag
+    # Verify MAX_EXTRACTED_CHARS total cap across multi-page PDFs
+    multi = PdfWriter()
+    long_line = "TP3 pneumatic compressor " * 1500
+    for _ in range(8):
+        page_reader_pdf = _minimal_text_pdf(long_line)
+        temp_p = tmp_path / "one.pdf"
+        temp_p.write_bytes(page_reader_pdf)
+        multi.append(str(temp_p))
+    capped_pdf = tmp_path / "capped.pdf"
+    with capped_pdf.open("wb") as handle:
+        multi.write(handle)
+    capped_chunks = extract_pdf_chunks(capped_pdf)
+    assert sum(len(c.text) for c in capped_chunks) <= MAX_EXTRACTED_CHARS
+
+    # Valid PDF extracts cleanly with license tag; missing docs_root degrades cleanly
     valid = tmp_path / "Data Description_Metro.pdf"
     valid.write_bytes(
         _minimal_text_pdf(
@@ -82,9 +108,12 @@ def test_extract_pdf_chunks_enforces_size_bounds_and_handles_corruption(tmp_path
     assert "MetroPT3 TP3 pneumatic panel" in chunks[0].text
     assert chunks[0].license == "CC BY 4.0 (UCI #791)"
 
+    fallback = build_verified_corpus(tmp_path / "raw", docs_root=tmp_path / "missing_docs")
+    assert len(fallback) >= 1
 
-def test_hybrid_rag_enforces_tenant_and_asset_isolation(tmp_path: Path) -> None:
-    chunks = [
+
+def test_hybrid_rag_enforces_zero_cross_tenant_oracle_and_zero_score_filtering() -> None:
+    acme_chunks = [
         KnowledgeDocumentChunk(
             chunk_id="acme:apu-leak",
             doc_id="doc-1",
@@ -98,48 +127,95 @@ def test_hybrid_rag_enforces_tenant_and_asset_isolation(tmp_path: Path) -> None:
             text="Unloaded TP3 pressure drop and elevated loaded duty indicate pneumatic leak.",
         ),
         KnowledgeDocumentChunk(
-            chunk_id="beta:secret-doc",
-            doc_id="doc-secret",
-            title="Beta Confidential Maintenance Log",
-            section="Secret",
+            chunk_id="acme:apu-oil",
+            doc_id="doc-2",
+            title="APU Oil Thermal Note",
+            section="Oil Temperature",
             asset_id=ASSET,
-            tenant_scope="beta",
-            source_path="secret.md",
-            license="Internal",
-            provenance_origin="observed",
-            text="Confidential beta leak turbine keyword TP3 diagnostic tokenxyz999.",
-        ),
-        KnowledgeDocumentChunk(
-            chunk_id="acme:other-asset",
-            doc_id="doc-other",
-            title="Pump 99 Cavitation Manual",
-            section="Pump",
-            asset_id="pump-99",
             tenant_scope="acme",
-            source_path="pump.md",
-            license="Internal",
+            source_path="note2.md",
+            license="MIT",
             provenance_origin="observed",
-            text="Pump 99 TP3 secret pumpnote123.",
+            text="Oil temperature rises smoothly during continuous runtime cycles mentioning ai4i.",
         ),
     ]
-    index = HybridRagIndex(chunks)
+    beta_secret = KnowledgeDocumentChunk(
+        chunk_id="beta:secret-doc",
+        doc_id="doc-secret",
+        title="Beta Confidential Maintenance Log",
+        section="Secret",
+        asset_id=ASSET,
+        tenant_scope="beta",
+        source_path="secret.md",
+        license="Internal",
+        provenance_origin="observed",
+        text="Confidential beta leak turbine keyword TP3 diagnostic tokenxyz999.",
+    )
+    other_asset = KnowledgeDocumentChunk(
+        chunk_id="acme:other-asset",
+        doc_id="doc-other",
+        title="Pump 99 Cavitation Manual",
+        section="Pump",
+        asset_id="pump-99",
+        tenant_scope="acme",
+        source_path="pump.md",
+        license="Internal",
+        provenance_origin="observed",
+        text="Pump 99 TP3 secret pumpnote123.",
+    )
 
-    res = index.search(
-        "TP3 leak tokenxyz999 pumpnote123",
+    isolated_idx = HybridRagIndex(acme_chunks)
+    shared_idx = HybridRagIndex([*acme_chunks, beta_secret, other_asset])
+
+    # Cross-tenant secret token MUST NOT match via BM25, dense SVD co-occurrence, or RRF
+    for mode in ("bm25_only", "dense_svd_only", "hybrid_rrf"):
+        leak_probe = shared_idx.search(
+            "tokenxyz999",
+            tenant_id="acme",
+            allowed_asset_ids={ASSET},
+            top_k=5,
+            mode=mode,  # type: ignore[arg-type]
+        )
+        assert leak_probe.items == []
+        assert leak_probe.related_kg_edges == []
+        assert leak_probe.total_indexed_chunks == 2
+        assert leak_probe.accessible_chunks == 2
+
+    # Nonexistent token returns [] in hybrid_rrf (no zero-score filler hits)
+    nonexistent = shared_idx.search(
+        "nonexistenttoken000",
         tenant_id="acme",
         allowed_asset_ids={ASSET},
         top_k=5,
         mode="hybrid_rrf",
     )
-    assert res.total_indexed_chunks == 3
-    assert res.accessible_chunks == 1
-    assert [h.chunk_id for h in res.items] == ["acme:apu-leak"]
-    assert "Confidential beta leak" not in str(res.model_dump())
-    assert "Cavitation Manual" not in str(res.model_dump())
+    assert nonexistent.items == []
+
+    # Shared index scores on acme-only query are invariant to beta/pump-99 corpus additions
+    q_shared = shared_idx.search("TP3 leak", tenant_id="acme", allowed_asset_ids={ASSET})
+    q_iso = isolated_idx.search("TP3 leak", tenant_id="acme", allowed_asset_ids={ASSET})
+    assert [h.bm25_score for h in q_shared.items] == [h.bm25_score for h in q_iso.items]
+    assert [h.semantic_score for h in q_shared.items] == [h.semantic_score for h in q_iso.items]
+
+    # Mention of "ai4i" inside an acme chunk MUST NOT expose ungranted ai4i KG links
+    oil_hit = shared_idx.search(
+        "Oil temperature runtime", tenant_id="acme", allowed_asset_ids={ASSET}, top_k=2
+    )
+    assert oil_hit.items
+    assert "asset:ai4i-milling-bench" not in oil_hit.items[0].linked_node_ids
 
 
-def test_knowledge_graph_separates_causal_vs_correlation_and_blocks_ungranted_nodes() -> None:
+def test_knowledge_graph_word_boundaries_and_epistemic_isolation() -> None:
     kg = IndustrialKnowledgeGraph()
+
+    # Substring false positives eliminated
+    assert "sensor:LPS" not in infer_linked_kg_nodes("This helps diagnose compressor wear.")
+    assert "regime:loaded" not in infer_linked_kg_nodes("Unloaded pressure decay.")
+    assert infer_linked_kg_nodes("LPS dropped below 7 bar.") == ["sensor:LPS"]
+    assert infer_linked_kg_nodes("ai4i milling", allowed_asset_ids={ASSET}, kg=kg) == []
+    assert infer_linked_kg_nodes(
+        "ai4i milling", allowed_asset_ids={"ai4i-milling-bench"}, kg=kg
+    ) == ["asset:ai4i-milling-bench"]
 
     corr = kg.traverse(
         allowed_asset_ids={ASSET},
@@ -151,15 +227,21 @@ def test_knowledge_graph_separates_causal_vs_correlation_and_blocks_ungranted_no
     assert all(e.epistemic_type == "correlational_indicator" for e in corr.edges)
     assert any(e.target_id == "sensor:Oil_temperature" for e in corr.edges)
 
-    # AI4I node belongs to ai4i-milling-bench, inaccessible when only metropt3-apu-1 is granted
-    try:
+    uncentered_corr = kg.traverse(
+        allowed_asset_ids={ASSET},
+        center_node_id=None,
+        epistemic_type="correlational_indicator",
+    )
+    connected = {e.source_id for e in uncentered_corr.edges} | {
+        e.target_id for e in uncentered_corr.edges
+    }
+    assert {n.node_id for n in uncentered_corr.nodes} == connected
+
+    with pytest.raises(KeyError):
         kg.traverse(allowed_asset_ids={ASSET}, center_node_id="asset:ai4i-milling-bench")
-        raise AssertionError("Expected KeyError for ungranted KG asset node")
-    except KeyError:
-        pass
 
 
-def test_knowledge_eval_and_api_endpoints(kit: AuthKit, tmp_path: Path) -> None:
+def test_knowledge_eval_subset_and_api_endpoints(kit: AuthKit) -> None:
     pdf_dir = kit.root / "data" / "raw" / "metropt3"
     pdf_dir.mkdir(parents=True)
     (pdf_dir / "Data Description_Metro.pdf").write_bytes(
@@ -177,8 +259,19 @@ def test_knowledge_eval_and_api_endpoints(kit: AuthKit, tmp_path: Path) -> None:
         assert 0.0 <= m.mrr_at_10 <= 1.0
         assert 0.0 <= m.ndcg_at_5 <= 1.0
 
+    # Asset without ground-truth benchmark queries returns empty modes cleanly (no fake 0.0s)
+    unmapped = evaluate_retrieval_modes(index, tenant_id="acme", allowed_asset_ids={"pump-99"})
+    assert unmapped.corpus_chunks == 0
+    assert unmapped.modes == []
+
     client = make_client(kit)
     viewer = kit.headers(roles=["viewer"], assets=[ASSET])
+
+    # Whitespace-only query rejected cleanly with 422
+    assert (
+        client.get("/api/v1/knowledge/search", params={"q": "   "}, headers=viewer).status_code
+        == 422
+    )
 
     search_resp = client.get(
         "/api/v1/knowledge/search",
@@ -199,7 +292,6 @@ def test_knowledge_eval_and_api_endpoints(kit: AuthKit, tmp_path: Path) -> None:
     assert kg_resp.status_code == 200
     assert any(n["node_id"] == "mode:air_leakage" for n in kg_resp.json()["nodes"])
 
-    # Ungranted or unknown KG node / asset filter fails cleanly with 404
     assert (
         client.get(
             "/api/v1/knowledge/kg",
@@ -221,7 +313,6 @@ def test_knowledge_eval_and_api_endpoints(kit: AuthKit, tmp_path: Path) -> None:
     assert eval_resp.status_code == 200
     assert len(eval_resp.json()["modes"]) == 3
 
-    # Auditor and cross-tenant denied with 403
     assert (
         client.get("/api/v1/knowledge/eval", headers=kit.headers(roles=["auditor"])).status_code
         == 403

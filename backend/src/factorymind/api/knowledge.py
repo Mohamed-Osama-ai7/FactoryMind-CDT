@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -25,16 +26,21 @@ from factorymind.knowledge.eval import evaluate_retrieval_modes
 from factorymind.knowledge.rag import HybridRagIndex, SearchMode
 
 router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+_INDEX_LOCK = threading.Lock()
 
 
 def get_knowledge_index(request: Request) -> HybridRagIndex:
+    """Thread-safely build once and cache the verified knowledge index on ``app.state``."""
     state = request.app.state
     index: HybridRagIndex | None = getattr(state, "knowledge_index", None)
     if index is None:
-        settings: Settings = state.settings
-        chunks = build_verified_corpus(settings.raw_dir)
-        index = HybridRagIndex(chunks)
-        state.knowledge_index = index
+        with _INDEX_LOCK:
+            index = getattr(state, "knowledge_index", None)
+            if index is None:
+                settings: Settings = state.settings
+                chunks = build_verified_corpus(settings.raw_dir)
+                index = HybridRagIndex(chunks)
+                state.knowledge_index = index
     return index
 
 
@@ -51,6 +57,12 @@ def search_knowledge(
     top_k: Annotated[int, Query(ge=1, le=20)] = 5,
     mode: SearchMode = "hybrid_rrf",
 ) -> HybridSearchResponse:
+    cleaned_q = q.strip()
+    if not cleaned_q:
+        raise HTTPException(
+            status_code=422,
+            detail="Query string 'q' must not be empty or whitespace-only.",
+        )
     settings: Settings = request.app.state.settings
     allowed = _allowed_assets(principal, settings)
     if asset_id is not None:
@@ -59,7 +71,7 @@ def search_knowledge(
         allowed = {asset_id}
     index = get_knowledge_index(request)
     return index.search(
-        q,
+        cleaned_q,
         tenant_id=principal.tenant_id,
         allowed_asset_ids=allowed,
         top_k=top_k,
@@ -92,7 +104,7 @@ def query_knowledge_graph(
 @router.get("/eval", response_model=RetrievalEvalResponse)
 def evaluate_knowledge_retrieval(
     request: Request,
-    principal: Annotated[Principal, Depends(require_data_source(Permission.ASSET_READ))],
+    principal: Annotated[Principal, Depends(require_data_source(Permission.ASSET_READ, cost=5))],
 ) -> RetrievalEvalResponse:
     settings: Settings = request.app.state.settings
     allowed = _allowed_assets(principal, settings)

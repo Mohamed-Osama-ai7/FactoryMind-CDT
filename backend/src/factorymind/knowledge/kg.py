@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from collections.abc import Iterable, Sequence
 
@@ -462,10 +463,17 @@ class IndustrialKnowledgeGraph:
                 and e.target_id in accessible_nodes
                 and (epistemic_type is None or e.epistemic_type == epistemic_type)
             ]
+            if epistemic_type is not None:
+                connected = {e.source_id for e in filtered_edges} | {
+                    e.target_id for e in filtered_edges
+                }
+                nodes_out = [n for nid, n in accessible_nodes.items() if nid in connected]
+            else:
+                nodes_out = list(accessible_nodes.values())
             return KgSubgraphResponse(
                 center_node_id=None,
                 depth=bounded_depth,
-                nodes=list(accessible_nodes.values()),
+                nodes=nodes_out,
                 edges=filtered_edges,
                 epistemic_legend=EPISTEMIC_LEGEND,
             )
@@ -476,7 +484,7 @@ class IndustrialKnowledgeGraph:
         visited: set[str] = {center_node_id}
         queue: deque[tuple[str, int]] = deque([(center_node_id, 0)])
         collected_edges: list[KgEdge] = []
-        seen_edges: set[tuple[str, str, str]] = set()
+        seen_edges: set[tuple[str, str, str, str]] = set()
 
         while queue:
             cur_id, cur_depth = queue.popleft()
@@ -490,7 +498,7 @@ class IndustrialKnowledgeGraph:
                 other_id = edge.target_id if edge.source_id == cur_id else edge.source_id
                 if other_id not in accessible_nodes:
                     continue
-                edge_key = (edge.source_id, edge.target_id, edge.relation)
+                edge_key = (edge.source_id, edge.target_id, edge.relation, edge.epistemic_type)
                 if edge_key not in seen_edges:
                     seen_edges.add(edge_key)
                     collected_edges.append(edge)
@@ -507,12 +515,12 @@ class IndustrialKnowledgeGraph:
         )
 
 
-def infer_linked_kg_nodes(text: str) -> list[str]:
-    """Deterministically link corpus chunks to matching canonical Knowledge Graph entities."""
-    lower = text.lower()
-    mapping: tuple[tuple[str, str], ...] = (
+_LINK_RULES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(rf"(?<![a-z0-9_]){re.escape(needle)}(?![a-z0-9_])"), node_id)
+    for needle, node_id in (
         ("tp3", "sensor:TP3"),
         ("tp2", "sensor:TP2"),
+        ("reservoirs", "sensor:Reservoirs"),
         ("reservoir", "sensor:Reservoirs"),
         ("motor_current", "sensor:Motor_current"),
         ("oil_temperature", "sensor:Oil_temperature"),
@@ -522,6 +530,7 @@ def infer_linked_kg_nodes(text: str) -> list[str]:
         ("dv_eletric", "sensor:COMP_DV_eletric"),
         ("dv_electric", "sensor:COMP_DV_eletric"),
         ("air leak", "mode:air_leakage"),
+        ("air leakage", "mode:air_leakage"),
         ("air_leakage", "mode:air_leakage"),
         ("abnormal_high_demand", "mode:abnormal_high_demand"),
         ("high demand", "mode:abnormal_high_demand"),
@@ -532,9 +541,27 @@ def infer_linked_kg_nodes(text: str) -> list[str]:
         ("unloaded", "regime:unloaded"),
         ("loaded", "regime:loaded"),
         ("ai4i", "asset:ai4i-milling-bench"),
+        ("ai4i2020", "asset:ai4i-milling-bench"),
     )
+)
+
+
+def infer_linked_kg_nodes(
+    text: str,
+    *,
+    allowed_asset_ids: set[str] | None = None,
+    kg: IndustrialKnowledgeGraph | None = None,
+) -> list[str]:
+    """Deterministically link corpus chunks to authorized Knowledge Graph entities."""
+    lower = text.lower()
     hits: list[str] = []
-    for needle, node_id in mapping:
-        if needle in lower and node_id not in hits:
+    for pattern, node_id in _LINK_RULES:
+        if node_id in hits:
+            continue
+        if allowed_asset_ids is not None and kg is not None:
+            node = kg.node(node_id)
+            if node is None or node.asset_id not in allowed_asset_ids:
+                continue
+        if pattern.search(lower):
             hits.append(node_id)
     return hits

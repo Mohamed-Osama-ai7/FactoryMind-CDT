@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Final
 
@@ -84,9 +83,11 @@ def extract_pdf_chunks(
             if len(normalized) < _MIN_CHUNK_CHARS:
                 continue
             remaining = MAX_EXTRACTED_CHARS - total_chars
-            if remaining <= 0:
+            if remaining < _MIN_CHUNK_CHARS:
                 break
             excerpt = normalized[:remaining]
+            if len(excerpt) < _MIN_CHUNK_CHARS:
+                continue
             total_chars += len(excerpt)
             chunks.append(
                 KnowledgeDocumentChunk(
@@ -190,6 +191,52 @@ def _passport_chunks() -> list[KnowledgeDocumentChunk]:
     return chunks
 
 
+def _split_markdown_sections(raw: str) -> list[tuple[str, str]]:
+    """Split markdown on level-2 headings while ignoring lines inside code fences."""
+    sections: list[tuple[str, str]] = []
+    heading = "Overview"
+    buf: list[str] = []
+    in_fence = False
+    for idx, line in enumerate(raw.splitlines()):
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            buf.append(line)
+            continue
+        if not in_fence and stripped.startswith("## "):
+            body = " ".join(" ".join(buf).split())
+            if len(body) >= _MIN_CHUNK_CHARS:
+                sections.append((heading, body))
+            heading = stripped[3:].strip()[:80] or f"Section {idx}"
+            buf = [stripped[3:]]
+            continue
+        buf.append(line)
+    tail = " ".join(" ".join(buf).split())
+    if len(tail) >= _MIN_CHUNK_CHARS:
+        sections.append((heading, tail))
+    return sections
+
+
+def _split_long_chunk(text: str, max_len: int = 1800) -> list[str]:
+    """Split oversized normalized text on word boundaries without losing trailing content."""
+    if len(text) <= max_len:
+        return [text]
+    parts: list[str] = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        end = min(n, pos + max_len)
+        if end < n:
+            cut = text.rfind(" ", pos, end)
+            if cut > pos + _MIN_CHUNK_CHARS:
+                end = cut
+        segment = text[pos:end].strip()
+        if len(segment) >= _MIN_CHUNK_CHARS:
+            parts.append(segment)
+        pos = end + (1 if end < n and text[end] == " " else 0)
+    return parts
+
+
 def _markdown_chunks(
     path: Path,
     *,
@@ -202,27 +249,23 @@ def _markdown_chunks(
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []
-    parts = re.split(r"(?m)^##\s+", raw)
     chunks: list[KnowledgeDocumentChunk] = []
-    for idx, part in enumerate(parts):
-        cleaned = " ".join(part.split())
-        if len(cleaned) < _MIN_CHUNK_CHARS:
-            continue
-        heading_line = part.splitlines()[0].strip() if part.splitlines() else f"Section {idx}"
-        section = heading_line.lstrip("# ").strip()[:80] or f"Section {idx}"
-        chunks.append(
-            KnowledgeDocumentChunk(
-                chunk_id=f"{doc_id}:sec-{idx}",
-                doc_id=doc_id,
-                title=title,
-                section=section,
-                asset_id=asset_id,
-                source_path=rel_path,
-                license="MIT (Repository Documentation)",
-                provenance_origin="derived",
-                text=cleaned[:1800],
+    for idx, (section, cleaned) in enumerate(_split_markdown_sections(raw)):
+        for sub_idx, segment in enumerate(_split_long_chunk(cleaned, 1800)):
+            cid = f"{doc_id}:sec-{idx}" if sub_idx == 0 else f"{doc_id}:sec-{idx}-p{sub_idx}"
+            chunks.append(
+                KnowledgeDocumentChunk(
+                    chunk_id=cid,
+                    doc_id=doc_id,
+                    title=title,
+                    section=section if sub_idx == 0 else f"{section} (cont. {sub_idx})",
+                    asset_id=asset_id,
+                    source_path=rel_path,
+                    license="MIT (Repository Documentation)",
+                    provenance_origin="derived",
+                    text=segment,
+                )
             )
-        )
     return chunks
 
 
@@ -235,8 +278,14 @@ def build_verified_corpus(
     chunks: list[KnowledgeDocumentChunk] = []
     chunks.extend(_passport_chunks())
 
-    pdf_path = raw_dir / "metropt3" / "Data Description_Metro.pdf"
-    chunks.extend(extract_pdf_chunks(pdf_path))
+    raw_root = raw_dir.resolve()
+    pdf_candidate = raw_dir / "metropt3" / "Data Description_Metro.pdf"
+    try:
+        pdf_resolved = pdf_candidate.resolve()
+    except OSError:
+        pdf_resolved = None
+    if pdf_resolved is not None and pdf_resolved.is_relative_to(raw_root):
+        chunks.extend(extract_pdf_chunks(pdf_resolved))
 
     resolved_docs = docs_root if docs_root is not None else find_repo_docs_dir()
     if resolved_docs is not None:

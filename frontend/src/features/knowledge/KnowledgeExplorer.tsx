@@ -100,6 +100,9 @@ export function KnowledgeExplorer() {
   const kgData = kgQuery.data?.status === 200 ? kgQuery.data.data : undefined
   const evalData = evalQuery.data?.status === 200 ? evalQuery.data.data : undefined
 
+  const queryInputId = `${idPrefix}-q`
+  const validationId = `${idPrefix}-q-error`
+
   return (
     <section aria-labelledby={`${idPrefix}-title`} className="flex max-w-5xl flex-col gap-6">
       <header>
@@ -120,13 +123,15 @@ export function KnowledgeExplorer() {
           onSubmit={onSearchSubmit}
           className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-panel p-4 text-xs"
         >
-          <label htmlFor={`${idPrefix}-q`} className="flex min-w-60 flex-1 flex-col gap-1">
+          <label htmlFor={queryInputId} className="flex min-w-60 flex-1 flex-col gap-1">
             <span className="text-muted">Technical query</span>
             <input
-              id={`${idPrefix}-q`}
+              id={queryInputId}
               type="text"
               maxLength={256}
               value={draftQuery}
+              aria-invalid={validationError ? true : undefined}
+              aria-describedby={validationError ? validationId : undefined}
               onChange={(e) => {
                 setDraftQuery(e.target.value)
                 if (validationError) setValidationError(null)
@@ -156,7 +161,7 @@ export function KnowledgeExplorer() {
             {searchQuery.isFetching ? 'Searching…' : 'Search corpus'}
           </button>
           {validationError && (
-            <span role="alert" className="w-full text-critical">
+            <span id={validationId} role="alert" className="w-full text-critical">
               {validationError}
             </span>
           )}
@@ -171,56 +176,88 @@ export function KnowledgeExplorer() {
         {searchData && (
           <div className="flex flex-col gap-3">
             <p className="text-xs text-muted">
-              Showing {searchData.items.length} result(s) from {searchData.accessible_chunks}{' '}
-              authorized chunk(s) (indexed total: {searchData.total_indexed_chunks}).{' '}
-              {searchData.safety_note}
+              Showing {searchData.items.length} result(s) across {searchData.accessible_chunks}{' '}
+              authorized chunk(s). {searchData.safety_note}
             </p>
-            {searchData.items.map((hit) => (
-              <article
-                key={hit.chunk_id}
-                className="flex flex-col gap-2 rounded-lg border border-border bg-panel p-3 text-xs"
+            {searchData.items.length === 0 ? (
+              <p
+                role="status"
+                className="rounded-lg border border-border bg-panel p-3 text-xs text-muted"
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h3 className="font-medium text-ink">
-                      #{hit.rank} {hit.title} — {hit.section}
-                    </h3>
-                    <p className="text-muted">
-                      Source: <span className="font-mono">{hit.source_path}</span> · License:{' '}
-                      {hit.license} · Origin:{' '}
-                      <span className="font-mono">{hit.provenance_origin}</span>
-                    </p>
+                No matching chunks found in authorized documentation.
+              </p>
+            ) : (
+              searchData.items.map((hit) => (
+                <article
+                  key={hit.chunk_id}
+                  className="flex flex-col gap-2 rounded-lg border border-border bg-panel p-3 text-xs"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h3 className="font-medium text-ink">
+                        #{hit.rank} {hit.title} — {hit.section}
+                      </h3>
+                      <p className="text-muted">
+                        Source: <span className="font-mono">{hit.source_path}</span> · License:{' '}
+                        {hit.license} · Origin:{' '}
+                        <span className="font-mono">{hit.provenance_origin}</span>
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 font-mono text-[11px] text-muted">
+                      <span className="rounded border border-border px-1.5 py-0.5 text-ink">
+                        RRF {hit.rrf_score.toFixed(4)}
+                      </span>
+                      <span className="rounded border border-border px-1.5 py-0.5">
+                        BM25 {hit.bm25_score.toFixed(2)}
+                      </span>
+                      <span className="rounded border border-border px-1.5 py-0.5">
+                        SVD {hit.semantic_score.toFixed(3)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1.5 font-mono text-[11px] text-muted">
-                    <span className="rounded border border-border px-1.5 py-0.5 text-ink">
-                      RRF {hit.rrf_score.toFixed(4)}
-                    </span>
-                    <span className="rounded border border-border px-1.5 py-0.5">
-                      BM25 {hit.bm25_score.toFixed(2)}
-                    </span>
-                    <span className="rounded border border-border px-1.5 py-0.5">
-                      SVD {hit.semantic_score.toFixed(3)}
-                    </span>
-                  </div>
-                </div>
-                <p className="text-ink">{hit.snippet}</p>
-                {hit.linked_node_ids && hit.linked_node_ids.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-muted">KG links:</span>
-                    {hit.linked_node_ids.map((nid) => (
-                      <button
-                        key={nid}
-                        type="button"
-                        onClick={() => setCenterNodeId(nid)}
-                        className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-accent hover:bg-border"
+                  <p className="text-ink">{hit.snippet}</p>
+                  {hit.linked_node_ids && hit.linked_node_ids.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-muted">KG links:</span>
+                      {hit.linked_node_ids.map((nid) => (
+                        <button
+                          key={nid}
+                          type="button"
+                          onClick={() => setCenterNodeId(nid)}
+                          className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-accent hover:bg-border"
+                        >
+                          {nid}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              ))
+            )}
+            {searchData.related_kg_edges && searchData.related_kg_edges.length > 0 && (
+              <div className="rounded-lg border border-border bg-panel p-3 text-xs">
+                <h3 className="mb-1.5 font-medium text-muted">
+                  Related Knowledge Graph relationships ({searchData.related_kg_edges.length})
+                </h3>
+                <ul className="flex flex-col gap-1">
+                  {searchData.related_kg_edges.map((edge) => (
+                    <li
+                      key={`rel-${edge.source_id}-${edge.relation}-${edge.target_id}-${edge.epistemic_type}`}
+                      className="flex flex-wrap items-center gap-2"
+                    >
+                      <span className="font-mono text-ink">{edge.source_id}</span>
+                      <span className="font-mono text-muted">→ {edge.relation} →</span>
+                      <span className="font-mono text-ink">{edge.target_id}</span>
+                      <span
+                        className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${EPISTEMIC_BADGE[edge.epistemic_type]}`}
                       >
-                        {nid}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </article>
-            ))}
+                        {edge.epistemic_type}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -250,6 +287,7 @@ export function KnowledgeExplorer() {
               >
                 <option value={1}>1 hop</option>
                 <option value={2}>2 hops</option>
+                <option value={3}>3 hops</option>
               </select>
             </label>
             <label htmlFor={`${idPrefix}-epistemic`} className="flex items-center gap-1 text-muted">
@@ -313,41 +351,52 @@ export function KnowledgeExplorer() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <caption className="mb-1 text-left text-muted">
-                  Directed relationships preserving physical vs causal vs correlational semantics (
-                  {kgData.edges.length} edges)
-                </caption>
-                <thead>
-                  <tr className="text-left text-muted">
-                    {['Source', 'Relation', 'Epistemic type', 'Target', 'Rationale'].map((h) => (
-                      <th key={h} scope="col" className="pr-3 font-normal">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {kgData.edges.map((edge) => (
-                    <tr
-                      key={`${edge.source_id}-${edge.relation}-${edge.target_id}`}
-                      className="border-t border-border align-top"
-                    >
-                      <td className="py-1.5 pr-3 font-mono text-ink">{edge.source_id}</td>
-                      <td className="py-1.5 pr-3 font-mono text-muted">{edge.relation}</td>
-                      <td className="py-1.5 pr-3">
-                        <span
-                          className={`rounded border px-1.5 py-0.5 font-mono text-[11px] ${EPISTEMIC_BADGE[edge.epistemic_type]}`}
-                        >
-                          {edge.epistemic_type}
-                        </span>
-                      </td>
-                      <td className="py-1.5 pr-3 font-mono text-ink">{edge.target_id}</td>
-                      <td className="py-1.5 text-muted">{edge.rationale}</td>
+              {kgData.edges.length === 0 ? (
+                <p role="status" className="py-2 text-muted">
+                  No knowledge graph edges match the current filter criteria.
+                </p>
+              ) : (
+                <table className="w-full text-xs">
+                  <caption className="mb-1 text-left text-muted">
+                    Directed relationships preserving physical vs causal vs correlational semantics
+                    ({kgData.edges.length} edges)
+                  </caption>
+                  <thead>
+                    <tr className="text-left text-muted">
+                      {['Source', 'Relation', 'Epistemic type', 'Target', 'Rationale'].map((h) => (
+                        <th key={h} scope="col" className="pr-3 font-normal">
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {kgData.edges.map((edge) => (
+                      <tr
+                        key={`${edge.source_id}-${edge.relation}-${edge.target_id}-${edge.epistemic_type}`}
+                        className="border-t border-border align-top"
+                      >
+                        <th
+                          scope="row"
+                          className="py-1.5 pr-3 text-left font-mono font-normal text-ink"
+                        >
+                          {edge.source_id}
+                        </th>
+                        <td className="py-1.5 pr-3 font-mono text-muted">{edge.relation}</td>
+                        <td className="py-1.5 pr-3">
+                          <span
+                            className={`rounded border px-1.5 py-0.5 font-mono text-[11px] ${EPISTEMIC_BADGE[edge.epistemic_type]}`}
+                          >
+                            {edge.epistemic_type}
+                          </span>
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono text-ink">{edge.target_id}</td>
+                        <td className="py-1.5 text-muted">{edge.rationale}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         )}
@@ -363,40 +412,48 @@ export function KnowledgeExplorer() {
             Retrieval evaluation failed: {describeApiError(evalQuery.error)}
           </p>
         )}
-        {evalData && (
-          <div className="overflow-x-auto rounded-lg border border-border bg-panel p-4 text-xs">
-            <table className="w-full text-xs">
-              <caption className="mb-1 text-left text-muted">
-                Ablation across {evalData.corpus_chunks} accessible chunks ({evalData.notes})
-              </caption>
-              <thead>
-                <tr className="text-left text-muted">
-                  {['Retriever mode', 'Queries', 'Recall@5', 'MRR@10', 'nDCG@5'].map((h) => (
-                    <th key={h} scope="col" className="pr-4 font-normal">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {evalData.modes.map((m) => (
-                  <tr key={m.mode} className="border-t border-border">
-                    <th
-                      scope="row"
-                      className="py-1.5 pr-4 text-left font-mono font-medium text-ink"
-                    >
-                      {m.mode}
-                    </th>
-                    <td className="py-1.5 pr-4 font-mono">{m.query_count}</td>
-                    <td className="py-1.5 pr-4 font-mono">{m.recall_at_5.toFixed(4)}</td>
-                    <td className="py-1.5 pr-4 font-mono">{m.mrr_at_10.toFixed(4)}</td>
-                    <td className="py-1.5 font-mono">{m.ndcg_at_5.toFixed(4)}</td>
+        {evalData &&
+          (evalData.modes.length === 0 ? (
+            <p
+              role="status"
+              className="rounded-lg border border-border bg-panel p-4 text-xs text-muted"
+            >
+              {evalData.notes}
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border bg-panel p-4 text-xs">
+              <table className="w-full text-xs">
+                <caption className="mb-1 text-left text-muted">
+                  Ablation across {evalData.corpus_chunks} accessible chunks ({evalData.notes})
+                </caption>
+                <thead>
+                  <tr className="text-left text-muted">
+                    {['Retriever mode', 'Queries', 'Recall@5', 'MRR@10', 'nDCG@5'].map((h) => (
+                      <th key={h} scope="col" className="pr-4 font-normal">
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {evalData.modes.map((m) => (
+                    <tr key={m.mode} className="border-t border-border">
+                      <th
+                        scope="row"
+                        className="py-1.5 pr-4 text-left font-mono font-medium text-ink"
+                      >
+                        {m.mode}
+                      </th>
+                      <td className="py-1.5 pr-4 font-mono">{m.query_count}</td>
+                      <td className="py-1.5 pr-4 font-mono">{m.recall_at_5.toFixed(4)}</td>
+                      <td className="py-1.5 pr-4 font-mono">{m.mrr_at_10.toFixed(4)}</td>
+                      <td className="py-1.5 font-mono">{m.ndcg_at_5.toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
       </section>
     </section>
   )
