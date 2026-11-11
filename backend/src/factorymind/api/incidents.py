@@ -14,11 +14,12 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from factorymind.anomaly.service import DataUnavailableError, WindowScore
 from factorymind.api.anomaly import MAX_REPLAY, ServiceDep
 from factorymind.api.security import request_id_of
-from factorymind.auth.deps import get_principal, require
+from factorymind.auth.deps import get_principal, record_audit, require
 from factorymind.auth.principal import Permission, Principal
 from factorymind.config import IDENTIFIER, Settings
 from factorymind.db.audit import append_audit, verify_chain
@@ -223,19 +224,17 @@ def _detail(repo: IncidentRepo, incident: Incident) -> IncidentDetail:
 def _audit_denied(
     request: Request, principal: Principal, reason: str, object_id: str = "-"
 ) -> None:
-    with _db(request).session() as session:
-        append_audit(
-            session,
-            tenant_id=principal.tenant_id,
-            actor_id=principal.actor_id,
-            roles=principal.roles,
-            action="authz.denied",
-            object_type="incident",
-            object_id=object_id,
-            outcome="denied",
-            request_id=request_id_of(request),
-            details={"reason": reason},
-        )
+    record_audit(
+        request,
+        action="authz.denied",
+        outcome="denied",
+        tenant_id=principal.tenant_id,
+        actor_id=principal.actor_id,
+        roles=principal.roles,
+        object_type="incident",
+        object_id=object_id,
+        reason=reason,
+    )
 
 
 def _not_found() -> HTTPException:
@@ -285,7 +284,7 @@ def create_incident(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such alarm episode in range")
     evidence = _peak_evidence(windows, match.episode.start, match.episode.end)
 
-    with _db(request).session() as session:
+    def work(session: Session) -> IncidentDetail:
         repo = IncidentRepo(session, principal)
         existing = repo.find_by_episode(
             body.asset_id, service.bundle.version, match.episode.start.to_pydatetime()
@@ -321,6 +320,8 @@ def create_incident(
             details={"asset_id": body.asset_id, "evidence_items": len(evidence)},
         )
         return _detail(repo, incident)
+
+    return _db(request).run_with_retry(work)
 
 
 def _peak_evidence(
@@ -403,7 +404,7 @@ def create_decision(
         _audit_denied(request, principal, "separation_of_duties", incident_id)
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    with _db(request).session() as session:
+    def work(session: Session) -> IncidentDetail:
         repo = IncidentRepo(session, principal)
         current = repo.get(incident_id)
         if current is None:
@@ -432,6 +433,8 @@ def create_decision(
             details={"decision": decision.decision, "version": decision.incident_version},
         )
         return _detail(repo, current)
+
+    return _db(request).run_with_retry(work)
 
 
 @router.get("/audit/events", response_model=AuditList)

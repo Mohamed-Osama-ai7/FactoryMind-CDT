@@ -243,4 +243,5 @@ def test_concurrent_denials_keep_the_audit_chain_valid(
     codes = _run_threads(6, denied)
     assert set(codes) == {403}  # audit contention must not change the outcome of a request
     with client.app.state.db.session() as session:  # type: ignore[attr-defined]
-        assert verify_chain(session, "acme").valid
+        status = verify_chain(session, "acme")
+    assert status.valid and status.events == 6  # and no event is lost (see test_audit_contention)

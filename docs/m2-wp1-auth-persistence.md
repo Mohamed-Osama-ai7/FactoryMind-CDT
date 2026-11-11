@@ -119,8 +119,23 @@ Fixed after the review, each with regression tests (`backend/tests/test_review_f
   logs a warning at start-up. Immutability must be enforced with database privileges (no UPDATE or
   DELETE for the application role). The audit hash chain still detects tampering afterwards, but
   neither mechanism stops a database owner from rewriting history. Not verified against PostgreSQL.
-- **Contention:** two writers racing for the same audit position make one transaction fail and roll
-  back (no corruption; the caller sees an error and may retry). Concurrent decisions on one incident
-  yield exactly one winner and clean 409s for the rest (tested on SQLite only).
+- **Audit contention (behaviour and failure modes):** each tenant has one hash chain, and two
+  writers that compute the same next sequence number collide on the unique `(tenant_id, seq)` key.
+  Every audit write now runs in its own transaction and is retried up to 8 times with exponential
+  backoff and jitter, recomputing the sequence from committed state on each attempt. Under 12
+  concurrent denials all 12 events are recorded in a complete, valid chain (tested on SQLite; the
+  same tests fail against the previous code, which lost about half of them).
+  - *Denials and authentication failures:* the request is denied regardless. If the event still
+    cannot be recorded after the retries, that is never silent: it is logged at CRITICAL level
+    (`AUDIT FAILURE`) and counted in `Database.audit_failures`. In that case the audit trail is
+    incomplete for that event; the count is the signal to alert on.
+  - *State changes (incident creation, decisions):* the change and its audit event commit in one
+    transaction and the whole transaction is retried. If the audit event still cannot be recorded
+    the change is rolled back, nothing is applied, and the API answers 503 with `Retry-After`.
+  - Concurrent decisions on one incident yield exactly one winner and 409 for the rest.
+  - Retries are bounded, so sustained heavy contention on one tenant's chain can still surface as
+    503 or as a counted audit failure; there is no queue and no cross-process coordination beyond the
+    database's unique key. Tested on SQLite only; not verified on PostgreSQL or with several worker
+    processes.
 - The rate limiter and the JWKS refresh cooldown are per process.
 

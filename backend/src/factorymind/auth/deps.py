@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.orm import Session
 
 from factorymind.api.security import request_id_of
 from factorymind.auth.principal import IdentityError, Permission, Principal, principal_from_claims
@@ -22,7 +23,7 @@ from factorymind.db.session import Database
 log = logging.getLogger("factorymind.security")
 
 
-def _audit(
+def record_audit(
     request: Request,
     *,
     action: str,
@@ -30,26 +31,46 @@ def _audit(
     tenant_id: str = PRE_AUTH_TENANT,
     actor_id: str = "-",
     roles: frozenset[object] = frozenset(),
+    object_type: str = "route",
     object_id: str = "-",
     reason: str = "",
 ) -> None:
+    """Record a denial or authentication failure, retrying audit-chain contention.
+
+    The request is denied either way (a denial must not depend on the audit log being writable),
+    but a failure to record is never silent: it is logged at CRITICAL level and counted in
+    ``Database.audit_failures``.
+    """
     db: Database = request.app.state.db
+
+    def write(session: Session) -> None:
+        append_audit(
+            session,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            roles=roles,
+            action=action,
+            object_type=object_type,
+            object_id=object_id,
+            outcome=outcome,
+            request_id=request_id_of(request),
+            details={"reason": reason, "method": request.method},
+        )
+
     try:
-        with db.session() as session:
-            append_audit(
-                session,
-                tenant_id=tenant_id,
-                actor_id=actor_id,
-                roles=roles,
-                action=action,
-                object_type="route",
-                object_id=object_id,
-                outcome=outcome,
-                request_id=request_id_of(request),
-                details={"reason": reason, "method": request.method},
-            )
-    except Exception:  # the request outcome must not depend on audit availability
-        log.exception("audit write failed for %s", action)
+        db.run_with_retry(write)
+    except Exception:
+        db.note_audit_failure()
+        log.critical(
+            "AUDIT FAILURE: could not record %s (%s, request %s)",
+            action,
+            reason,
+            request_id_of(request),
+            exc_info=True,
+        )
+
+
+_audit = record_audit
 
 
 def _unauthorized(reason_visible: bool) -> HTTPException:

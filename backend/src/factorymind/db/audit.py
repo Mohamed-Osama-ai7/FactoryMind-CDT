@@ -29,6 +29,10 @@ class AuditContentionError(RuntimeError):
     """Two writers raced for the same position in a tenant's chain; the caller may retry."""
 
 
+class AuditUnavailableError(RuntimeError):
+    """The audit event could not be recorded even after bounded retries."""
+
+
 def utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 

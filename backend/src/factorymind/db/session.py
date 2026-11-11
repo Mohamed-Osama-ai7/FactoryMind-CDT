@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from sqlalchemy import Engine, create_engine, event, select, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from factorymind.db.audit import AuditContentionError, AuditUnavailableError
 from factorymind.db.models import APPEND_ONLY_TABLES, SCHEMA_VERSION, Base, SchemaMeta
 
 log = logging.getLogger("factorymind.db")
+T = TypeVar("T")
+RETRY_ATTEMPTS = 8
 
 
 class SchemaMismatchError(RuntimeError):
@@ -64,6 +70,8 @@ class Database:
             _sqlite_pragmas(self.engine)
         self._ready = False
         self._lock = threading.Lock()
+        self._failure_lock = threading.Lock()
+        self.audit_failures = 0  # events that could not be recorded; never reset
 
     def ensure_ready(self) -> None:
         if self._ready:
@@ -98,6 +106,31 @@ class Database:
             except BaseException:
                 session.rollback()
                 raise
+
+    def run_with_retry(self, work: Callable[[Session], T], *, attempts: int = RETRY_ATTEMPTS) -> T:
+        """Run ``work`` in a fresh transaction, retrying when writers race for the audit chain.
+
+        Each attempt starts a new session, so the audit sequence is recomputed from committed
+        state and a failed attempt leaves nothing behind. Only contention (a sequence collision, or
+        a lock/serialization conflict) is retried; any other exception, including HTTP errors
+        raised by ``work``, propagates at once. After the last attempt ``AuditUnavailableError`` is
+        raised: the work was rolled back, it is never half-applied.
+        """
+        last: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                with self.session() as session:
+                    return work(session)
+            except (AuditContentionError, OperationalError) as exc:
+                last = exc
+                # exponential backoff with jitter so racing writers stop colliding in lockstep
+                delay = min(0.002 * 2**attempt, 0.1) * (0.5 + secrets.randbelow(1000) / 1000)
+                time.sleep(delay)
+        raise AuditUnavailableError("audit log unavailable after retries") from last
+
+    def note_audit_failure(self) -> None:
+        with self._failure_lock:
+            self.audit_failures += 1
 
     def dispose(self) -> None:
         self.engine.dispose()

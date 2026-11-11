@@ -9,7 +9,8 @@ access token and an explicit permission (deny by default); ``tests/test_auth_rou
 import logging
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
@@ -19,6 +20,7 @@ from factorymind.api.incidents import router as incidents_router
 from factorymind.api.security import SecurityMiddleware, SlidingWindowLimiter
 from factorymind.auth.tokens import TokenVerifier
 from factorymind.config import Settings, get_settings
+from factorymind.db.audit import AuditUnavailableError
 from factorymind.db.session import Database
 
 log = logging.getLogger("factorymind")
@@ -66,6 +68,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = Database(settings.sqlalchemy_url)
     app.state.limiter = SlidingWindowLimiter()
     app.add_middleware(SecurityMiddleware, max_body_bytes=settings.max_body_bytes)
+
+    @app.exception_handler(AuditUnavailableError)
+    async def audit_unavailable(_: Request, exc: AuditUnavailableError) -> JSONResponse:
+        # a state change whose audit event cannot be recorded is rolled back, never applied
+        app.state.db.note_audit_failure()
+        log.critical("AUDIT FAILURE: state change refused (audit log unavailable)", exc_info=exc)
+        return JSONResponse(
+            {"detail": "Audit log temporarily unavailable; the request was not applied"},
+            status_code=503,
+            headers={"Retry-After": "1"},
+        )
 
     @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:
