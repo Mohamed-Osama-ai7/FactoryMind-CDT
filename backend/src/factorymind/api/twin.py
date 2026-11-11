@@ -87,4 +87,3 @@ def simulate_twin_scenario(
     _ensure_apu_access(payload.asset_id, principal, request.app.state.settings)
     twin = get_digital_twin(request)
     return twin.simulate(payload)
-

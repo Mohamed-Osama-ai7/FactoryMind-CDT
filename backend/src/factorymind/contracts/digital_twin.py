@@ -130,4 +130,3 @@ class TwinSimulationResponse(BaseModel):
     trajectory: list[TwinTrajectoryPoint]
     summary: TwinScenarioSummary
     advisory_note: str
-

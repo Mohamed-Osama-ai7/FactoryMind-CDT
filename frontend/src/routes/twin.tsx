@@ -8,4 +8,3 @@ export const Route = createFileRoute('/twin')({
 function TwinPage() {
   return <DigitalTwinLab />
 }
-
