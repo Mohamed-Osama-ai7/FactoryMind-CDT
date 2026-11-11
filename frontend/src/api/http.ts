@@ -1,3 +1,5 @@
+import { getAccessToken, notifyUnauthorized, PUBLIC_PATHS } from '../auth/token'
+
 /** Error raised for any non-2xx API response, so TanStack Query treats it as a failure. */
 export class ApiError extends Error {
   readonly status: number
@@ -27,8 +29,19 @@ function parseBody(text: string): unknown {
  * Returns `{ data, status, headers }` and throws ApiError on non-2xx responses.
  */
 export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, options)
+  const path = url.split('?')[0] ?? url
+  const isPublic = PUBLIC_PATHS.includes(path)
+  const token = getAccessToken()
+  if (!isPublic && token === null) {
+    // never call a protected endpoint without a token
+    notifyUnauthorized()
+    throw new ApiError(401, { detail: 'Not signed in' })
+  }
+  const headers = new Headers(options?.headers)
+  if (!isPublic && token !== null) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(url, { ...options, headers })
   const body = NO_CONTENT.has(response.status) ? null : parseBody(await response.text())
+  if (response.status === 401 && !isPublic) notifyUnauthorized()
   if (!response.ok) {
     throw new ApiError(response.status, body)
   }

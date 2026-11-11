@@ -12,3 +12,4 @@ def test_health_reports_version_and_read_only_mode() -> None:
     assert body["status"] == "ok"
     assert body["version"] == __version__
     assert body["operating_mode"] == "advisory-read-only"
+    assert body["auth"] in {"configured", "not_configured"}

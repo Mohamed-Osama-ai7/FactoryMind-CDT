@@ -10,12 +10,11 @@ from __future__ import annotations
 import math
 import statistics
 from datetime import datetime
-from functools import lru_cache
 from itertools import pairwise
 from typing import Annotated, Any, Literal
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from factorymind.anomaly.evidence import EvidenceItem
@@ -28,7 +27,8 @@ from factorymind.anomaly.service import (
     WindowScore,
     load_bundle,
 )
-from factorymind.config import get_settings
+from factorymind.auth.deps import require_data_source
+from factorymind.auth.principal import Permission
 from factorymind.data.metropt3 import (
     ANALOG_SENSORS,
     DIGITAL_SENSORS,
@@ -53,18 +53,19 @@ router = APIRouter(prefix="/api/v1/anomaly", tags=["anomaly"])
 # ---------------------------------------------------------------- service dependency
 
 
-@lru_cache(maxsize=1)
-def _cached_service() -> AnomalyService:
-    settings = get_settings()
-    bundle, card = load_bundle(settings.models_dir, settings.anomaly_model_name)
-    return AnomalyService(bundle, card, settings.processed_dir)
-
-
-def get_anomaly_service() -> AnomalyService:
-    try:
-        return _cached_service()
-    except ModelUnavailableError as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+def get_anomaly_service(request: Request) -> AnomalyService:
+    """Load the current model once per application and keep it on ``app.state``."""
+    state = request.app.state
+    service: AnomalyService | None = getattr(state, "anomaly_service", None)
+    if service is None:
+        settings = state.settings
+        try:
+            bundle, card = load_bundle(settings.models_dir, settings.anomaly_model_name)
+        except ModelUnavailableError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        service = AnomalyService(bundle, card, settings.processed_dir)
+        state.anomaly_service = service
+    return service
 
 
 ServiceDep = Annotated[AnomalyService, Depends(get_anomaly_service)]
@@ -369,7 +370,11 @@ def _loeo(summary: dict[str, Any]) -> LoeoSummary:
 # ---------------------------------------------------------------- routes
 
 
-@router.get("/model", response_model=ModelInfo)
+@router.get(
+    "/model",
+    response_model=ModelInfo,
+    dependencies=[Depends(require_data_source(Permission.ANOMALY_READ))],
+)
 def anomaly_model(service: ServiceDep) -> ModelInfo:
     card, bundle = service.card, service.bundle
     data_range = service.data_range()
@@ -413,7 +418,11 @@ def anomaly_model(service: ServiceDep) -> ModelInfo:
     )
 
 
-@router.post("/score", response_model=ScoreResponse)
+@router.post(
+    "/score",
+    response_model=ScoreResponse,
+    dependencies=[Depends(require_data_source(Permission.ANOMALY_READ, cost=2))],
+)
 def anomaly_score(request: ScoreRequest, service: ServiceDep) -> ScoreResponse:
     result = service.score_block(request.to_frame())
     return ScoreResponse(
@@ -426,7 +435,11 @@ def anomaly_score(request: ScoreRequest, service: ServiceDep) -> ScoreResponse:
     )
 
 
-@router.get("/replay", response_model=ReplayResponse)
+@router.get(
+    "/replay",
+    response_model=ReplayResponse,
+    dependencies=[Depends(require_data_source(Permission.ANOMALY_READ, cost=5))],
+)
 def anomaly_replay(
     service: ServiceDep,
     start: Annotated[datetime, Query(description="Range start (naive local train time)")],

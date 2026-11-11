@@ -3,13 +3,18 @@ evaluation results come from the real MetroPT-3 data."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from factorymind.data.metropt3 import ANALOG_SENSORS, DIGITAL_SENSORS
+
+if TYPE_CHECKING:
+    from factorymind.anomaly.service import AnomalyService
+    from tests.auth_helpers import AuthKit
 
 
 def simulate_apu(
@@ -76,9 +81,25 @@ def apu_normal() -> pd.DataFrame:
 
 
 @pytest.fixture
-def clear_service_cache() -> Iterator[None]:
-    from factorymind.api import anomaly
+def kit(tmp_path: Path) -> AuthKit:
+    from tests.auth_helpers import AuthKit
 
-    anomaly._cached_service.cache_clear()
-    yield
-    anomaly._cached_service.cache_clear()
+    return AuthKit(tmp_path)
+
+
+@pytest.fixture(scope="session")
+def anomaly_service(tmp_path_factory: pytest.TempPathFactory) -> AnomalyService:
+    """A real model trained on simulated telemetry plus that telemetry for replay."""
+    from factorymind.anomaly import experiment
+    from factorymind.anomaly.service import AnomalyService, load_bundle
+    from factorymind.data import metropt3
+    from tests.test_anomaly_experiment import REPORTS, config, telemetry
+
+    output = experiment.run(config(), telemetry(), REPORTS)
+    root = tmp_path_factory.mktemp("service")
+    experiment.save(output, root / "artifacts", "unit-model")
+    processed = root / "processed"
+    (processed / metropt3.DATASET_ID).mkdir(parents=True)
+    telemetry().to_parquet(processed / metropt3.DATASET_ID / "telemetry.parquet")
+    bundle, card = load_bundle(root / "artifacts" / "models", "unit-model")
+    return AnomalyService(bundle, card, processed, REPORTS)

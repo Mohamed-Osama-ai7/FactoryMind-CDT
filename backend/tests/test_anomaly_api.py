@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -7,33 +6,22 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from factorymind.anomaly import experiment
-from factorymind.anomaly.service import AnomalyService, load_bundle
-from factorymind.api.anomaly import get_anomaly_service
-from factorymind.api.app import create_app
+from factorymind.anomaly.service import AnomalyService
 from factorymind.data import metropt3
+from tests.auth_helpers import AuthKit, make_client
 from tests.conftest import simulate_apu
-from tests.test_anomaly_experiment import REPORTS, config, telemetry
-
-
-@pytest.fixture(scope="module")
-def service(tmp_path_factory: pytest.TempPathFactory) -> AnomalyService:
-    # the simulated duty rule is the default: pin it so the API tests are deterministic
-    output = experiment.run(config(), telemetry(), REPORTS)
-    root = tmp_path_factory.mktemp("api")
-    experiment.save(output, root / "artifacts", "unit-model")
-    processed = root / "processed"
-    (processed / metropt3.DATASET_ID).mkdir(parents=True)
-    telemetry().to_parquet(processed / metropt3.DATASET_ID / "telemetry.parquet")
-    bundle, card = load_bundle(root / "artifacts" / "models", "unit-model")
-    return AnomalyService(bundle, card, processed, REPORTS)
 
 
 @pytest.fixture
-def client(service: AnomalyService) -> Iterator[TestClient]:
-    app = create_app()
-    app.dependency_overrides[get_anomaly_service] = lambda: service
-    yield TestClient(app)
+def service(anomaly_service: AnomalyService) -> AnomalyService:
+    return anomaly_service
+
+
+@pytest.fixture
+def client(kit: AuthKit, anomaly_service: AnomalyService) -> TestClient:
+    test_client = make_client(kit, anomaly_service)
+    test_client.headers.update(kit.headers(roles=["viewer"]))
+    return test_client
 
 
 def payload(frame: pd.DataFrame) -> dict[str, Any]:
@@ -249,30 +237,21 @@ def test_replay_outside_data_returns_empty(client: TestClient) -> None:
 
 
 def test_replay_without_processed_data_is_503_without_paths(
-    service: AnomalyService, tmp_path: Path
+    kit: AuthKit, service: AnomalyService, tmp_path: Path
 ) -> None:
-    app = create_app()
-    app.dependency_overrides[get_anomaly_service] = lambda: AnomalyService(
-        service.bundle, service.card, tmp_path
-    )
-    response = TestClient(app).get(
+    broken = AnomalyService(service.bundle, service.card, tmp_path)
+    client = make_client(kit, broken)
+    response = client.get(
         "/api/v1/anomaly/replay",
         params={"start": "2020-01-05T00:00:00", "end": "2020-01-05T01:00:00"},
+        headers=kit.headers(),
     )
     assert response.status_code == 503 and str(tmp_path) not in response.text
 
 
-def test_missing_model_returns_503_without_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, clear_service_cache: None
-) -> None:
-    from factorymind.config import get_settings
-
-    monkeypatch.setenv("FACTORYMIND_ARTIFACTS_DIR", str(tmp_path))
-    get_settings.cache_clear()
-    try:
-        response = TestClient(create_app()).get("/api/v1/anomaly/model")
-        assert response.status_code == 503
-        assert "No current model" in response.json()["detail"]
-        assert str(tmp_path) not in response.text
-    finally:
-        get_settings.cache_clear()
+def test_missing_model_returns_503_without_paths(kit: AuthKit, tmp_path: Path) -> None:
+    client = make_client(kit, artifacts_dir=tmp_path)  # no model has been trained there
+    response = client.get("/api/v1/anomaly/model", headers=kit.headers())
+    assert response.status_code == 503
+    assert "No current model" in response.json()["detail"]
+    assert str(tmp_path) not in response.text

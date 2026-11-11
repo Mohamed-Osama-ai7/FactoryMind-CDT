@@ -5,8 +5,10 @@
  * Evidence-grounded, uncertainty-aware decision support. Advisory only.
  * OpenAPI spec version: 0.1.0
  */
+import type { HealthResponseAuth } from './healthResponseAuth';
 
 export interface HealthResponse {
+  auth: HealthResponseAuth;
   environment: string;
   operating_mode: 'advisory-read-only';
   status: 'ok';
