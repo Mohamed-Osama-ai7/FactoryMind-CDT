@@ -155,6 +155,66 @@
         "title": "AlarmEpisode",
         "type": "object"
       },
+      "ArtifactAttestationEntry": {
+        "additionalProperties": false,
+        "description": "Verification status of one governance, workflow, config, or model artifact.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "json_manifest",
+              "text_license",
+              "yaml_workflow",
+              "joblib_legacy"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "status": {
+            "enum": [
+              "verified",
+              "sha_pinned",
+              "missing",
+              "tamper_or_hash_mismatch",
+              "legacy_pickle_advisory"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "relative_path",
+          "format",
+          "status",
+          "detail"
+        ],
+        "title": "ArtifactAttestationEntry",
+        "type": "object"
+      },
       "AssetDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1218,6 +1278,418 @@
           }
         },
         "title": "EconomicAssumptions",
+        "type": "object"
+      },
+      "EdgeBufferStats": {
+        "additionalProperties": false,
+        "description": "Bounded ring-buffer and reconnect backoff state.",
+        "properties": {
+          "backoff_schedule_s": {
+            "default": [],
+            "items": {
+              "type": "number"
+            },
+            "title": "Backoff Schedule S",
+            "type": "array"
+          },
+          "capacity": {
+            "minimum": 4.0,
+            "title": "Capacity",
+            "type": "integer"
+          },
+          "evicted_count": {
+            "minimum": 0.0,
+            "title": "Evicted Count",
+            "type": "integer"
+          },
+          "reconnect_attempts": {
+            "minimum": 0.0,
+            "title": "Reconnect Attempts",
+            "type": "integer"
+          },
+          "retained_count": {
+            "minimum": 0.0,
+            "title": "Retained Count",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "standby_offline",
+              "connected_readonly",
+              "reconnecting_backoff",
+              "degraded_buffer_evicting"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capacity",
+          "retained_count",
+          "evicted_count",
+          "reconnect_attempts",
+          "state"
+        ],
+        "title": "EdgeBufferStats",
+        "type": "object"
+      },
+      "EdgeCadenceReport": {
+        "additionalProperties": false,
+        "description": "Sampling cadence and uninterpolated gap diagnostics.",
+        "properties": {
+          "cadence_status": {
+            "enum": [
+              "nominal",
+              "gapped_or_jittered",
+              "stale_or_invalid"
+            ],
+            "title": "Cadence Status",
+            "type": "string"
+          },
+          "duplicate_timestamp_count": {
+            "minimum": 0.0,
+            "title": "Duplicate Timestamp Count",
+            "type": "integer"
+          },
+          "expected_cadence_s": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expected Cadence S",
+            "type": "number"
+          },
+          "gap_count": {
+            "minimum": 0.0,
+            "title": "Gap Count",
+            "type": "integer"
+          },
+          "max_interval_s": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Interval S"
+          },
+          "min_interval_s": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval S"
+          },
+          "observed_median_interval_s": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Median Interval S"
+          },
+          "out_of_order_count": {
+            "minimum": 0.0,
+            "title": "Out Of Order Count",
+            "type": "integer"
+          },
+          "sample_count": {
+            "minimum": 0.0,
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "unallowlisted_sensors_ignored": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unallowlisted Sensors Ignored",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sample_count",
+          "expected_cadence_s",
+          "out_of_order_count",
+          "duplicate_timestamp_count",
+          "gap_count",
+          "cadence_status"
+        ],
+        "title": "EdgeCadenceReport",
+        "type": "object"
+      },
+      "EdgeSampleValidationRequest": {
+        "additionalProperties": false,
+        "description": "Stateless edge buffer, cadence, and node-allowlist validation request.",
+        "properties": {
+          "asset_id": {
+            "default": "metropt3-apu-1",
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "buffer_capacity_override": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 4.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buffer Capacity Override"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/EdgeTelemetrySampleInput"
+            },
+            "maxItems": 500,
+            "minItems": 2,
+            "title": "Samples",
+            "type": "array"
+          },
+          "simulate_disconnects": {
+            "default": 0,
+            "maximum": 20.0,
+            "minimum": 0.0,
+            "title": "Simulate Disconnects",
+            "type": "integer"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "samples"
+        ],
+        "title": "EdgeSampleValidationRequest",
+        "type": "object"
+      },
+      "EdgeSampleValidationResponse": {
+        "additionalProperties": false,
+        "description": "Result of stateless read-only edge connector validation.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "buffer": {
+            "$ref": "#/components/schemas/EdgeBufferStats"
+          },
+          "cadence": {
+            "$ref": "#/components/schemas/EdgeCadenceReport"
+          },
+          "endpoint_allowlist_ok": {
+            "title": "Endpoint Allowlist Ok",
+            "type": "boolean"
+          },
+          "protocol": {
+            "enum": [
+              "opcua_readonly",
+              "mqtt_readonly",
+              "historian_readonly"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "read_only": {
+            "const": true,
+            "default": true,
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "safety_note": {
+            "title": "Safety Note",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "source_id",
+          "asset_id",
+          "protocol",
+          "endpoint_allowlist_ok",
+          "cadence",
+          "buffer",
+          "safety_note"
+        ],
+        "title": "EdgeSampleValidationResponse",
+        "type": "object"
+      },
+      "EdgeSourceStatusEntry": {
+        "additionalProperties": false,
+        "description": "Summary of one registered read-only OT/edge source.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "buffer_utilization": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Buffer Utilization",
+            "type": "number"
+          },
+          "connection_state": {
+            "enum": [
+              "standby_offline",
+              "connected_readonly",
+              "reconnecting_backoff",
+              "degraded_buffer_evicting"
+            ],
+            "title": "Connection State",
+            "type": "string"
+          },
+          "endpoint_url": {
+            "title": "Endpoint Url",
+            "type": "string"
+          },
+          "max_buffer_records": {
+            "minimum": 4.0,
+            "title": "Max Buffer Records",
+            "type": "integer"
+          },
+          "node_allowlist_count": {
+            "minimum": 1.0,
+            "title": "Node Allowlist Count",
+            "type": "integer"
+          },
+          "nominal_cadence_s": {
+            "exclusiveMinimum": 0.0,
+            "title": "Nominal Cadence S",
+            "type": "number"
+          },
+          "protocol": {
+            "enum": [
+              "opcua_readonly",
+              "mqtt_readonly",
+              "historian_readonly"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          },
+          "read_only": {
+            "const": true,
+            "default": true,
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "reconnect_attempts": {
+            "minimum": 0.0,
+            "title": "Reconnect Attempts",
+            "type": "integer"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "ssrf_policy_status": {
+            "enum": [
+              "allowlisted_host_verified",
+              "blocked"
+            ],
+            "title": "Ssrf Policy Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "asset_id",
+          "protocol",
+          "endpoint_url",
+          "connection_state",
+          "nominal_cadence_s",
+          "max_buffer_records",
+          "node_allowlist_count",
+          "ssrf_policy_status",
+          "buffer_utilization",
+          "reconnect_attempts"
+        ],
+        "title": "EdgeSourceStatusEntry",
+        "type": "object"
+      },
+      "EdgeSourcesResponse": {
+        "additionalProperties": false,
+        "description": "Permission-scoped listing of read-only OT/edge sources.",
+        "properties": {
+          "advisory_only": {
+            "const": true,
+            "default": true,
+            "title": "Advisory Only",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/EdgeSourceStatusEntry"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "write_capabilities": {
+            "const": "none_disabled_by_architecture",
+            "default": "none_disabled_by_architecture",
+            "title": "Write Capabilities",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "title": "EdgeSourcesResponse",
+        "type": "object"
+      },
+      "EdgeTelemetrySampleInput": {
+        "additionalProperties": false,
+        "description": "Single telemetry sample submitted for stateless edge validation.",
+        "properties": {
+          "sensor_values": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "maxProperties": 64,
+            "minProperties": 1,
+            "title": "Sensor Values",
+            "type": "object"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timestamp",
+          "source_id",
+          "sensor_values"
+        ],
+        "title": "EdgeTelemetrySampleInput",
         "type": "object"
       },
       "EventEvidencePackage": {
@@ -5459,6 +5931,61 @@
         "title": "SpecialistModelEntry",
         "type": "object"
       },
+      "SupplyChainHardeningResponse": {
+        "additionalProperties": false,
+        "description": "Repository supply-chain, CI pinning, license, and artifact attestation audit.",
+        "properties": {
+          "advisory_only": {
+            "const": true,
+            "default": true,
+            "title": "Advisory Only",
+            "type": "boolean"
+          },
+          "attestations": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactAttestationEntry"
+            },
+            "title": "Attestations",
+            "type": "array"
+          },
+          "ci_actions_sha_pinned": {
+            "title": "Ci Actions Sha Pinned",
+            "type": "boolean"
+          },
+          "cross_system_benchmarks": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Cross System Benchmarks",
+            "type": "object"
+          },
+          "license_present": {
+            "title": "License Present",
+            "type": "boolean"
+          },
+          "non_pickle_attestation_ready": {
+            "title": "Non Pickle Attestation Ready",
+            "type": "boolean"
+          },
+          "unpinned_workflow_uses": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unpinned Workflow Uses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "license_present",
+          "ci_actions_sha_pinned",
+          "non_pickle_attestation_ready",
+          "attestations",
+          "cross_system_benchmarks"
+        ],
+        "title": "SupplyChainHardeningResponse",
+        "type": "object"
+      },
       "TimelineEntry": {
         "description": "Chronological event-timeline entry preserving original timestamps and origins.",
         "properties": {
@@ -7494,6 +8021,120 @@
         "summary": "List Datasets",
         "tags": [
           "assets"
+        ]
+      }
+    },
+    "/api/v1/edge/hardening": {
+      "get": {
+        "description": "Inspect repository license, SHA-pinned CI workflow, and artifact attestation status.",
+        "operationId": "get_supply_chain_hardening",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplyChainHardeningResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Supply Chain Hardening",
+        "tags": [
+          "edge"
+        ]
+      }
+    },
+    "/api/v1/edge/sources": {
+      "get": {
+        "description": "List SSRF-verified read-only OT & edge telemetry sources visible to this caller.",
+        "operationId": "get_edge_sources",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EdgeSourcesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Edge Sources",
+        "tags": [
+          "edge"
+        ]
+      }
+    },
+    "/api/v1/edge/validate-sample": {
+      "post": {
+        "description": "Validate sampling cadence, bounded ring-buffer eviction, and tag allowlists statelessly.",
+        "operationId": "validate_edge_sample",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EdgeSampleValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EdgeSampleValidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Edge Sample",
+        "tags": [
+          "edge"
         ]
       }
     },

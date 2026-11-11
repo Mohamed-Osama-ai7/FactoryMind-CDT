@@ -17,6 +17,7 @@ ALLOWED_MUTATING_OPERATIONS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/twin/simulate"),  # stateless counterfactual digital-twin simulation
         ("POST", "/api/v1/optimization/compare"),  # stateless bounded maintenance option ranking
         ("POST", "/api/v1/copilot/query"),  # stateless read-only citation-grounded copilot
+        ("POST", "/api/v1/edge/validate-sample"),  # stateless read-only edge cadence/buffer check
         ("POST", "/api/v1/incidents"),  # records an incident re-detected by the server
         ("POST", "/api/v1/incidents/{incident_id}/decisions"),  # human review record
         ("POST", "/api/v1/incidents/{incident_id}/observations"),  # human field observation
