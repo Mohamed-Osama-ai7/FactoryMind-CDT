@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import math
+import re
 from abc import ABC
 from collections import deque
 from collections.abc import Sequence
@@ -47,6 +48,10 @@ _BLOCKED_HOSTNAMES: Final[frozenset[str]] = frozenset(
         "instance-data",
     }
 )
+_BLOCKED_IPS: Final[frozenset[str]] = frozenset({"100.100.100.200"})
+_NUMERIC_IPV4_LIKE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}$"
+)
 
 
 class EdgeSecurityError(ValueError):
@@ -65,49 +70,68 @@ def validate_edge_endpoint(
 ) -> tuple[str, int | None]:
     """Validate an industrial read-only endpoint URL against SSRF and host-allowlist policy.
 
-    Rejects insecure schemes, embedded userinfo credentials, query strings/fragments,
-    private/loopback/link-local/reserved IP literals, cloud metadata hostnames, and hosts outside
-    ``allowed_hosts``.
+    Rejects insecure schemes, embedded userinfo credentials, query strings/fragments, control
+    characters, non-canonical numeric/octal/hex IPv4 literals, non-global/private/loopback/
+    link-local/CGNAT IPs, cloud metadata hostnames, and hosts outside ``allowed_hosts``.
     """
-    parsed = urlsplit(endpoint_url.strip())
+    raw = endpoint_url.strip()
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in endpoint_url):
+        raise EdgeSecurityError("Control characters are forbidden in edge endpoint URLs")
+    if "?" in raw or "#" in raw:
+        raise EdgeSecurityError(
+            "Query parameters and fragments are not permitted in edge endpoints"
+        )
+    parsed = urlsplit(raw)
     scheme = parsed.scheme.lower()
     if scheme not in _ALLOWED_SCHEMES[protocol]:
         raise EdgeSecurityError(
             f"Protocol {protocol} does not permit URI scheme {scheme!r}; "
             f"allowed: {sorted(_ALLOWED_SCHEMES[protocol])}"
         )
-    if parsed.username is not None or parsed.password is not None:
+    if "@" in parsed.netloc or parsed.username is not None or parsed.password is not None:
         raise EdgeSecurityError("Embedded credentials in edge endpoint URL are forbidden")
-    if parsed.query or parsed.fragment:
-        raise EdgeSecurityError(
-            "Query parameters and fragments are not permitted in edge endpoints"
-        )
+    if re.search(r":(?=$|/)", parsed.netloc):
+        raise EdgeSecurityError("Malformed empty port in edge endpoint URL")
     host = (parsed.hostname or "").strip().lower().rstrip(".")
     if not host:
         raise EdgeSecurityError("Edge endpoint must include a hostname")
-    if host in _BLOCKED_HOSTNAMES or host.endswith(".local"):
+    if host in _BLOCKED_HOSTNAMES or host.endswith(".localhost") or host.endswith(".local"):
         raise EdgeSecurityError(f"Blocked internal/metadata hostname {host!r}")
-    try:
-        ip_obj = ipaddress.ip_address(host)
-    except ValueError:
-        ip_obj = None
+    if _NUMERIC_IPV4_LIKE_RE.fullmatch(host):
+        try:
+            ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address | None = ipaddress.IPv4Address(
+                host
+            )
+        except ValueError as exc:
+            raise EdgeSecurityError(f"Blocked non-canonical IPv4 literal {host!r}") from exc
+    else:
+        try:
+            ip_obj = ipaddress.ip_address(host)
+        except ValueError:
+            ip_obj = None
     candidates = [ip_obj] if ip_obj is not None else []
     if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped is not None:
         candidates.append(ip_obj.ipv4_mapped)
     for addr in candidates:
         if (
-            addr.is_private
+            not addr.is_global
+            or str(addr) in _BLOCKED_IPS
+            or addr.is_private
             or addr.is_loopback
             or addr.is_link_local
             or addr.is_multicast
             or addr.is_reserved
             or addr.is_unspecified
         ):
-            raise EdgeSecurityError(f"Blocked non-public IP literal {host!r} in edge endpoint")
+            raise EdgeSecurityError(
+                f"Blocked non-global/public IP literal {host!r} in edge endpoint"
+            )
     try:
         port = parsed.port
     except ValueError as exc:
         raise EdgeSecurityError("Malformed port in edge endpoint URL") from exc
+    if port is not None and port == 0:
+        raise EdgeSecurityError("Port 0 is not permitted in edge endpoints")
     allow_set = {item.strip().lower().rstrip(".") for item in allowed_hosts if item.strip()}
     if host not in allow_set:
         raise EdgeSecurityError(f"Endpoint hostname {host!r} is not in source host allowlist")
@@ -183,7 +207,12 @@ class _BaseReadOnlyEdgeAdapter(ABC):
             protocol=self.config.protocol,
             allowed_hosts=self.config.allowed_hosts,
         )
-        capacity = buffer_capacity_override or self.config.max_buffer_records
+        if buffer_capacity_override is not None:
+            if buffer_capacity_override < 4:
+                raise EdgeValidationError("buffer_capacity_override must be at least 4")
+            capacity = buffer_capacity_override
+        else:
+            capacity = self.config.max_buffer_records
         ring: deque[dict[str, object]] = deque(maxlen=capacity)
         evicted = 0
         allowed_sensors = set(self.config.node_allowlist)
@@ -201,17 +230,20 @@ class _BaseReadOnlyEdgeAdapter(ABC):
                 if key not in allowed_sensors:
                     ignored_sensors.add(key)
                     continue
+                if isinstance(raw_val, bool):
+                    raise EdgeValidationError(f"Boolean sensor reading not allowed for {key!r}")
                 val = float(raw_val)
                 if not math.isfinite(val):
                     raise EdgeValidationError(f"Non-finite sensor reading for {key!r}")
                 filtered[key] = val
-            timestamps.append(_normalize_utc(sample.timestamp))
             if not filtered:
                 continue
+            ts = _normalize_utc(sample.timestamp)
+            timestamps.append(ts)
             accepted_rows += 1
             if len(ring) == capacity:
                 evicted += 1
-            ring.append({"timestamp": timestamps[-1].isoformat(), "sensors": filtered})
+            ring.append({"timestamp": ts.isoformat(), "sensors": filtered})
 
         out_of_order = 0
         duplicates = 0

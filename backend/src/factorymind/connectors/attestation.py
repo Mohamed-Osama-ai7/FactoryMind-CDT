@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
+from factorymind.config import IDENTIFIER
 from factorymind.contracts.connectors import (
     ArtifactAttestationEntry,
     AttestationStatus,
@@ -19,6 +20,11 @@ from factorymind.contracts.connectors import (
 _WORKFLOW_USES_RE: Final[re.Pattern[str]] = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)")
 _SHA_PINNED_RE: Final[re.Pattern[str]] = re.compile(r"^[^@]+@[0-9a-f]{40}$")
 _FORBIDDEN_PICKLE_FORMATS: Final[frozenset[str]] = frozenset({"pickle", "joblib", "dill"})
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise ValueError(f"Non-standard JSON constant {value!r} is forbidden")
+
 
 _CROSS_SYSTEM_BENCHMARKS: Final[dict[str, str]] = {
     "M2-WP0/WP2 MetroPT-3 LOEO Detection": (
@@ -37,7 +43,7 @@ _CROSS_SYSTEM_BENCHMARKS: Final[dict[str, str]] = {
         "0 violations, 3.78x leak ratio"
     ),
     "M4-WP2 Controlled Copilot": (
-        "24/24 red-team probes blocked, 5/5 benign allowed, strict [C1..Cn] subset check"
+        "6 permission-scoped read-only tools, red-team refusal firewall + [C1..Cn] subset gate"
     ),
     "M5-WP0 OT/Edge & Supply Chain": (
         "Read-only OPC-UA/MQTT/Historian adapters, SSRF allowlists, MIT LICENSE, SHA-pinned CI"
@@ -108,48 +114,55 @@ def verify_non_pickle_manifest(
         return "missing", None, "Non-pickle manifest file not present"
     try:
         raw = manifest_path.read_bytes()
-        data = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        return "tamper_or_hash_mismatch", None, f"Invalid JSON manifest: {exc}"
+    except OSError:
+        return "tamper_or_hash_mismatch", None, "Unreadable manifest file"
+    digest = sha256_bytes(raw)
+    try:
+        data = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        return "tamper_or_hash_mismatch", digest, f"Invalid JSON manifest: {exc}"
     if not isinstance(data, dict):
-        return "tamper_or_hash_mismatch", None, "Manifest root must be a JSON object"
+        return "tamper_or_hash_mismatch", digest, "Manifest root must be a JSON object"
     fmt = str(data.get("artifact_format", "")).strip().lower()
     if fmt in _FORBIDDEN_PICKLE_FORMATS or fmt != "json_parameters_v1":
         return (
             "tamper_or_hash_mismatch",
-            sha256_bytes(raw),
+            digest,
             f"Unsupported or unsafe artifact_format {fmt!r}",
         )
     params = data.get("parameters")
     expected_sha = data.get("parameters_sha256")
     if not isinstance(params, dict) or not isinstance(expected_sha, str):
-        return "tamper_or_hash_mismatch", sha256_bytes(raw), "Missing parameters or digest"
+        return "tamper_or_hash_mismatch", digest, "Missing parameters or digest"
     try:
         actual_sha = sha256_bytes(canonical_json_bytes(params))
-    except ValueError as exc:
-        return "tamper_or_hash_mismatch", sha256_bytes(raw), f"Non-finite parameter: {exc}"
+    except (ValueError, TypeError) as exc:
+        return "tamper_or_hash_mismatch", digest, f"Non-finite parameter: {exc}"
     if not hmac.compare_digest(actual_sha, expected_sha):
         return (
             "tamper_or_hash_mismatch",
-            sha256_bytes(raw),
+            digest,
             "Parameters SHA-256 mismatch (manifest modified)",
         )
     if hmac_key is not None:
         sig = data.get("hmac_sha256")
         if not isinstance(sig, str):
-            return "tamper_or_hash_mismatch", sha256_bytes(raw), "Missing required HMAC signature"
-        material = canonical_json_bytes(
-            {
-                "schema_version": data.get("schema_version"),
-                "artifact_format": fmt,
-                "model_name": data.get("model_name"),
-                "parameters_sha256": expected_sha,
-            }
-        )
+            return "tamper_or_hash_mismatch", digest, "Missing required HMAC signature"
+        try:
+            material = canonical_json_bytes(
+                {
+                    "schema_version": data.get("schema_version"),
+                    "artifact_format": fmt,
+                    "model_name": data.get("model_name"),
+                    "parameters_sha256": expected_sha,
+                }
+            )
+        except (ValueError, TypeError) as exc:
+            return "tamper_or_hash_mismatch", digest, f"Invalid manifest metadata: {exc}"
         expected_sig = hmac.new(hmac_key, material, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected_sig):
-            return "tamper_or_hash_mismatch", sha256_bytes(raw), "HMAC-SHA256 verification failed"
-    return "verified", sha256_bytes(raw), "Non-pickle JSON manifest hash verified"
+            return "tamper_or_hash_mismatch", digest, "HMAC-SHA256 verification failed"
+    return "verified", digest, "Non-pickle JSON manifest hash verified"
 
 
 def audit_ci_workflow(ci_path: Path) -> tuple[bool, tuple[str, ...], str | None, str]:
@@ -165,7 +178,7 @@ def audit_ci_workflow(ci_path: Path) -> tuple[bool, tuple[str, ...], str | None,
         if not match:
             continue
         seen += 1
-        target = match.group(1)
+        target = match.group(1).strip("'\"")
         if not _SHA_PINNED_RE.fullmatch(target):
             unpinned.append(target)
     if seen == 0:
@@ -183,10 +196,13 @@ def audit_ci_workflow(ci_path: Path) -> tuple[bool, tuple[str, ...], str | None,
 def _audit_json_file(path: Path) -> tuple[AttestationStatus, str | None, str]:
     if not path.is_file():
         return "missing", None, "File not found"
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return "tamper_or_hash_mismatch", None, "Unreadable JSON file"
     digest = sha256_bytes(raw)
     try:
-        json.loads(raw.decode("utf-8"))
+        json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         return "tamper_or_hash_mismatch", digest, f"Malformed JSON: {exc}"
     return "verified", digest, "Valid UTF-8 JSON verified by SHA-256"
@@ -264,59 +280,112 @@ def build_supply_chain_report(
         base_dir = (models_dir / model_name).resolve()
         pointer = base_dir / "CURRENT"
         if pointer.is_file():
-            version = pointer.read_text(encoding="utf-8").strip()
-            version_dir = (base_dir / version).resolve()
-            if (
-                version
-                and version_dir != base_dir
-                and version_dir.is_relative_to(base_dir)
-                and version_dir.is_dir()
-            ):
-                manifest_path = version_dir / "model_manifest.json"
-                if manifest_path.is_file():
-                    m_status, m_sha, m_detail = verify_non_pickle_manifest(manifest_path)
-                    non_pickle_ready = m_status == "verified"
+            try:
+                version = pointer.read_text(encoding="utf-8").strip()
+            except OSError:
+                version = ""
+            if not IDENTIFIER.fullmatch(version):
+                non_pickle_ready = False
+                attestations.append(
+                    ArtifactAttestationEntry(
+                        name=f"Model {model_name} CURRENT Pointer",
+                        relative_path=f"artifacts/{model_name}/CURRENT",
+                        format="json_manifest",
+                        status="tamper_or_hash_mismatch",
+                        sha256=None,
+                        detail="Invalid model version identifier in CURRENT pointer",
+                    )
+                )
+            else:
+                try:
+                    version_dir = (base_dir / version).resolve()
+                    valid_dir = (
+                        version_dir != base_dir
+                        and version_dir.is_relative_to(base_dir)
+                        and version_dir.is_dir()
+                    )
+                except (OSError, ValueError):
+                    valid_dir = False
+                    version_dir = base_dir
+                if not valid_dir:
+                    non_pickle_ready = False
                     attestations.append(
                         ArtifactAttestationEntry(
-                            name=f"Model {version} JSON Manifest",
-                            relative_path=f"artifacts/{model_name}/{version}/model_manifest.json",
+                            name=f"Model {version} Directory",
+                            relative_path=f"artifacts/{model_name}/{version}",
                             format="json_manifest",
-                            status=m_status,
-                            sha256=m_sha,
-                            detail=m_detail,
+                            status="missing",
+                            sha256=None,
+                            detail="Model version directory missing or invalid",
                         )
                     )
-                joblib_path = version_dir / "model.joblib"
-                card_path = version_dir / "model_card.json"
-                if joblib_path.is_file():
-                    j_sha = sha256_bytes(joblib_path.read_bytes())
-                    c_status, _, _ = _audit_json_file(card_path)
-                    card_match = False
-                    if c_status == "verified":
-                        card_obj = json.loads(card_path.read_text(encoding="utf-8"))
-                        card_match = (
-                            isinstance(card_obj, dict) and card_obj.get("artifact_sha256") == j_sha
+                else:
+                    manifest_path = version_dir / "model_manifest.json"
+                    if manifest_path.is_file():
+                        m_status, m_sha, m_detail = verify_non_pickle_manifest(manifest_path)
+                        non_pickle_ready = m_status == "verified"
+                        attestations.append(
+                            ArtifactAttestationEntry(
+                                name=f"Model {version} JSON Manifest",
+                                relative_path=(
+                                    f"artifacts/{model_name}/{version}/model_manifest.json"
+                                ),
+                                format="json_manifest",
+                                status=m_status,
+                                sha256=m_sha,
+                                detail=m_detail,
+                            )
                         )
-                    attestations.append(
-                        ArtifactAttestationEntry(
-                            name=f"Model {version} Legacy Joblib Bundle",
-                            relative_path=f"artifacts/{model_name}/{version}/model.joblib",
-                            format="joblib_legacy",
-                            status=(
-                                "legacy_pickle_advisory"
-                                if card_match
-                                else "tamper_or_hash_mismatch"
-                            ),
-                            sha256=j_sha,
-                            detail=(
-                                "Legacy joblib/pickle bundle matches model_card.json "
-                                "artifact_sha256; json_parameters_v1 manifest verifier ready"
-                                if card_match
-                                else "Legacy joblib bundle fails model_card.json "
-                                "artifact_sha256 check"
-                            ),
+                    else:
+                        non_pickle_ready = False
+                        attestations.append(
+                            ArtifactAttestationEntry(
+                                name=f"Model {version} JSON Manifest",
+                                relative_path=(
+                                    f"artifacts/{model_name}/{version}/model_manifest.json"
+                                ),
+                                format="json_manifest",
+                                status="missing",
+                                sha256=None,
+                                detail="Non-pickle json_parameters_v1 manifest not present for "
+                                "this runtime bundle",
+                            )
                         )
-                    )
+                    joblib_path = version_dir / "model.joblib"
+                    card_path = version_dir / "model_card.json"
+                    if joblib_path.is_file():
+                        j_sha = sha256_bytes(joblib_path.read_bytes())
+                        c_status, _, _ = _audit_json_file(card_path)
+                        card_match = False
+                        if c_status == "verified":
+                            card_obj = json.loads(
+                                card_path.read_text(encoding="utf-8"),
+                                parse_constant=_reject_json_constant,
+                            )
+                            card_match = (
+                                isinstance(card_obj, dict)
+                                and card_obj.get("artifact_sha256") == j_sha
+                            )
+                        attestations.append(
+                            ArtifactAttestationEntry(
+                                name=f"Model {version} Legacy Joblib Bundle",
+                                relative_path=f"artifacts/{model_name}/{version}/model.joblib",
+                                format="joblib_legacy",
+                                status=(
+                                    "legacy_pickle_advisory"
+                                    if card_match
+                                    else "tamper_or_hash_mismatch"
+                                ),
+                                sha256=j_sha,
+                                detail=(
+                                    "Legacy joblib/pickle bundle matches model_card.json "
+                                    "artifact_sha256; json_parameters_v1 manifest verifier ready"
+                                    if card_match
+                                    else "Legacy joblib bundle fails model_card.json "
+                                    "artifact_sha256 check"
+                                ),
+                            )
+                        )
 
     return SupplyChainHardeningResponse(
         advisory_only=True,

@@ -77,26 +77,46 @@ export function EdgeConnectorsWorkspace() {
     )
   }
 
+  const sourcesData = sourcesQuery.data?.status === 200 ? sourcesQuery.data.data : null
+  const hardeningData = hardeningQuery.data?.status === 200 ? hardeningQuery.data.data : null
+  const validationResult = validateMutation.data?.status === 200 ? validateMutation.data.data : null
+  const sourceOptions = sourcesData?.sources.length
+    ? sourcesData.sources.map((src) => ({
+        source_id: src.source_id,
+        asset_id: src.asset_id,
+      }))
+    : [
+        { source_id: 'metropt3-opcua-ro', asset_id: 'metropt3-apu-1' },
+        { source_id: 'metropt3-mqtt-ro', asset_id: 'metropt3-apu-1' },
+        { source_id: 'metropt3-historian-ro', asset_id: 'metropt3-apu-1' },
+      ]
+  const activeSource = sourceOptions.find((item) => item.source_id === sourceId) ??
+    sourceOptions[0] ?? {
+      source_id: sourceId,
+      asset_id: 'metropt3-apu-1',
+    }
+  const validationId = `${idPrefix}-validation-error`
+
   function handleValidateSubmit(event: FormEvent) {
     event.preventDefault()
-    const parsedStep = parseBoundedInt(intervalSeconds, 'Sample interval (s)', 1, 300)
+    const parsedStep = parseBoundedInt(intervalSeconds, 'Nominal step (s)', 1, 300)
     if (parsedStep.error !== null) {
       setValidation({ field: 'intervalSeconds', message: parsedStep.error })
       return
     }
-    const parsedDisc = parseBoundedInt(disconnects, 'Simulated disconnects', 0, 20)
+    const parsedDisc = parseBoundedInt(disconnects, 'Reconnect events', 0, 20)
     if (parsedDisc.error !== null) {
       setValidation({ field: 'disconnects', message: parsedDisc.error })
       return
     }
-    const parsedCap = parseBoundedInt(bufferCapacity, 'Ring-buffer capacity', 4, 10000)
+    const parsedCap = parseBoundedInt(bufferCapacity, 'Buffer capacity', 4, 10000)
     if (parsedCap.error !== null) {
       setValidation({ field: 'bufferCapacity', message: parsedCap.error })
       return
     }
     setValidation(null)
 
-    const primarySensor = sourceId === 'metropt3-mqtt-ro' ? 'COMP' : 'TP2'
+    const primarySensor = activeSource.source_id === 'metropt3-mqtt-ro' ? 'COMP' : 'TP2'
     const baseMs = Date.UTC(2020, 3, 15, 10, 0, 0)
     let cursorMs = baseMs
     const samples = Array.from({ length: 6 }, (_, idx) => {
@@ -104,32 +124,28 @@ export function EdgeConnectorsWorkspace() {
       const gapStep = includeGap && idx === 2 ? parsedStep.value * 4 : parsedStep.value
       cursorMs += gapStep * 1000
       const sensorValues: Record<string, number> = {
-        [primarySensor]: sourceId === 'metropt3-mqtt-ro' ? 1.0 : 8.4 + idx * 0.05,
+        [primarySensor]: activeSource.source_id === 'metropt3-mqtt-ro' ? 1.0 : 8.4 + idx * 0.05,
       }
       if (includeUnallowlistedTag) {
         sensorValues.UNALLOWLISTED_SETPOINT_WRITE = 9.9
       }
       return {
         timestamp: ts,
-        source_id: sourceId,
+        source_id: activeSource.source_id,
         sensor_values: sensorValues,
       }
     })
 
     validateMutation.mutate({
       data: {
-        source_id: sourceId,
-        asset_id: 'metropt3-apu-1',
+        source_id: activeSource.source_id,
+        asset_id: activeSource.asset_id,
         samples,
         simulate_disconnects: parsedDisc.value,
         buffer_capacity_override: parsedCap.value,
       },
     })
   }
-
-  const sourcesData = sourcesQuery.data?.status === 200 ? sourcesQuery.data.data : null
-  const hardeningData = hardeningQuery.data?.status === 200 ? hardeningQuery.data.data : null
-  const validationResult = validateMutation.data?.status === 200 ? validateMutation.data.data : null
 
   return (
     <section aria-labelledby={`${idPrefix}-title`} className="max-w-5xl space-y-6">
@@ -268,13 +284,18 @@ export function EdgeConnectorsWorkspace() {
             </label>
             <select
               id={`${idPrefix}-source`}
-              value={sourceId}
-              onChange={(e) => setSourceId(e.target.value)}
+              value={activeSource.source_id}
+              onChange={(e) => {
+                setSourceId(e.target.value)
+                setValidation(null)
+              }}
               className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm"
             >
-              <option value="metropt3-opcua-ro">metropt3-opcua-ro</option>
-              <option value="metropt3-mqtt-ro">metropt3-mqtt-ro</option>
-              <option value="metropt3-historian-ro">metropt3-historian-ro</option>
+              {sourceOptions.map((item) => (
+                <option key={item.source_id} value={item.source_id}>
+                  {item.source_id}
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -286,8 +307,12 @@ export function EdgeConnectorsWorkspace() {
               type="text"
               inputMode="numeric"
               value={intervalSeconds}
-              onChange={(e) => setIntervalSeconds(e.target.value)}
+              onChange={(e) => {
+                setIntervalSeconds(e.target.value)
+                setValidation(null)
+              }}
               aria-invalid={validation?.field === 'intervalSeconds'}
+              aria-describedby={validation?.field === 'intervalSeconds' ? validationId : undefined}
               className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm font-mono"
             />
           </div>
@@ -300,8 +325,12 @@ export function EdgeConnectorsWorkspace() {
               type="text"
               inputMode="numeric"
               value={disconnects}
-              onChange={(e) => setDisconnects(e.target.value)}
+              onChange={(e) => {
+                setDisconnects(e.target.value)
+                setValidation(null)
+              }}
               aria-invalid={validation?.field === 'disconnects'}
+              aria-describedby={validation?.field === 'disconnects' ? validationId : undefined}
               className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm font-mono"
             />
           </div>
@@ -314,8 +343,12 @@ export function EdgeConnectorsWorkspace() {
               type="text"
               inputMode="numeric"
               value={bufferCapacity}
-              onChange={(e) => setBufferCapacity(e.target.value)}
+              onChange={(e) => {
+                setBufferCapacity(e.target.value)
+                setValidation(null)
+              }}
               aria-invalid={validation?.field === 'bufferCapacity'}
+              aria-describedby={validation?.field === 'bufferCapacity' ? validationId : undefined}
               className="mt-1 w-full rounded border border-border bg-surface px-2 py-1.5 text-sm font-mono"
             />
           </div>
@@ -341,7 +374,7 @@ export function EdgeConnectorsWorkspace() {
         </div>
 
         {validation && (
-          <p role="alert" className="text-xs text-critical">
+          <p id={validationId} role="alert" className="text-xs text-critical">
             {validation.message}
           </p>
         )}

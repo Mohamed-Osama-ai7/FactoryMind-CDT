@@ -197,22 +197,37 @@ describe('EdgeConnectorsWorkspace', () => {
     expect(await screen.findByText(/allowlisted_host_verified/)).toBeInTheDocument()
     expect(screen.getByText(/CI actions SHA-pinned: yes/)).toBeInTheDocument()
 
-    // Invalid buffer capacity must show scoped aria-invalid and block POST
+    // Invalid buffer capacity must show scoped aria-invalid, aria-describedby, and block POST
+    const callsBeforeValidation = fetchMock.mock.calls.length
     const capInput = screen.getByLabelText(/Buffer capacity/)
     await user.clear(capInput)
     await user.type(capInput, '2')
     await user.click(screen.getByRole('button', { name: /Run Read-Only Batch Check/ }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /Ring-buffer capacity must be an integer between 4 and 10000/,
-    )
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/Buffer capacity must be an integer between 4 and 10000/)
     expect(capInput).toHaveAttribute('aria-invalid', 'true')
+    expect(capInput).toHaveAttribute('aria-describedby', alert.id)
     expect(screen.getByLabelText(/Nominal step/)).toHaveAttribute('aria-invalid', 'false')
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeValidation)
 
+    // Typing clears prior validation error cleanly
     await user.clear(capInput)
     await user.type(capInput, '4')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: /Run Read-Only Batch Check/ }))
 
     expect(await screen.findByText(/cadence: gapped_or_jittered/)).toBeInTheDocument()
     expect(screen.getByText(/retained 4\/4 · evicted 2/)).toBeInTheDocument()
+
+    // Failed validation POST renders mutation error alert
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'Simulated server rejection' }), {
+        status: 422,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    await user.click(screen.getByRole('button', { name: /Run Read-Only Batch Check/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Simulated server rejection/)
   })
 })

@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from factorymind.connectors import (
     DEFAULT_EDGE_SOURCES,
     EdgeSecurityError,
+    EdgeValidationError,
     HistorianReadOnlyAdapter,
     MqttReadOnlyAdapter,
     OpcUaReadOnlyAdapter,
@@ -110,10 +111,38 @@ def test_adapters_enforce_read_only_architecture() -> None:
             ("historian.plant.example",),
         ),
         ("opcua_readonly", "opc.tcp://127.0.0.1:4840", ("127.0.0.1",)),
+        ("opcua_readonly", "opc.tcp://127.1:4840", ("127.1",)),
+        ("opcua_readonly", "opc.tcp://0177.0.0.1:4840", ("0177.0.0.1",)),
+        ("opcua_readonly", "opc.tcp://0x7f000001:4840", ("0x7f000001",)),
+        ("opcua_readonly", "opc.tcp://2130706433:4840", ("2130706433",)),
         ("opcua_readonly", "opc.tcp://169.254.169.254:4840", ("169.254.169.254",)),
         ("opcua_readonly", "opc.tcp://[::ffff:169.254.169.254]:4840", ("::ffff:169.254.169.254",)),
+        ("opcua_readonly", "opc.tcp://100.64.0.1:4840", ("100.64.0.1",)),
+        ("opcua_readonly", "opc.tcp://[::ffff:100.64.0.1]:4840", ("::ffff:100.64.0.1",)),
+        ("opcua_readonly", "opc.tcp://100.100.100.200:4840", ("100.100.100.200",)),
         ("opcua_readonly", "opc.tcp://10.1.2.3:4840", ("10.1.2.3",)),
         ("opcua_readonly", "opc.tcp://localhost:4840", ("localhost",)),
+        ("opcua_readonly", "opc.tcp://sub.localhost:4840", ("sub.localhost",)),
+        (
+            "opcua_readonly",
+            "opc.tcp://opc-ro.factorymind.internal\n:4840",
+            ("opc-ro.factorymind.internal",),
+        ),
+        (
+            "opcua_readonly",
+            "opc.tcp://opc-ro.factorymind.internal:0",
+            ("opc-ro.factorymind.internal",),
+        ),
+        (
+            "opcua_readonly",
+            "opc.tcp://opc-ro.factorymind.internal:/",
+            ("opc-ro.factorymind.internal",),
+        ),
+        (
+            "opcua_readonly",
+            "opc.tcp://opc-ro.factorymind.internal:4840?",
+            ("opc-ro.factorymind.internal",),
+        ),
         (
             "opcua_readonly",
             "opc.tcp://metadata.google.internal:4840",
@@ -161,6 +190,18 @@ def test_adapter_cadence_allowlist_and_ring_buffer_eviction() -> None:
     assert gapped.buffer.backoff_schedule_s == (1.0, 2.0, 4.0)
     assert gapped.buffer.state == "degraded_buffer_evicting"
 
+    with pytest.raises(EdgeValidationError):
+        adapter.ingest_batch(nominal_inputs, buffer_capacity_override=0)
+
+    with pytest.raises(ValidationError):
+        EdgeTelemetrySampleInput.model_validate(
+            {
+                "timestamp": "2020-04-15T10:00:00Z",
+                "source_id": "metropt3-opcua-ro",
+                "sensor_values": {"TP2": True},
+            }
+        )
+
 
 # ---------------------------------------------------------------- Supply-Chain & Manifests
 
@@ -175,12 +216,21 @@ def test_ci_actions_pinned_and_root_license_present() -> None:
     assert any(entry.status == "sha_pinned" for entry in report.attestations)
 
 
-def test_audit_ci_workflow_flags_unpinned_tag(tmp_path: Path) -> None:
+def test_audit_ci_workflow_flags_unpinned_tag_and_handles_quotes(tmp_path: Path) -> None:
     bad_ci = tmp_path / "ci.yml"
     bad_ci.write_text("steps:\n  - uses: actions/checkout@v4\n", encoding="utf-8")
     pinned, unpinned, _, _ = audit_ci_workflow(bad_ci)
     assert pinned is False
     assert unpinned == ("actions/checkout@v4",)
+
+    quoted_ci = tmp_path / "quoted.yml"
+    quoted_ci.write_text(
+        'steps:\n  - uses: "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"\n',
+        encoding="utf-8",
+    )
+    pinned_q, unpinned_q, _, _ = audit_ci_workflow(quoted_ci)
+    assert pinned_q is True
+    assert unpinned_q == ()
 
 
 def test_signed_non_pickle_manifest_verification_and_tamper_detection(tmp_path: Path) -> None:
@@ -197,6 +247,14 @@ def test_signed_non_pickle_manifest_verification_and_tamper_detection(tmp_path: 
     status_ok, sha_ok, _ = verify_non_pickle_manifest(path, hmac_key=key)
     assert status_ok == "verified"
     assert sha_ok is not None and len(sha_ok) == 64
+
+    # Non-RFC NaN metadata must be rejected cleanly without raising ValueError
+    path.write_text(
+        json.dumps(manifest).replace('"schema_version": 1', '"schema_version": NaN'),
+        encoding="utf-8",
+    )
+    status_nan, _, _ = verify_non_pickle_manifest(path, hmac_key=key)
+    assert status_nan == "tamper_or_hash_mismatch"
 
     # Parameter tampering must fail cleanly
     manifest["parameters"]["k_drain"] = 0.999
@@ -222,6 +280,23 @@ def test_supply_chain_report_audits_runtime_models_dir(tmp_path: Path) -> None:
         json.dumps({"artifact_sha256": hashlib.sha256(blob).hexdigest()}),
         encoding="utf-8",
     )
+
+    # Without model_manifest.json present, non_pickle_attestation_ready is honestly False
+    missing_manifest_report = build_supply_chain_report(
+        models_dir=models_dir, model_name="metropt3-anomaly"
+    )
+    assert missing_manifest_report.non_pickle_attestation_ready is False
+    by_format_missing = {item.format: item for item in missing_manifest_report.attestations}
+    assert by_format_missing["json_manifest"].status == "missing"
+
+    # Traversal / null-byte CURRENT must never crash or pass
+    (models_dir / "metropt3-anomaly" / "CURRENT").write_text("v1\x00evil", encoding="utf-8")
+    bad_ptr_report = build_supply_chain_report(models_dir=models_dir, model_name="metropt3-anomaly")
+    assert bad_ptr_report.non_pickle_attestation_ready is False
+    assert any(item.status == "tamper_or_hash_mismatch" for item in bad_ptr_report.attestations)
+
+    # Restoring valid pointer + signed JSON manifest passes cleanly
+    (models_dir / "metropt3-anomaly" / "CURRENT").write_text("v1", encoding="utf-8")
     manifest = build_signed_manifest(
         model_name="metropt3-anomaly",
         schema_version=1,
@@ -230,6 +305,7 @@ def test_supply_chain_report_audits_runtime_models_dir(tmp_path: Path) -> None:
     (vdir / "model_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     report = build_supply_chain_report(models_dir=models_dir, model_name="metropt3-anomaly")
+    assert report.non_pickle_attestation_ready is True
     by_format = {item.format: item for item in report.attestations}
     assert by_format["json_manifest"].status == "verified"
     assert by_format["joblib_legacy"].status == "legacy_pickle_advisory"

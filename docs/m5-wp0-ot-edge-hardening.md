@@ -44,6 +44,6 @@ Route paths intentionally use `/api/v1/edge/...` and expose zero write/actuation
 | **M3-WP1 Calibration & OOD (AI4I 2020 Separate Bench)** | `ai4i-hgb` `ROC-AUC 0.9803`, `Brier 0.0124`, `ECE 0.0054`; Ledoit-Wolf Mahalanobis OOD abstention |
 | **M3-WP2 Hybrid RAG + KG** | `Recall@5 1.0`, `MRR@10 1.0`, `nDCG@5 0.7683` across `61` live chunks |
 | **M4-WP0 Physics Digital Twin** | `168` held-out segments: `10m MAE 0.2526 bar`, `60m MAE 0.5218 bar`, `RMSE 0.5853`, `0` violations, `3.78x` leak ratio |
-| **M4-WP1 / WP2 Optimization & Copilot** | 4-tier impact stratification + constrained optimizer; `24/24` red-team probes blocked, `5/5` benign queries allowed, strict `[C1..Cn]` subset check |
-| **M5-WP0 OT/Edge & Full Suite** | Zero PLC write methods, SSRF IP/scheme/host enforcement, MIT `LICENSE`, SHA-pinned CI, **`590` backend tests & `62` frontend tests (17 files) passing** |
+| **M4-WP1 / WP2 Optimization & Copilot** | 4-tier impact stratification + constrained optimizer; 6 permission-scoped read-only Copilot tools, red-team refusal firewall + strict `[C1..Cn]` subset gate |
+| **M5-WP0 OT/Edge & Full Suite** | Zero PLC write methods, SSRF IP/scheme/host enforcement, MIT `LICENSE`, SHA-pinned CI, **`602` backend tests & `62` frontend tests (17 files) passing** |
 

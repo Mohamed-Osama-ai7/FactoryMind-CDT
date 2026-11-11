@@ -79,6 +79,15 @@ class EdgeTelemetrySampleInput(BaseModel):
     def _valid_source_id(cls, value: str) -> str:
         return _validate_identifier(value, "source_id")
 
+    @field_validator("sensor_values", mode="before")
+    @classmethod
+    def _reject_booleans(cls, raw: object) -> object:
+        if isinstance(raw, dict):
+            for key, val in raw.items():
+                if isinstance(val, bool):
+                    raise ValueError(f"Sensor reading for {key!r} must be numeric, not boolean")
+        return raw
+
 
 class EdgeSampleValidationRequest(BaseModel):
     """Stateless edge buffer, cadence, and node-allowlist validation request."""
