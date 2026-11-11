@@ -6,16 +6,27 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Evidence } from './evidence';
+import type { RegimeInfo } from './regimeInfo';
+import type { WindowResultEventClass } from './windowResultEventClass';
 import type { WindowResultStatus } from './windowResultStatus';
 
 export interface WindowResult {
+  event_class: WindowResultEventClass;
+  event_meaning: string;
   evidence: Evidence[];
   /** Share of reference-normal windows scoring at least this high (smoothed). Not a failure probability. */
   exceedance: number | null;
   n_samples: number;
+  regime: RegimeInfo;
   score: number | null;
   /** `stopped` is an explained state (machine off), not an anomaly. */
   status: WindowResultStatus;
+  warning_active?: boolean;
+  warning_detector?: string | null;
+  warning_evidence?: Evidence[];
+  warning_exceedance?: number | null;
+  warning_reasons?: string[];
+  warning_score?: number | null;
   window_end: string;
   window_start: string;
 }

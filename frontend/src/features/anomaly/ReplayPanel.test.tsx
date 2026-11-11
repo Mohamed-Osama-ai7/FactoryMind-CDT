@@ -27,6 +27,16 @@ const replay: ReplayResponse = {
       score: 0.5,
       exceedance: 0.4,
       evidence: [],
+      event_class: 'informational',
+      event_meaning: 'Nominal operating telemetry.',
+      regime: {
+        regime: 'unloaded',
+        confidence: 'confirmed',
+        reason: 'confirmed_unloaded',
+        summary: 'Compressor running unloaded for 100% of the window.',
+        quality_flags: [],
+        missing_signals: [],
+      },
     },
     {
       window_start: '2020-06-05T09:10:00',
@@ -36,6 +46,16 @@ const replay: ReplayResponse = {
       score: null,
       exceedance: null,
       evidence: [],
+      event_class: 'insufficient_evidence',
+      event_meaning: 'Telemetry window lacks valid sample coverage.',
+      regime: {
+        regime: 'insufficient_evidence',
+        confidence: 'insufficient_evidence',
+        reason: 'incomplete_or_gapped',
+        summary: 'Window fails sample coverage requirements.',
+        quality_flags: ['incomplete_or_gapped'],
+        missing_signals: ['valid_non_stale_telemetry'],
+      },
     },
     {
       window_start: '2020-06-05T09:20:00',
@@ -56,6 +76,17 @@ const replay: ReplayResponse = {
           meaning: 'Share of the window the compressor spent under load.',
         },
       ],
+      event_class: 'air_leak_alarm',
+      event_meaning:
+        'Sustained excess compressor load duty consistent with an air leak hypothesis.',
+      regime: {
+        regime: 'loaded',
+        confidence: 'confirmed',
+        reason: 'confirmed_loaded',
+        summary: 'Compressor under load for 90% of the window.',
+        quality_flags: [],
+        missing_signals: [],
+      },
     },
     {
       window_start: '2020-06-05T09:30:00',
@@ -76,6 +107,17 @@ const replay: ReplayResponse = {
           meaning: 'Compressor outlet pressure (TP2).',
         },
       ],
+      event_class: 'air_leak_alarm',
+      event_meaning:
+        'Sustained excess compressor load duty consistent with an air leak hypothesis.',
+      regime: {
+        regime: 'loaded',
+        confidence: 'confirmed',
+        reason: 'confirmed_loaded',
+        summary: 'Compressor under load for 90% of the window.',
+        quality_flags: [],
+        missing_signals: [],
+      },
     },
   ],
   episodes: [

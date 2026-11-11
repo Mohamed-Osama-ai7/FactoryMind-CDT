@@ -7,6 +7,7 @@
  */
 import type { AlarmEpisode } from './alarmEpisode';
 import type { OperatorReport } from './operatorReport';
+import type { WarningEpisode } from './warningEpisode';
 import type { WindowResult } from './windowResult';
 
 export interface ReplayResponse {
@@ -17,5 +18,9 @@ export interface ReplayResponse {
   persistence: number;
   start: string;
   threshold: number;
+  warning_detector?: string | null;
+  warning_persistence?: number | null;
+  warning_threshold?: number | null;
+  warnings?: WarningEpisode[];
   windows: WindowResult[];
 }
