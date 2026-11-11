@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from fastapi import Request
 
@@ -31,6 +33,39 @@ from tests.auth_helpers import ASSET, AuthKit, make_client
 from tests.test_evidence_foundation import _make_wp_a_service
 
 
+@lru_cache(maxsize=1)
+def _test_twin() -> CompressorReservoirTwin:
+    idx = pd.date_range("2020-02-15", periods=500, freq="10s").append(
+        pd.date_range("2020-04-10", periods=420, freq="10s")
+    )
+    n = len(idx)
+    tp3 = np.empty(n, dtype="float64")
+    oil = np.empty(n, dtype="float64")
+    loaded = np.zeros(n, dtype="float64")
+    p, t_oil, on = 9.0, 60.0, False
+    dt = 1.0 / 6.0
+    for i in range(n):
+        if p <= 8.1:
+            on = True
+        elif p >= 10.1:
+            on = False
+        loaded[i] = 1.0 if on else 0.0
+        tp3[i], oil[i] = p, t_oil
+        p += (0.86 if on else -0.085) * dt
+        t_oil += (2.1 * loaded[i] - 0.05 * (t_oil - 55.0)) * dt
+    df = pd.DataFrame(
+        {
+            "TP3": tp3,
+            "Reservoirs": tp3 - 0.05,
+            "Oil_temperature": oil,
+            "Motor_current": np.where(loaded > 0.5, 7.0, 4.0),
+            "DV_eletric": loaded,
+        },
+        index=idx,
+    )
+    return CompressorReservoirTwin.fit_from_telemetry(df)
+
+
 def _make_copilot(
     *,
     extra_chunks: list[KnowledgeDocumentChunk] | None = None,
@@ -52,7 +87,7 @@ def _make_copilot(
     ]
     return ControlledCopilot(
         knowledge_index=HybridRagIndex(chunks),
-        twin=CompressorReservoirTwin(),
+        twin=_test_twin(),
         llm_adapter=llm_adapter,
     )
 
@@ -217,6 +252,7 @@ def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(
     eng = kit.headers(roles=["engineer"], assets=[ASSET])
 
     client.app.state.knowledge_index = HybridRagIndex(build_verified_corpus(kit.root / "raw"))  # type: ignore[union-attr]
+    client.app.state.digital_twin = _test_twin()  # type: ignore[union-attr]
 
     tools_resp = client.get("/api/v1/copilot/tools", headers=viewer)
     assert tools_resp.status_code == 200
@@ -268,6 +304,20 @@ def test_copilot_api_endpoints_incident_grounding_bounds_and_isolation(
     no_svc_client.app.state.knowledge_index = HybridRagIndex(  # type: ignore[union-attr]
         build_verified_corpus(kit.root / "raw")
     )
+    # Without telemetry.parquet, simulate_scenario & compare_options mark status='unavailable'
+    # instead of falling back to hardcoded parameters, while DB-only incident still abstains RCA
+    uncal_resp = no_svc_client.post(
+        "/api/v1/copilot/query",
+        json={"question": "Explain COMP valve contradiction semantics."},
+        headers=viewer,
+    )
+    assert uncal_resp.status_code == 200
+    u_tools = {t["tool"]: t for t in uncal_resp.json()["tools_executed"]}
+    assert u_tools["simulate_scenario"]["status"] == "unavailable"
+    assert u_tools["compare_options"]["status"] == "unavailable"
+    assert not any(c["source_type"] == "digital_twin" for c in uncal_resp.json()["citations"])
+
+    no_svc_client.app.state.digital_twin = _test_twin()  # type: ignore[union-attr]
     with no_svc_client.app.state.db.session() as session:  # type: ignore[union-attr]
         creator = Principal(
             actor_id="eng-seed",
@@ -427,7 +477,7 @@ def test_copilot_routes_through_real_rca_and_passes_supported_hypothesis_to_opti
     inc_leak = _seed_incident(db_a, eng, datetime(2020, 1, 6, 6, 0), datetime(2020, 1, 6, 9, 0))
     cp_clean = ControlledCopilot(
         knowledge_index=corpus,
-        twin=CompressorReservoirTwin(),
+        twin=_test_twin(),
         anomaly_service=svc_clean,
     )
     res_leak = cp_clean.run_query(
@@ -461,7 +511,7 @@ def test_copilot_routes_through_real_rca_and_passes_supported_hypothesis_to_opti
     inc_freeze = _seed_incident(db_a, eng, datetime(2020, 1, 4, 6, 0), datetime(2020, 1, 4, 7, 0))
     cp_freeze = ControlledCopilot(
         knowledge_index=corpus,
-        twin=CompressorReservoirTwin(),
+        twin=_test_twin(),
         anomaly_service=svc_freeze,
     )
     res_freeze = cp_freeze.run_query(
@@ -499,7 +549,7 @@ def test_copilot_routes_through_real_rca_and_passes_supported_hypothesis_to_opti
     inc_valve = _seed_incident(db_a, eng, datetime(2020, 1, 4, 8, 0), datetime(2020, 1, 4, 8, 30))
     cp_valve = ControlledCopilot(
         knowledge_index=corpus,
-        twin=CompressorReservoirTwin(),
+        twin=_test_twin(),
         anomaly_service=svc_valve,
     )
     res_valve = cp_valve.run_query(
@@ -574,7 +624,7 @@ def test_copilot_routes_through_real_rca_and_passes_supported_hypothesis_to_opti
 
     cp_demand = ControlledCopilot(
         knowledge_index=corpus,
-        twin=CompressorReservoirTwin(),
+        twin=_test_twin(),
         anomaly_service=svc_clean,
         rca_fn=_demand_rca,
     )
@@ -592,7 +642,7 @@ def test_copilot_routes_through_real_rca_and_passes_supported_hypothesis_to_opti
     inc_obs = _seed_incident(obs_db, eng, datetime(2020, 1, 6, 6, 0), datetime(2020, 1, 6, 9, 0))
     cp_obs = ControlledCopilot(
         knowledge_index=corpus,
-        twin=CompressorReservoirTwin(),
+        twin=_test_twin(),
         anomaly_service=svc_clean,
     )
     before_obs = cp_obs.run_query(
@@ -629,6 +679,7 @@ def test_copilot_abstains_on_out_of_scope_empty_and_weak_retrieval(
     client = make_client(kit, anomaly_service)
     corpus = HybridRagIndex(build_verified_corpus(kit.root / "raw"))
     client.app.state.knowledge_index = corpus  # type: ignore[union-attr]
+    client.app.state.digital_twin = _test_twin()  # type: ignore[union-attr]
     viewer = kit.headers(roles=["viewer"], assets=[ASSET])
     eng = kit.headers(roles=["engineer"], assets=[ASSET])
 
@@ -702,6 +753,7 @@ def test_copilot_abstains_on_out_of_scope_empty_and_weak_retrieval(
 
     # Restore populated index & verify positive grounded response preserves relevant citations
     client.app.state.knowledge_index = corpus  # type: ignore[union-attr]
+    client.app.state.digital_twin = _test_twin()  # type: ignore[union-attr]
     pos_resp = client.post(
         "/api/v1/copilot/query",
         json={"question": "Explain COMP valve contradiction semantics."},
@@ -811,7 +863,7 @@ def test_copilot_defensive_edges_feature_bounds_custom_abstain_and_request_overr
     corpus = HybridRagIndex(build_verified_corpus(tmp_path / "raw"))
     cp_custom = ControlledCopilot(
         knowledge_index=corpus,
-        twin=CompressorReservoirTwin(),
+        twin=_test_twin(),
         anomaly_service=svc_clean,
         rca_fn=_abstained_custom_rca,
     )
@@ -838,6 +890,7 @@ def test_copilot_defensive_edges_feature_bounds_custom_abstain_and_request_overr
     # 4. api/copilot handles dependency_overrides taking Request
     client = make_client(kit)
     client.app.state.knowledge_index = corpus  # type: ignore[union-attr]
+    client.app.state.digital_twin = _test_twin()  # type: ignore[union-attr]
 
     def _svc_override(request: Request) -> AnomalyService:
         assert request.app is client.app

@@ -21,7 +21,7 @@ from factorymind.contracts.digital_twin import (
     TwinSimulationRequest,
     TwinSimulationResponse,
 )
-from factorymind.twin.physics import CompressorReservoirTwin
+from factorymind.twin.physics import CompressorReservoirTwin, TwinCalibrationError
 
 log = logging.getLogger("factorymind.twin")
 
@@ -30,7 +30,7 @@ _TWIN_LOCK = threading.Lock()
 
 
 def get_digital_twin(request: Request) -> CompressorReservoirTwin:
-    """Thread-safely obtain or initialize the calibrated physics twin on ``app.state``."""
+    """Thread-safely obtain or calibrate the physics twin on ``app.state`` (fail closed)."""
     state = request.app.state
     twin: CompressorReservoirTwin | None = getattr(state, "digital_twin", None)
     if twin is None:
@@ -39,17 +39,23 @@ def get_digital_twin(request: Request) -> CompressorReservoirTwin:
             if twin is None:
                 settings: Settings = state.settings
                 parquet = settings.processed_dir / "metropt3" / "telemetry.parquet"
-                if parquet.is_file():
-                    try:
-                        frame = pd.read_parquet(parquet)
-                        twin = CompressorReservoirTwin.fit_from_telemetry(frame)
-                    except Exception:
-                        log.warning(
-                            "Falling back to verified baseline twin parameters", exc_info=True
-                        )
-                        twin = CompressorReservoirTwin()
-                else:
-                    twin = CompressorReservoirTwin()
+                if not parquet.is_file():
+                    raise HTTPException(
+                        status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=(
+                            f"Digital twin calibration telemetry not found at '{parquet}'. "
+                            "Cannot initialize calibrated model without pre-evaluation telemetry."
+                        ),
+                    )
+                try:
+                    frame = pd.read_parquet(parquet)
+                    twin = CompressorReservoirTwin.fit_from_telemetry(frame)
+                except (TwinCalibrationError, OSError, ValueError, RuntimeError) as exc:
+                    log.warning("Digital twin calibration failed: %s", exc, exc_info=True)
+                    raise HTTPException(
+                        status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"Digital twin calibration failed: {exc}",
+                    ) from exc
                 state.digital_twin = twin
     return twin
 

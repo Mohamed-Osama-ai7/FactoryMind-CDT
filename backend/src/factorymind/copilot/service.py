@@ -339,7 +339,7 @@ class ControlledCopilot:
         self,
         *,
         knowledge_index: HybridRagIndex,
-        twin: CompressorReservoirTwin,
+        twin: CompressorReservoirTwin | None = None,
         llm_adapter: LlmAdapter | Callable[[str, str], str] | None = None,
         anomaly_service: AnomalyService | None = None,
         anomaly_service_factory: Callable[[str], AnomalyService | None] | None = None,
@@ -876,8 +876,16 @@ class ControlledCopilot:
                     )
                 )
 
-            if req.asset_id != "metropt3-apu-1":
+            if req.asset_id != "metropt3-apu-1" or self._twin is None:
                 twin_tools: tuple[CopilotToolName, ...] = ("simulate_scenario", "compare_options")
+                unavail_msg = (
+                    "Physics twin / optimizer scoped to metropt3-apu-1 only."
+                    if req.asset_id != "metropt3-apu-1"
+                    else (
+                        "Calibrated digital twin unavailable; pre-eval telemetry missing or "
+                        "uncalibrated."
+                    )
+                )
                 for t_name in twin_tools:
                     invocations.append(
                         CopilotToolInvocation(
@@ -885,7 +893,7 @@ class ControlledCopilot:
                             permitted=True,
                             status="unavailable",
                             record_count=0,
-                            summary="Physics twin / optimizer scoped to metropt3-apu-1 only.",
+                            summary=unavail_msg,
                         )
                     )
             else:
@@ -931,7 +939,7 @@ class ControlledCopilot:
                     incident_id=req.incident_id,
                 )
                 extra_warn = (
-                    f" {opt_res.uncertainty_warnings[-1]}"
+                    f" {' '.join(opt_res.uncertainty_warnings[2:])}"
                     if len(opt_res.uncertainty_warnings) > 2
                     else ""
                 )

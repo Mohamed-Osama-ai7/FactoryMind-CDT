@@ -1,23 +1,27 @@
 """Physics-informed Compressor & Reservoir Mass-Balance + Duty-Governor Digital Twin.
 
 Strictly fitted on pre-evaluation normal operating telemetry (`2020-02-01` to `2020-04-01`) in
-normalized capacity units (`bar/min`), explicitly disclosing unidentifiable physical parameters
-and keeping simulated counterfactual trajectories strictly separate from observed signals.
+normalized capacity units (`bar/min`), without silent parameter fallbacks. Explicitly discloses
+unidentifiable physical parameters, separates teacher-forced from closed-loop validation, compares
+all horizons against Persistence and Constant-Training-Mean baselines, and flags unsupported
+horizons honestly.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 import numpy as np
 import pandas as pd
 
 from factorymind.contracts.digital_twin import (
+    TwinHorizonEvaluation,
     TwinModelResponse,
     TwinParameterEstimate,
     TwinScenarioSummary,
+    TwinSensitivityCheck,
     TwinSimulationRequest,
     TwinSimulationResponse,
     TwinTrajectoryPoint,
@@ -26,7 +30,7 @@ from factorymind.contracts.digital_twin import (
 )
 from factorymind.data import metropt3
 
-TWIN_MODEL_VERSION: Final = "apu-mass-balance-v1"
+TWIN_MODEL_VERSION: Final = "apu-mass-balance-v2"
 EVALUATION_BOUNDARY: Final = pd.Timestamp("2020-04-01")
 TRAIN_START: Final = pd.Timestamp("2020-02-01")
 DUTY_ALARM_THRESHOLD: Final = 0.7
@@ -34,10 +38,18 @@ LPS_SWITCH_BAR: Final = 7.0
 MIN_PHYSICAL_BAR: Final = 0.0
 MAX_PHYSICAL_BAR: Final = 15.0
 SIM_DT_S: Final = 10.0  # matches nominal 0.1 Hz MetroPT-3 period
+EVAL_HORIZONS_MINUTES: Final[tuple[float, ...]] = (10.0, 30.0, 60.0, 120.0, 240.0)
+REQUIRED_TWIN_COLUMNS: Final[tuple[str, ...]] = (
+    "TP3",
+    "Reservoirs",
+    "Oil_temperature",
+    "Motor_current",
+    "DV_eletric",
+)
 
 GOVERNING_EQUATIONS: Final[list[str]] = [
     (
-        "Mass-balance pressure dynamics: dP_TP3/dt = k_charge * u_load(t) - "
+        "Mass-balance pressure dynamics: dP_TP3/dt = k_charge * u_load(t) * eff(P) - "
         "(k_drain * demand_factor + k_leak(t))"
     ),
     "Coupled reservoir pressure: P_Reservoirs(t) = clip(P_TP3(t) - coupling_bias_bar, 0, 15)",
@@ -74,9 +86,9 @@ UNIDENTIFIABLE_PARAMETERS: Final[tuple[UnidentifiableParameter, ...]] = (
         name="ambient_air_temperature_c",
         reason=(
             "External tunnel/ambient air temperature around Porto Metro trains is unrecorded; "
-            "cooling rate relies on a constant ambient reference T_ambient_ref."
+            "cooling rate relies on a fitted constant effective ambient reference T_ambient_ref."
         ),
-        assumption_or_proxy="Fixed constant reference 50.0 C anchored during steady oil cooling.",
+        assumption_or_proxy="Effective reference proxy T_ambient_ref estimated from thermal OLS.",
     ),
     UnidentifiableParameter(
         name="sub_10s_inrush_transient",
@@ -89,20 +101,28 @@ UNIDENTIFIABLE_PARAMETERS: Final[tuple[UnidentifiableParameter, ...]] = (
 )
 
 
+class TwinCalibrationError(ValueError):
+    """Raised when telemetry fitting, calibration, or held-out validation cannot proceed safely."""
+
+
 @dataclass(frozen=True)
 class TwinCalibratedParams:
-    """Identifiable physical rate constants fitted from normal pre-evaluation telemetry."""
+    """Identifiable physical rate constants & training baselines from pre-eval telemetry."""
 
-    k_charge_bar_per_min: float = 0.948
-    k_drain_bar_per_min: float = 0.084
-    cut_in_bar: float = 8.09
-    cut_out_bar: float = 10.078
-    coupling_bias_bar: float = 0.0
-    alpha_heat_c_per_min: float = 2.30353
-    alpha_cool_per_min: float = 0.01734
-    t_ambient_ref_c: float = 50.0
-    fit_source: str = "verified_train_cal_baseline"
-    train_cal_samples: int = 165_547
+    k_charge_bar_per_min: float
+    k_drain_bar_per_min: float
+    cut_in_bar: float
+    cut_out_bar: float
+    charge_overshoot_bar: float
+    coupling_bias_bar: float
+    alpha_heat_c_per_min: float
+    alpha_cool_per_min: float
+    t_ambient_ref_c: float
+    train_mean_tp3_bar: float
+    train_mean_oil_temp_c: float
+    train_mean_load_duty: float
+    fit_source: str = "live_pre_eval_fit"
+    train_cal_samples: int = 0
 
     def to_contracts(self) -> list[TwinParameterEstimate]:
         return [
@@ -130,7 +150,7 @@ class TwinCalibratedParams:
                 unit="bar",
                 identifiable=True,
                 fit_source=self.fit_source,
-                uncertainty_note="Median MPG cut-in pressure at 0->1 load transitions (~8.2 bar).",
+                uncertainty_note="Median MPG cut-in pressure at 0->1 load transitions.",
             ),
             TwinParameterEstimate(
                 name="cut_out_bar",
@@ -138,8 +158,16 @@ class TwinCalibratedParams:
                 unit="bar",
                 identifiable=True,
                 fit_source=self.fit_source,
+                uncertainty_note="Median cut-out pressure at 1->0 unloading transitions.",
+            ),
+            TwinParameterEstimate(
+                name="charge_overshoot_bar",
+                value=round(self.charge_overshoot_bar, 4),
+                unit="bar",
+                identifiable=True,
+                fit_source=self.fit_source,
                 uncertainty_note=(
-                    "Median cut-out pressure at 1->0 unloading transitions (~10.1 bar)."
+                    "99th-percentile pre-eval loaded pressure overshoot above cut_out."
                 ),
             ),
             TwinParameterEstimate(
@@ -165,34 +193,18 @@ class TwinCalibratedParams:
                 identifiable=True,
                 fit_source=self.fit_source,
                 uncertainty_note=(
-                    "Cooling decay relative to constant T_ambient_ref=50 C (proxy only)."
+                    f"Cooling rate toward fitted T_ambient_ref={self.t_ambient_ref_c:.2f} C proxy."
                 ),
             ),
         ]
 
 
-DEFAULT_TWIN_PARAMS: Final = TwinCalibratedParams()
-
-# Empirical out-of-sample metrics measured across 168 contiguous 60-min normal segments
-# (>= 2020-04-01 outside failure windows) + peak F1..F3 failure slices in MetroPT-3.
-DEFAULT_VALIDATION_SUMMARY: Final = TwinValidationSummary(
-    split_policy="Fit strictly on <2020-04-01; validate on >=2020-04-01 held-out.",
-    train_cal_samples=165_547,
-    heldout_normal_segments=168,
-    mae_10min_bar=0.2526,
-    mae_60min_bar=0.5218,
-    rmse_60min_bar=0.5853,
-    constraint_violations=0,
-    step_halving_max_diff_bar=0.395,
-    leak_vs_normal_residual_ratio=3.78,
-)
-
-
-def _charge_efficiency(p_bar: float, cut_out_bar: float) -> float:
-    """Physical check-valve & back-pressure saturation above nominal cut-out envelope."""
+def _charge_efficiency(p_bar: float, cut_out_bar: float, charge_overshoot_bar: float) -> float:
+    """Physical check-valve & back-pressure saturation above calibrated cut-out envelope."""
     if p_bar <= cut_out_bar:
         return 1.0
-    return max(0.0, min(1.0, (cut_out_bar + 0.42 - p_bar) / 0.42))
+    margin = max(1e-3, charge_overshoot_bar)
+    return max(0.0, min(1.0, (cut_out_bar + margin - p_bar) / margin))
 
 
 def _clamp(val: float, lo: float, hi: float) -> tuple[float, bool]:
@@ -203,13 +215,443 @@ def _clamp(val: float, lo: float, hi: float) -> tuple[float, bool]:
     return val, False
 
 
+def _compute_skill(model_err: float, baseline_err: float) -> float:
+    if baseline_err > 1e-9:
+        return 1.0 - (model_err / baseline_err)
+    return 0.0 if model_err <= 1e-9 else -1.0
+
+
+def _contiguous_supported_limit(
+    evals: list[TwinHorizonEvaluation],
+    *,
+    attr: Literal["closed_loop_supported", "teacher_forced_supported", "duty_cycle_supported"],
+) -> float:
+    """Return max contiguous horizon where the model outperforms baselines without skipping gaps."""
+    limit = 0.0
+    for ev in sorted(evals, key=lambda item: item.horizon_minutes):
+        if bool(getattr(ev, attr)):
+            limit = ev.horizon_minutes
+        else:
+            break
+    return limit
+
+
+def _extract_contiguous_segments(
+    frame: pd.DataFrame,
+    *,
+    min_len: int,
+    max_gap_s: float = 15.0,
+) -> list[pd.DataFrame]:
+    """Return gap-free contiguous slices of length >= ``min_len``."""
+    if frame.empty:
+        return []
+    ordered = frame.sort_index()
+    dts_s = ordered.index.to_series().diff().dt.total_seconds().fillna(999.0).to_numpy()
+    breaks = np.where((dts_s > max_gap_s) | (dts_s <= 0.0))[0]
+    starts = np.concatenate([[0], breaks])
+    ends = np.concatenate([breaks, [len(ordered)]])
+    return [ordered.iloc[s:e] for s, e in zip(starts, ends, strict=True) if (e - s) >= min_len]
+
+
+def _rollout_observed_segment(
+    params: TwinCalibratedParams,
+    seg: pd.DataFrame,
+    *,
+    closed_loop: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Simulate TP3, oil temperature, and valve state along a telemetry slice.
+
+    When ``closed_loop=True``, only t=0 state is observed; future valve commands ``u[1:]``
+    are governed strictly by the Twin hysteresis law on simulated pressure.
+    """
+    p_obs = seg["TP3"].to_numpy(dtype="float64")
+    oil_obs = seg["Oil_temperature"].to_numpy(dtype="float64")
+    u_obs = (seg["DV_eletric"].to_numpy(dtype="float64") >= 0.5).astype("float64")
+    step_min = np.diff(seg.index.to_numpy()).astype("timedelta64[s]").astype(float) / 60.0
+
+    n = len(p_obs)
+    p_sim = np.empty(n, dtype="float64")
+    oil_sim = np.empty(n, dtype="float64")
+    u_sim = np.empty(n, dtype="float64")
+
+    p_sim[0] = p_obs[0]
+    oil_sim[0] = oil_obs[0]
+    loaded = bool(u_obs[0] >= 0.5)
+    u_sim[0] = 1.0 if loaded else 0.0
+    violations = 0
+
+    for i in range(1, n):
+        if closed_loop:
+            if loaded and p_sim[i - 1] >= params.cut_out_bar:
+                loaded = False
+            elif not loaded and p_sim[i - 1] <= params.cut_in_bar:
+                loaded = True
+            u_step = 1.0 if loaded else 0.0
+            u_sim[i] = u_step
+        else:
+            u_step = u_obs[i - 1]
+            u_sim[i] = u_obs[i]
+
+        eff = _charge_efficiency(p_sim[i - 1], params.cut_out_bar, params.charge_overshoot_bar)
+        raw_p = (
+            p_sim[i - 1]
+            + (params.k_charge_bar_per_min * u_step * eff - params.k_drain_bar_per_min)
+            * step_min[i - 1]
+        )
+        p_next, violated = _clamp(raw_p, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
+        if violated:
+            violations += 1
+        p_sim[i] = p_next
+
+        d_oil = params.alpha_heat_c_per_min * u_step - params.alpha_cool_per_min * (
+            oil_sim[i - 1] - params.t_ambient_ref_c
+        )
+        oil_sim[i], _ = _clamp(oil_sim[i - 1] + d_oil * step_min[i - 1], -20.0, 150.0)
+
+    return p_sim, oil_sim, u_sim, violations
+
+
+def _evaluate_horizon_segments(
+    params: TwinCalibratedParams,
+    segments: list[pd.DataFrame],
+    *,
+    horizon_minutes: float,
+    n_pts: int,
+) -> tuple[TwinHorizonEvaluation, int]:
+    """Compute teacher-forced, closed-loop, persistence, and train-mean metrics for one horizon."""
+    tf_maes: list[float] = []
+    tf_rmses: list[float] = []
+    cl_maes: list[float] = []
+    cl_rmses: list[float] = []
+    pers_maes: list[float] = []
+    mean_maes: list[float] = []
+
+    duty_cl_maes: list[float] = []
+    duty_pers_maes: list[float] = []
+    duty_mean_maes: list[float] = []
+    obs_cycles: list[float] = []
+    sim_cycles: list[float] = []
+
+    oil_cl_maes: list[float] = []
+    oil_pers_maes: list[float] = []
+    oil_mean_maes: list[float] = []
+    total_violations = 0
+
+    for block in segments:
+        seg = block.iloc[:n_pts]
+        p_obs = seg["TP3"].to_numpy(dtype="float64")
+        oil_obs = seg["Oil_temperature"].to_numpy(dtype="float64")
+        u_obs = (seg["DV_eletric"].to_numpy(dtype="float64") >= 0.5).astype("float64")
+
+        p_tf, _oil_tf, _u_tf, tf_viol = _rollout_observed_segment(params, seg, closed_loop=False)
+        p_cl, oil_cl, u_cl, cl_viol = _rollout_observed_segment(params, seg, closed_loop=True)
+        total_violations += tf_viol + cl_viol
+
+        tf_maes.append(float(np.mean(np.abs(p_tf - p_obs))))
+        tf_rmses.append(float(np.sqrt(np.mean((p_tf - p_obs) ** 2))))
+        cl_maes.append(float(np.mean(np.abs(p_cl - p_obs))))
+        cl_rmses.append(float(np.sqrt(np.mean((p_cl - p_obs) ** 2))))
+        pers_maes.append(float(np.mean(np.abs(p_obs[0] - p_obs))))
+        mean_maes.append(float(np.mean(np.abs(params.train_mean_tp3_bar - p_obs))))
+
+        obs_duty = float(np.mean(u_obs))
+        sim_duty = float(np.mean(u_cl))
+        duty_cl_maes.append(abs(sim_duty - obs_duty))
+        duty_pers_maes.append(abs(float(u_obs[0]) - obs_duty))
+        duty_mean_maes.append(abs(params.train_mean_load_duty - obs_duty))
+
+        obs_cycles.append(float(np.sum((u_obs[1:] > 0.5) & (u_obs[:-1] < 0.5))))
+        sim_cycles.append(float(np.sum((u_cl[1:] > 0.5) & (u_cl[:-1] < 0.5))))
+
+        oil_cl_maes.append(float(np.mean(np.abs(oil_cl - oil_obs))))
+        oil_pers_maes.append(float(np.mean(np.abs(oil_obs[0] - oil_obs))))
+        oil_mean_maes.append(float(np.mean(np.abs(params.train_mean_oil_temp_c - oil_obs))))
+
+    tf_mean = float(np.mean(tf_maes))
+    tf_med = float(np.median(tf_maes))
+    tf_rmse = float(np.mean(tf_rmses))
+    cl_mean = float(np.mean(cl_maes))
+    cl_med = float(np.median(cl_maes))
+    cl_rmse = float(np.mean(cl_rmses))
+    pers_mean = float(np.mean(pers_maes))
+    pers_med = float(np.median(pers_maes))
+    train_mean = float(np.mean(mean_maes))
+    train_med = float(np.median(mean_maes))
+
+    tf_skill_p = _compute_skill(tf_mean, pers_mean)
+    tf_skill_m = _compute_skill(tf_mean, train_mean)
+    tf_med_skill_p = _compute_skill(tf_med, pers_med)
+    tf_med_skill_m = _compute_skill(tf_med, train_med)
+    cl_skill_p = _compute_skill(cl_mean, pers_mean)
+    cl_skill_m = _compute_skill(cl_mean, train_mean)
+    cl_med_skill_p = _compute_skill(cl_med, pers_med)
+    cl_med_skill_m = _compute_skill(cl_med, train_med)
+
+    tf_ok = tf_skill_p > 0.0 and tf_skill_m > 0.0 and tf_med_skill_p > 0.0 and tf_med_skill_m > 0.0
+    cl_ok = cl_skill_p > 0.0 and cl_skill_m > 0.0 and cl_med_skill_p > 0.0 and cl_med_skill_m > 0.0
+
+    duty_mean = float(np.mean(duty_cl_maes))
+    duty_med = float(np.median(duty_cl_maes))
+    duty_p_mean = float(np.mean(duty_pers_maes))
+    duty_m_mean = float(np.mean(duty_mean_maes))
+    duty_m_med = float(np.median(duty_mean_maes))
+    duty_skill_m = _compute_skill(duty_mean, duty_m_mean)
+    duty_med_skill_m = _compute_skill(duty_med, duty_m_med)
+    duty_ok = duty_mean < duty_p_mean and duty_skill_m > 0.0 and duty_med_skill_m > 0.0
+
+    notes: list[str] = []
+    if cl_ok:
+        notes.append("Closed-loop TP3 beats both Persistence and Train-Mean")
+    elif tf_ok:
+        notes.append(
+            "UNSUPPORTED closed-loop TP3 forecast (fails Train-Mean baseline due to cycle drift); "
+            "teacher-forced only"
+        )
+    else:
+        notes.append(
+            "UNSUPPORTED TP3 trajectory forecast (both teacher-forced and closed-loop fail "
+            "Train-Mean baseline)"
+        )
+    if not duty_ok:
+        notes.append("duty_cycle also fails stationary Train-Mean")
+
+    cyc_err = float(np.mean(np.abs(np.asarray(sim_cycles) - np.asarray(obs_cycles))))
+    return (
+        TwinHorizonEvaluation(
+            horizon_minutes=horizon_minutes,
+            segment_count=len(segments),
+            teacher_forced_tp3_mae_bar=round(tf_mean, 4),
+            teacher_forced_tp3_median_mae_bar=round(tf_med, 4),
+            teacher_forced_tp3_rmse_bar=round(tf_rmse, 4),
+            closed_loop_tp3_mae_bar=round(cl_mean, 4),
+            closed_loop_tp3_median_mae_bar=round(cl_med, 4),
+            closed_loop_tp3_rmse_bar=round(cl_rmse, 4),
+            persistence_tp3_mae_bar=round(pers_mean, 4),
+            persistence_tp3_median_mae_bar=round(pers_med, 4),
+            train_mean_tp3_mae_bar=round(train_mean, 4),
+            train_mean_tp3_median_mae_bar=round(train_med, 4),
+            teacher_forced_skill_vs_persistence=round(tf_skill_p, 4),
+            teacher_forced_skill_vs_train_mean=round(tf_skill_m, 4),
+            closed_loop_skill_vs_persistence=round(cl_skill_p, 4),
+            closed_loop_skill_vs_train_mean=round(cl_skill_m, 4),
+            teacher_forced_supported=tf_ok,
+            closed_loop_supported=cl_ok,
+            duty_cycle_mae=round(min(1.0, duty_mean), 4),
+            duty_cycle_median_mae=round(min(1.0, duty_med), 4),
+            persistence_duty_mae=round(min(1.0, duty_p_mean), 4),
+            train_mean_duty_mae=round(min(1.0, duty_m_mean), 4),
+            train_mean_duty_median_mae=round(min(1.0, duty_m_med), 4),
+            duty_skill_vs_train_mean=round(duty_skill_m, 4),
+            duty_cycle_supported=duty_ok,
+            observed_cycles_per_segment=round(float(np.mean(obs_cycles)), 3),
+            simulated_cycles_per_segment=round(float(np.mean(sim_cycles)), 3),
+            cycle_count_mae=round(cyc_err, 3),
+            closed_loop_oil_mae_c=round(float(np.mean(oil_cl_maes)), 3),
+            persistence_oil_mae_c=round(float(np.mean(oil_pers_maes)), 3),
+            train_mean_oil_mae_c=round(float(np.mean(oil_mean_maes)), 3),
+            support_note="; ".join(notes),
+        ),
+        total_violations,
+    )
+
+
+def _evaluate_pre_eval_sensitivity(
+    pre_eval: pd.DataFrame,
+    params: TwinCalibratedParams,
+) -> list[TwinSensitivityCheck]:
+    """Evaluate 10-min closed-loop sensitivity strictly on pre-evaluation contiguous segments."""
+    pre_segs = _extract_contiguous_segments(pre_eval, min_len=60)
+    if not pre_segs:
+        return []
+    sample_segs = [seg.iloc[:60] for seg in pre_segs[:80]]
+
+    def _run(p_set: TwinCalibratedParams) -> tuple[float, float]:
+        tp3_errs: list[float] = []
+        duty_errs: list[float] = []
+        for seg in sample_segs:
+            p_obs = seg["TP3"].to_numpy(dtype="float64")
+            u_obs = (seg["DV_eletric"].to_numpy(dtype="float64") >= 0.5).astype("float64")
+            p_cl, _o_cl, u_cl, _v = _rollout_observed_segment(p_set, seg, closed_loop=True)
+            tp3_errs.append(float(np.mean(np.abs(p_cl - p_obs))))
+            duty_errs.append(abs(float(np.mean(u_cl)) - float(np.mean(u_obs))))
+        return float(np.mean(tp3_errs)), float(np.mean(duty_errs))
+
+    base_tp3, base_duty = _run(params)
+    specs: list[tuple[str, TwinCalibratedParams]] = [
+        (
+            "k_charge -15%",
+            TwinCalibratedParams(
+                **{**params.__dict__, "k_charge_bar_per_min": params.k_charge_bar_per_min * 0.85}
+            ),
+        ),
+        (
+            "k_charge +15%",
+            TwinCalibratedParams(
+                **{**params.__dict__, "k_charge_bar_per_min": params.k_charge_bar_per_min * 1.15}
+            ),
+        ),
+        (
+            "k_drain -15%",
+            TwinCalibratedParams(
+                **{**params.__dict__, "k_drain_bar_per_min": params.k_drain_bar_per_min * 0.85}
+            ),
+        ),
+        (
+            "k_drain +15%",
+            TwinCalibratedParams(
+                **{**params.__dict__, "k_drain_bar_per_min": params.k_drain_bar_per_min * 1.15}
+            ),
+        ),
+    ]
+    if params.cut_in_bar + 0.15 + 0.2 < params.cut_out_bar:
+        specs.append(
+            (
+                "cut_in +0.15 bar",
+                TwinCalibratedParams(**{**params.__dict__, "cut_in_bar": params.cut_in_bar + 0.15}),
+            )
+        )
+    if params.cut_out_bar - 0.15 > params.cut_in_bar + 0.2:
+        specs.append(
+            (
+                "cut_out -0.15 bar",
+                TwinCalibratedParams(
+                    **{**params.__dict__, "cut_out_bar": params.cut_out_bar - 0.15}
+                ),
+            )
+        )
+
+    out: list[TwinSensitivityCheck] = []
+    for label, perturbed in specs:
+        p_tp3, p_duty = _run(perturbed)
+        out.append(
+            TwinSensitivityCheck(
+                perturbation=label,
+                segment_count=len(sample_segs),
+                baseline_tp3_mae_10min_bar=round(base_tp3, 4),
+                perturbed_tp3_mae_10min_bar=round(p_tp3, 4),
+                delta_tp3_mae_bar=round(p_tp3 - base_tp3, 4),
+                baseline_duty_mae_10min=round(base_duty, 4),
+                perturbed_duty_mae_10min=round(p_duty, 4),
+                delta_duty_mae=round(p_duty - base_duty, 4),
+            )
+        )
+    return out
+
+
+def _fit_pre_eval_params(
+    pre_eval: pd.DataFrame,
+    *,
+    fit_source: str,
+) -> TwinCalibratedParams:
+    """Fit identifiable physical constants strictly on pre-evaluation telemetry (zero fallbacks)."""
+    dt_min = pre_eval.index.to_series().diff().dt.total_seconds().to_numpy() / 60.0
+    tp3 = pre_eval["TP3"].to_numpy(dtype="float64")
+    res = pre_eval["Reservoirs"].to_numpy(dtype="float64")
+    oil = pre_eval["Oil_temperature"].to_numpy(dtype="float64")
+    curr = pre_eval["Motor_current"].to_numpy(dtype="float64")
+    loaded = pre_eval["DV_eletric"].to_numpy(dtype="float64") >= 0.5
+    prev_loaded = np.roll(loaded, 1)
+
+    contiguous = np.isfinite(dt_min) & (dt_min > 0.0) & (dt_min <= 0.3)
+    active = contiguous & (curr >= 1.0)
+    steady_l = contiguous & loaded & prev_loaded & (curr >= 5.5)
+    steady_u = contiguous & (~loaded) & (~prev_loaded) & (curr >= 1.0) & (curr <= 5.5)
+    if not np.any(steady_l) or not np.any(steady_u) or int(np.sum(active)) < 60:
+        raise TwinCalibrationError(
+            "Missing steady loaded/unloaded active samples in pre-evaluation telemetry"
+        )
+
+    dp_dt = np.diff(tp3, prepend=np.nan) / dt_min
+    raw_drain = -float(np.median(dp_dt[steady_u]))
+    if not math.isfinite(raw_drain) or raw_drain <= 0.0:
+        raise TwinCalibrationError(
+            f"Unloaded pre-evaluation telemetry failed physical decay check (k_drain={raw_drain})"
+        )
+    net_loaded = float(np.median(dp_dt[steady_l]))
+    if not math.isfinite(net_loaded) or net_loaded <= 0.0:
+        raise TwinCalibrationError(
+            f"Loaded pre-evaluation telemetry failed physical charging check (net={net_loaded})"
+        )
+    k_drain = raw_drain
+    k_charge = net_loaded + k_drain
+
+    on_trans = np.where(contiguous[1:] & loaded[1:] & (~loaded[:-1]) & (curr[1:] >= 1.0))[0]
+    off_trans = np.where(contiguous[1:] & (~loaded[1:]) & loaded[:-1] & (curr[1:] >= 1.0))[0]
+    if len(on_trans) == 0 or len(off_trans) == 0:
+        raise TwinCalibrationError(
+            "Missing governor loading (0->1) or unloading (1->0) transitions in pre-evaluation data"
+        )
+    cut_in = float(np.median(tp3[on_trans]))
+    cut_out = float(np.median(tp3[off_trans]))
+    if (
+        not (math.isfinite(cut_in) and math.isfinite(cut_out))
+        or cut_in <= MIN_PHYSICAL_BAR
+        or cut_out >= MAX_PHYSICAL_BAR
+        or cut_out <= cut_in + 0.2
+    ):
+        raise TwinCalibrationError(
+            f"Calibrated governor hysteresis invalid (cut_in={cut_in}, cut_out={cut_out})"
+        )
+
+    over = tp3[contiguous & loaded & (tp3 > cut_out)] - cut_out
+    if len(over) >= 5:
+        overshoot = max(0.05, float(np.quantile(over, 0.99)))
+    else:
+        overshoot = max(0.05, 0.1 * (cut_out - cut_in))
+
+    coupling_bias = float(np.median(tp3[active] - res[active]))
+    if not math.isfinite(coupling_bias):
+        raise TwinCalibrationError("Non-finite panel-to-reservoir coupling bias")
+
+    dt_oil = np.diff(oil, prepend=np.nan) / dt_min
+    x_t = np.column_stack([loaded[active].astype("float64"), -oil[active], np.ones(np.sum(active))])
+    try:
+        beta_t, *_ = np.linalg.lstsq(x_t, dt_oil[active], rcond=None)
+    except np.linalg.LinAlgError as exc:
+        raise TwinCalibrationError(f"Thermal OLS calibration failed: {exc}") from exc
+
+    alpha_heat, alpha_cool, intercept = float(beta_t[0]), float(beta_t[1]), float(beta_t[2])
+    if (
+        not (math.isfinite(alpha_heat) and math.isfinite(alpha_cool) and math.isfinite(intercept))
+        or alpha_heat <= 0.0
+        or alpha_cool <= 1e-6
+    ):
+        raise TwinCalibrationError(
+            f"Thermal OLS produced non-physical parameters "
+            f"(alpha_heat={alpha_heat}, alpha_cool={alpha_cool})"
+        )
+    t_ambient_ref = intercept / alpha_cool
+    if not math.isfinite(t_ambient_ref) or t_ambient_ref < -20.0 or t_ambient_ref > 150.0:
+        raise TwinCalibrationError(
+            f"Fitted thermal ambient reference out of physical range ({t_ambient_ref} C)"
+        )
+
+    return TwinCalibratedParams(
+        k_charge_bar_per_min=k_charge,
+        k_drain_bar_per_min=k_drain,
+        cut_in_bar=cut_in,
+        cut_out_bar=cut_out,
+        charge_overshoot_bar=overshoot,
+        coupling_bias_bar=coupling_bias,
+        alpha_heat_c_per_min=alpha_heat,
+        alpha_cool_per_min=alpha_cool,
+        t_ambient_ref_c=t_ambient_ref,
+        train_mean_tp3_bar=float(np.mean(tp3)),
+        train_mean_oil_temp_c=float(np.mean(oil)),
+        train_mean_load_duty=float(np.mean(loaded)),
+        fit_source=fit_source,
+        train_cal_samples=int(np.sum(active)),
+    )
+
+
 class CompressorReservoirTwin:
-    """Calibrated Physics-Informed Compressor + Reservoir Digital Twin."""
+    """Calibrated Physics-Informed Compressor + Reservoir Digital Twin (no silent fallbacks)."""
 
     def __init__(
         self,
-        params: TwinCalibratedParams = DEFAULT_TWIN_PARAMS,
-        validation: TwinValidationSummary = DEFAULT_VALIDATION_SUMMARY,
+        *,
+        params: TwinCalibratedParams,
+        validation: TwinValidationSummary,
     ) -> None:
         self.params = params
         self.validation = validation
@@ -221,76 +663,84 @@ class CompressorReservoirTwin:
         *,
         eval_start: pd.Timestamp = EVALUATION_BOUNDARY,
     ) -> CompressorReservoirTwin:
-        """Fit ODE constants strictly on pre-evaluation telemetry (zero evaluation leakage)."""
+        """Fit ODE constants & baselines strictly on pre-evaluation telemetry (< ``eval_start``)."""
+        if not isinstance(frame.index, pd.DatetimeIndex):
+            raise TwinCalibrationError("Telemetry frame must have a DatetimeIndex")
+        missing_cols = [c for c in REQUIRED_TWIN_COLUMNS if c not in frame.columns]
+        if missing_cols:
+            raise TwinCalibrationError(
+                f"Telemetry frame missing required columns: {', '.join(missing_cols)}"
+            )
+
         pre_eval = frame[(frame.index >= TRAIN_START) & (frame.index < eval_start)].sort_index()
-        cols = ["TP3", "Reservoirs", "Oil_temperature", "Motor_current", "DV_eletric"]
-        finite_mask = np.isfinite(pre_eval[cols].to_numpy(dtype="float64")).all(axis=1)
-        pre_eval = pre_eval[finite_mask]
+        finite_mask = np.isfinite(pre_eval[list(REQUIRED_TWIN_COLUMNS)].to_numpy(dtype="float64"))
+        pre_eval = pre_eval[finite_mask.all(axis=1)]
         if len(pre_eval) < 120:
-            raise ValueError("Insufficient pre-evaluation telemetry to calibrate digital twin")
+            raise TwinCalibrationError(
+                f"Insufficient finite pre-evaluation telemetry ({len(pre_eval)} < 120 rows)"
+            )
 
-        dt_min = pre_eval.index.to_series().diff().dt.total_seconds().to_numpy() / 60.0
-        tp3 = pre_eval["TP3"].to_numpy(dtype="float64")
-        res = pre_eval["Reservoirs"].to_numpy(dtype="float64")
-        oil = pre_eval["Oil_temperature"].to_numpy(dtype="float64")
-        curr = pre_eval["Motor_current"].to_numpy(dtype="float64")
-        loaded = pre_eval["DV_eletric"].to_numpy(dtype="float64") >= 0.5
-        prev_loaded = np.roll(loaded, 1)
+        params = _fit_pre_eval_params(pre_eval, fit_source="live_pre_eval_fit")
+        sensitivity = _evaluate_pre_eval_sensitivity(pre_eval, params)
 
-        contiguous = np.isfinite(dt_min) & (dt_min > 0.0) & (dt_min <= 0.3)
-        active = contiguous & (curr >= 1.0)
-        steady_l = contiguous & loaded & prev_loaded & (curr >= 5.5)
-        steady_u = contiguous & (~loaded) & (~prev_loaded) & (curr >= 1.0) & (curr <= 5.5)
-        if not np.any(steady_l) or not np.any(steady_u) or np.sum(active) < 60:
-            raise ValueError("Missing steady loaded/unloaded samples in pre-evaluation segment")
+        cal_notes = [
+            (
+                f"Fitted on {params.train_cal_samples} finite active pre-eval samples "
+                f"(<{eval_start.date()})."
+            ),
+            (
+                "Training baselines anchored strictly pre-evaluation: "
+                f"TP3={params.train_mean_tp3_bar:.3f} bar, "
+                f"Oil={params.train_mean_oil_temp_c:.2f} C, "
+                f"Duty={params.train_mean_load_duty:.4f}."
+            ),
+        ]
+        # Optional pre-eval temporal sub-split stability check when enough spans exist
+        mid_ts = pre_eval.index[len(pre_eval) // 2]
+        early = pre_eval[pre_eval.index < mid_ts]
+        late = pre_eval[pre_eval.index >= mid_ts]
+        if len(early) >= 120 and len(late) >= 120:
+            try:
+                p_early = _fit_pre_eval_params(early, fit_source="pre_eval_early_half")
+                p_late = _fit_pre_eval_params(late, fit_source="pre_eval_late_half")
+                cal_notes.append(
+                    "Pre-eval half-split parameter drift: "
+                    f"k_charge [{p_early.k_charge_bar_per_min:.3f} vs "
+                    f"{p_late.k_charge_bar_per_min:.3f}], "
+                    f"k_drain [{p_early.k_drain_bar_per_min:.3f} vs "
+                    f"{p_late.k_drain_bar_per_min:.3f}], "
+                    f"cut_in [{p_early.cut_in_bar:.3f} vs {p_late.cut_in_bar:.3f}], "
+                    f"cut_out [{p_early.cut_out_bar:.3f} vs {p_late.cut_out_bar:.3f}]."
+                )
+            except TwinCalibrationError:
+                cal_notes.append(
+                    "Pre-eval temporal sub-split too short/non-stationary for independent "
+                    "half-fit; relies on pre-eval parameter perturbation sensitivity."
+                )
 
-        dp_dt = np.diff(tp3, prepend=np.nan) / dt_min
-        k_drain = max(1e-4, float(-np.median(dp_dt[steady_u])))
-        net_loaded = max(0.05, float(np.median(dp_dt[steady_l])))
-        k_charge = net_loaded + k_drain
-
-        on_trans = np.where(contiguous[1:] & loaded[1:] & (~loaded[:-1]) & (curr[1:] >= 1.0))[0]
-        off_trans = np.where(contiguous[1:] & (~loaded[1:]) & loaded[:-1] & (curr[1:] >= 1.0))[0]
-        cut_in = float(np.median(tp3[on_trans])) if len(on_trans) > 0 else 8.09
-        cut_out = float(np.median(tp3[off_trans])) if len(off_trans) > 0 else 10.078
-        if not (math.isfinite(cut_in) and math.isfinite(cut_out)) or cut_out <= cut_in + 0.2:
-            cut_in, cut_out = 8.09, 10.078
-
-        coupling_bias = float(np.median(tp3[active] - res[active]))
-        if not math.isfinite(coupling_bias):
-            coupling_bias = 0.0
-        dt_oil = np.diff(oil, prepend=np.nan) / dt_min
-        x_t = np.column_stack([loaded[active].astype("float64"), -(oil[active] - 50.0)])
-        try:
-            beta_t, *_ = np.linalg.lstsq(x_t, dt_oil[active], rcond=None)
-            alpha_heat = max(0.05, float(beta_t[0])) if math.isfinite(beta_t[0]) else 2.30353
-            alpha_cool = max(0.001, float(beta_t[1])) if math.isfinite(beta_t[1]) else 0.01734
-        except np.linalg.LinAlgError:
-            alpha_heat, alpha_cool = 2.30353, 0.01734
-
-        params = TwinCalibratedParams(
-            k_charge_bar_per_min=k_charge,
-            k_drain_bar_per_min=k_drain,
-            cut_in_bar=cut_in,
-            cut_out_bar=cut_out,
-            coupling_bias_bar=coupling_bias,
-            alpha_heat_c_per_min=alpha_heat,
-            alpha_cool_per_min=alpha_cool,
-            fit_source="live_pre_eval_fit",
-            train_cal_samples=int(np.sum(active)),
+        validation = cls._validate_held_out_params(
+            params,
+            frame,
+            eval_start=eval_start,
+            sensitivity_checks=sensitivity,
+            calibration_notes=cal_notes,
         )
-        twin = cls(params=params)
-        twin.validation = twin.validate_held_out(frame, eval_start=eval_start)
-        return twin
+        return cls(params=params, validation=validation)
 
-    def validate_held_out(
-        self,
+    @classmethod
+    def _validate_held_out_params(
+        cls,
+        params: TwinCalibratedParams,
         frame: pd.DataFrame,
         *,
         eval_start: pd.Timestamp = EVALUATION_BOUNDARY,
+        sensitivity_checks: list[TwinSensitivityCheck] | None = None,
+        calibration_notes: list[str] | None = None,
     ) -> TwinValidationSummary:
-        """Measure held-out 10m/60m open-loop accuracy, violations, and step-halving stability."""
-        ev_df = frame[frame.index >= eval_start].sort_index()
+        """Evaluate teacher-forced & closed-loop rollouts vs Persistence & Train-Mean baselines."""
+        ev_raw = frame[frame.index >= eval_start].sort_index()
+        finite_ev = np.isfinite(ev_raw[list(REQUIRED_TWIN_COLUMNS)].to_numpy(dtype="float64"))
+        ev_df = ev_raw[finite_ev.all(axis=1)]
         rep_mask = pd.Series(True, index=ev_df.index)
         for rep in metropt3.FAILURE_REPORTS:
             lo = pd.Timestamp(rep.start) - pd.Timedelta(hours=24)
@@ -298,91 +748,135 @@ class CompressorReservoirTwin:
             rep_mask &= ~((ev_df.index >= lo) & (ev_df.index <= hi))
 
         normal_ev = ev_df[rep_mask]
-        dts_s = normal_ev.index.to_series().diff().dt.total_seconds().fillna(999.0).to_numpy()
-        breaks = np.where((dts_s > 15.0) | (dts_s <= 0.0))[0]
-        starts = np.concatenate([[0], breaks])
-        ends = np.concatenate([breaks, [len(normal_ev)]])
+        blocks_10 = _extract_contiguous_segments(normal_ev, min_len=60)
+        blocks_60 = _extract_contiguous_segments(normal_ev, min_len=360)
+        if not blocks_60:
+            raise TwinCalibrationError(
+                f"Zero contiguous >=60m held-out normal segments available (>={eval_start.date()})"
+            )
 
-        maes_10: list[float] = []
-        maes_60: list[float] = []
-        rmses_60: list[float] = []
-        violations = 0
-        for s, e in zip(starts, ends, strict=True):
-            if e - s < 360:
+        horizon_specs = [(h, round(h * 6.0)) for h in EVAL_HORIZONS_MINUTES]
+        horizon_evals: list[TwinHorizonEvaluation] = []
+        total_violations = 0
+        for h_min, n_pts in horizon_specs:
+            segs = _extract_contiguous_segments(normal_ev, min_len=n_pts)
+            if not segs:
                 continue
-            seg = normal_ev.iloc[s : s + 360]
-            p_obs = seg["TP3"].to_numpy(dtype="float64")
-            u_obs = (seg["DV_eletric"].to_numpy(dtype="float64") >= 0.5).astype("float64")
-            step_min = np.diff(seg.index.to_numpy()).astype("timedelta64[s]").astype(float) / 60.0
-            p_sim = np.empty_like(p_obs)
-            p_sim[0] = p_obs[0]
-            for i in range(1, len(p_obs)):
-                eff = _charge_efficiency(p_sim[i - 1], self.params.cut_out_bar)
-                raw = (
-                    p_sim[i - 1]
-                    + (
-                        self.params.k_charge_bar_per_min * u_obs[i - 1] * eff
-                        - self.params.k_drain_bar_per_min
-                    )
-                    * step_min[i - 1]
-                )
-                clamped, violated = _clamp(raw, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
-                if violated:
-                    violations += 1
-                p_sim[i] = clamped
-            maes_10.append(float(np.mean(np.abs(p_sim[:60] - p_obs[:60]))))
-            maes_60.append(float(np.mean(np.abs(p_sim - p_obs))))
-            rmses_60.append(float(np.sqrt(np.mean((p_sim - p_obs) ** 2))))
+            ev_res, viol = _evaluate_horizon_segments(
+                params, segs, horizon_minutes=h_min, n_pts=n_pts
+            )
+            total_violations += viol
+            horizon_evals.append(ev_res)
 
-        mae10 = float(np.median(maes_10)) if maes_10 else 0.0
-        mae60 = float(np.median(maes_60)) if maes_60 else 0.0
-        rmse60 = float(np.median(rmses_60)) if rmses_60 else 0.0
+        ev10 = next((h for h in horizon_evals if h.horizon_minutes == 10.0), horizon_evals[0])
+        ev60 = next((h for h in horizon_evals if h.horizon_minutes == 60.0), horizon_evals[-1])
 
-        # Check failure residual magnification when failure windows exist
+        max_cl = _contiguous_supported_limit(horizon_evals, attr="closed_loop_supported")
+        max_tf = _contiguous_supported_limit(horizon_evals, attr="teacher_forced_supported")
+        max_duty = _contiguous_supported_limit(horizon_evals, attr="duty_cycle_supported")
+
+        unsupported: list[str] = []
+        for h in horizon_evals:
+            if not h.closed_loop_supported and not h.teacher_forced_supported:
+                unsupported.append(f"{h.horizon_minutes:.0f}m (teacher_forced & closed_loop)")
+            elif not h.closed_loop_supported:
+                unsupported.append(f"{h.horizon_minutes:.0f}m (closed_loop)")
+            elif not h.teacher_forced_supported:
+                unsupported.append(f"{h.horizon_minutes:.0f}m (teacher_forced)")
+
+        # Evaluate failure residual magnification strictly on contiguous gap-free failure slices
         f_maes: list[float] = []
         for rep in metropt3.FAILURE_REPORTS:
             sub = ev_df[
                 (ev_df.index >= pd.Timestamp(rep.start)) & (ev_df.index <= pd.Timestamp(rep.end))
             ]
-            if len(sub) < 120:
+            f_segs = _extract_contiguous_segments(sub, min_len=60)
+            if not f_segs:
                 continue
-            seg = sub.iloc[len(sub) // 2 : len(sub) // 2 + min(360, len(sub) // 2)]
-            if len(seg) < 60:
-                continue
-            step_min = np.diff(seg.index.to_numpy()).astype("timedelta64[s]").astype(float) / 60.0
-            if np.any(step_min <= 0.0) or np.any(step_min > 0.5):
-                continue
-            p_obs = seg["TP3"].to_numpy(dtype="float64")
-            u_obs = (seg["DV_eletric"].to_numpy(dtype="float64") >= 0.5).astype("float64")
-            p_sim = np.empty_like(p_obs)
-            p_sim[0] = p_obs[0]
-            for i in range(1, len(p_obs)):
-                eff = _charge_efficiency(p_sim[i - 1], self.params.cut_out_bar)
-                raw = (
-                    p_sim[i - 1]
-                    + (
-                        self.params.k_charge_bar_per_min * u_obs[i - 1] * eff
-                        - self.params.k_drain_bar_per_min
-                    )
-                    * step_min[i - 1]
-                )
-                p_sim[i], _ = _clamp(raw, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
-            f_maes.append(float(np.mean(np.abs(p_sim - p_obs))))
+            f_seg = max(f_segs, key=len).iloc[:360]
+            p_obs = f_seg["TP3"].to_numpy(dtype="float64")
+            p_tf, _o_tf, _u_tf, _v = _rollout_observed_segment(params, f_seg, closed_loop=False)
+            f_maes.append(float(np.mean(np.abs(p_tf - p_obs))))
 
-        leak_ratio = float(np.mean(f_maes)) / max(mae60, 1e-6) if (f_maes and maes_60) else 0.0
-        step_diff = self._step_halving_stability_diff()
+        if not f_maes:
+            leak_ratio = 0.0
+        else:
+            leak_ratio = float(np.mean(f_maes)) / max(ev60.teacher_forced_tp3_mae_bar, 1e-6)
+
+        dummy_twin = cls(
+            params=params,
+            validation=TwinValidationSummary(
+                split_policy="pending",
+                train_cal_samples=params.train_cal_samples,
+                heldout_normal_segments=len(blocks_60),
+                mae_10min_bar=0.0,
+                mae_60min_bar=0.0,
+                rmse_60min_bar=0.0,
+                closed_loop_mae_10min_bar=0.0,
+                closed_loop_mae_60min_bar=0.0,
+                closed_loop_rmse_60min_bar=0.0,
+                max_supported_closed_loop_horizon_minutes=0.0,
+                max_supported_teacher_forced_horizon_minutes=0.0,
+                max_supported_duty_horizon_minutes=0.0,
+                unsupported_horizons=[],
+                horizon_evaluations=[],
+                sensitivity_checks=[],
+                calibration_notes=[],
+                constraint_violations=0,
+                step_halving_max_diff_bar=0.0,
+                leak_vs_normal_residual_ratio=0.0,
+            ),
+        )
+        step_diff = dummy_twin._step_halving_stability_diff()
+        notes = list(calibration_notes or [])
+        if unsupported:
+            notes.append(
+                f"Unsupported horizons failing Persistence/Train-Mean baselines: "
+                f"{', '.join(unsupported)}."
+            )
+        if len(blocks_10) != len(blocks_60):
+            notes.append(
+                f"Contiguous segments vary by horizon ({len(blocks_10)} at 10m vs "
+                f"{len(blocks_60)} at 60m)."
+            )
+
         return TwinValidationSummary(
             split_policy=(
                 f"Fit strictly on <{eval_start.date()}; validate on >={eval_start.date()} held-out."
             ),
-            train_cal_samples=self.params.train_cal_samples,
-            heldout_normal_segments=len(maes_60),
-            mae_10min_bar=round(mae10, 4),
-            mae_60min_bar=round(mae60, 4),
-            rmse_60min_bar=round(rmse60, 4),
-            constraint_violations=violations,
+            train_cal_samples=params.train_cal_samples,
+            heldout_normal_segments=len(blocks_60),
+            mae_10min_bar=ev10.teacher_forced_tp3_mae_bar,
+            mae_60min_bar=ev60.teacher_forced_tp3_mae_bar,
+            rmse_60min_bar=ev60.teacher_forced_tp3_rmse_bar,
+            closed_loop_mae_10min_bar=ev10.closed_loop_tp3_mae_bar,
+            closed_loop_mae_60min_bar=ev60.closed_loop_tp3_mae_bar,
+            closed_loop_rmse_60min_bar=ev60.closed_loop_tp3_rmse_bar,
+            max_supported_closed_loop_horizon_minutes=max_cl,
+            max_supported_teacher_forced_horizon_minutes=max_tf,
+            max_supported_duty_horizon_minutes=max_duty,
+            unsupported_horizons=unsupported,
+            horizon_evaluations=horizon_evals,
+            sensitivity_checks=sensitivity_checks or [],
+            calibration_notes=notes,
+            constraint_violations=total_violations,
             step_halving_max_diff_bar=round(step_diff, 4),
             leak_vs_normal_residual_ratio=round(leak_ratio, 3),
+        )
+
+    def validate_held_out(
+        self,
+        frame: pd.DataFrame,
+        *,
+        eval_start: pd.Timestamp = EVALUATION_BOUNDARY,
+    ) -> TwinValidationSummary:
+        """Re-evaluate held-out performance against strict baselines without mutating params."""
+        return self._validate_held_out_params(
+            self.params,
+            frame,
+            eval_start=eval_start,
+            sensitivity_checks=self.validation.sensitivity_checks,
+            calibration_notes=self.validation.calibration_notes,
         )
 
     def _integrate_steps(
@@ -428,7 +922,7 @@ class CompressorReservoirTwin:
             recent = load_hist[-win_steps:]
             rolling_duty = sum(recent) / len(recent)
             res_p, _ = _clamp(p - self.params.coupling_bias_bar, MIN_PHYSICAL_BAR, MAX_PHYSICAL_BAR)
-            eff = _charge_efficiency(p, self.params.cut_out_bar)
+            eff = _charge_efficiency(p, self.params.cut_out_bar, self.params.charge_overshoot_bar)
             dp = (
                 self.params.k_charge_bar_per_min * (1.0 if loaded else 0.0) * eff
                 - self.params.k_drain_bar_per_min * demand_mult
@@ -449,7 +943,6 @@ class CompressorReservoirTwin:
         req = TwinSimulationRequest(scenario="leak", horizon_minutes=60.0)
         coarse = self._integrate_steps(req, dt_s=SIM_DT_S)
         fine = self._integrate_steps(req, dt_s=SIM_DT_S / 2.0)
-        # Compare aligned integer-minute pressures across coarse (6 steps/min) & fine (12 steps/min)
         stride_c = 6
         stride_f = 12
         diffs = [
@@ -467,8 +960,10 @@ class CompressorReservoirTwin:
             unidentifiable_parameters=list(UNIDENTIFIABLE_PARAMETERS),
             validation=self.validation,
             advisory_note=(
-                "Physics-informed surrogate calibrated on normalized pre-evaluation APU segments. "
-                "Simulation outputs remain counterfactual advisory projections only."
+                "Physics-informed surrogate calibrated strictly on pre-evaluation APU segments. "
+                f"Closed-loop TP3 forecast validated up to "
+                f"{self.validation.max_supported_closed_loop_horizon_minutes:.0f} min; "
+                "longer rollouts remain uncalibrated exploratory projections."
             ),
         )
 
@@ -476,7 +971,6 @@ class CompressorReservoirTwin:
         rows = self._integrate_steps(req, dt_s=SIM_DT_S)
         dt_min = SIM_DT_S / 60.0
 
-        # Sample trajectory every 1.0 min (every 6th 10s step) plus final point for crisp API output
         trajectory: list[TwinTrajectoryPoint] = []
         stride = 6
         for idx, (minute, p, res_p, t_oil, loaded, duty, _) in enumerate(rows):
@@ -508,10 +1002,26 @@ class CompressorReservoirTwin:
         if not (math.isfinite(mean_duty) and math.isfinite(final_temp)):
             raise RuntimeError("Digital twin integrator produced non-finite state")
 
+        max_cl = self.validation.max_supported_closed_loop_horizon_minutes
+        horizon_supported = max_cl > 0.0 and req.horizon_minutes <= max_cl
+        horizon_status: Literal["supported_closed_loop", "unsupported_closed_loop_horizon"] = (
+            "supported_closed_loop" if horizon_supported else "unsupported_closed_loop_horizon"
+        )
+        horizon_warning: str | None = None
+        if not horizon_supported:
+            horizon_warning = (
+                f"Requested horizon ({req.horizon_minutes:.0f} min) exceeds max validated "
+                f"closed-loop TP3 horizon ({max_cl:.0f} min). Beyond {max_cl:.0f} min, "
+                "autonomous TP3 point accuracy fails the constant-training-mean baseline due to "
+                "unmodeled demand-driven cycle phase drift; treat rollout as qualitative stress "
+                "direction only."
+            )
+
         if req.scenario == "baseline":
             interp = (
-                "Baseline nominal duty remains bounded inside the [8.09, 10.08] bar governor band "
-                "with zero LPS excursions."
+                f"Baseline nominal duty remains bounded inside the "
+                f"[{self.params.cut_in_bar:.2f}, {self.params.cut_out_bar:.2f}] bar governor band "
+                f"(mean duty {mean_duty:.2f}, LPS {lps_mins:.1f} min)."
             )
         elif req.scenario == "maintenance_repair":
             repair_min = req.repair_at_minute if req.repair_at_minute is not None else 30.0
@@ -526,6 +1036,8 @@ class CompressorReservoirTwin:
                 f"(above 0.70 threshold for {duty_breach_mins:.1f} min) with min TP3 "
                 f"{min_tp3:.2f} bar and {lps_mins:.1f} min below 7.0 bar LPS switch."
             )
+        if horizon_warning is not None:
+            interp = f"{interp} [UNSUPPORTED FORECAST HORIZON >{max_cl:.0f}m]"
 
         summary = TwinScenarioSummary(
             scenario=req.scenario,
@@ -543,6 +1055,9 @@ class CompressorReservoirTwin:
         return TwinSimulationResponse(
             asset_id=req.asset_id,
             scenario=req.scenario,
+            horizon_supported=horizon_supported,
+            horizon_support_status=horizon_status,
+            horizon_warning=horizon_warning,
             params_used=self.params.to_contracts(),
             unidentifiable_parameters=list(UNIDENTIFIABLE_PARAMETERS),
             trajectory=trajectory,

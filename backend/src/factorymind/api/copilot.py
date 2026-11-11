@@ -24,6 +24,7 @@ from factorymind.contracts.copilot import (
     CopilotToolsResponse,
 )
 from factorymind.copilot.service import ControlledCopilot
+from factorymind.twin.physics import CompressorReservoirTwin
 
 router = APIRouter(prefix="/api/v1/copilot", tags=["copilot"])
 
@@ -34,7 +35,10 @@ def _get_copilot(
     principal: Principal | None = None,
 ) -> ControlledCopilot:
     index = get_knowledge_index(request)
-    twin = get_digital_twin(request)
+    try:
+        twin: CompressorReservoirTwin | None = get_digital_twin(request)
+    except HTTPException:
+        twin = None
 
     def _anomaly_for_asset(asset_id: str) -> AnomalyService | None:
         settings: Settings = request.app.state.settings

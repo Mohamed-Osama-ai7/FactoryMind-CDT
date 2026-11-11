@@ -297,6 +297,16 @@ export function DigitalTwinLab() {
               <span className="text-muted">{simData.summary.advisory_interpretation}</span>
             </div>
 
+            {!simData.horizon_supported && simData.horizon_warning && (
+              <p
+                role="status"
+                className="rounded border border-warn/60 bg-warn/10 px-2.5 py-2 text-xs text-warn"
+              >
+                Horizon validation limit ({simData.horizon_support_status}):{' '}
+                {simData.horizon_warning}
+              </p>
+            )}
+
             <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded border border-border p-2">
                 <dt className="text-muted">Mean / Peak Duty</dt>
@@ -400,33 +410,161 @@ export function DigitalTwinLab() {
 
             <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded border border-border p-2">
-                <dt className="text-muted">Held-out Segments</dt>
+                <dt className="text-muted">Supported Horizons (CL / TF / Duty)</dt>
                 <dd className="font-mono text-sm text-ink">
-                  {modelData.validation.heldout_normal_segments} (1h rollouts)
+                  {modelData.validation.max_supported_closed_loop_horizon_minutes.toFixed(0)}m /{' '}
+                  {modelData.validation.max_supported_teacher_forced_horizon_minutes.toFixed(0)}m /{' '}
+                  {modelData.validation.max_supported_duty_horizon_minutes.toFixed(0)}m
                 </dd>
               </div>
               <div className="rounded border border-border p-2">
-                <dt className="text-muted">10-min / 60-min MAE</dt>
+                <dt className="text-muted">Closed-Loop 10m / 60m MAE</dt>
+                <dd className="font-mono text-sm text-ink">
+                  {modelData.validation.closed_loop_mae_10min_bar.toFixed(4)} /{' '}
+                  {modelData.validation.closed_loop_mae_60min_bar.toFixed(4)} bar
+                </dd>
+              </div>
+              <div className="rounded border border-border p-2">
+                <dt className="text-muted">Teacher-Forced 10m / 60m MAE</dt>
                 <dd className="font-mono text-sm text-ink">
                   {modelData.validation.mae_10min_bar.toFixed(4)} /{' '}
                   {modelData.validation.mae_60min_bar.toFixed(4)} bar
                 </dd>
               </div>
               <div className="rounded border border-border p-2">
-                <dt className="text-muted">60-min RMSE / Step Diff</dt>
-                <dd className="font-mono text-sm text-ink">
-                  {modelData.validation.rmse_60min_bar.toFixed(4)} /{' '}
-                  {modelData.validation.step_halving_max_diff_bar.toFixed(3)} bar
-                </dd>
-              </div>
-              <div className="rounded border border-border p-2">
-                <dt className="text-muted">Leak Residual Magnification</dt>
+                <dt className="text-muted">
+                  Leak Ratio / Violations ({modelData.validation.heldout_normal_segments} seg)
+                </dt>
                 <dd className="font-mono text-sm text-ink">
                   {modelData.validation.leak_vs_normal_residual_ratio.toFixed(2)}x (
-                  {modelData.validation.constraint_violations} viol)
+                  {modelData.validation.constraint_violations} viol,{' '}
+                  {modelData.validation.step_halving_max_diff_bar.toFixed(3)} diff)
                 </dd>
               </div>
             </dl>
+
+            {modelData.validation.unsupported_horizons.length > 0 && (
+              <p
+                role="status"
+                className="rounded border border-warn/60 bg-warn/10 px-2.5 py-2 text-xs text-warn"
+              >
+                Unsupported prediction horizons (fails Persistence or Train-Mean baseline):{' '}
+                {modelData.validation.unsupported_horizons.join(', ')}
+              </p>
+            )}
+
+            {modelData.validation.horizon_evaluations.length > 0 && (
+              <div className="overflow-x-auto">
+                <h3 className="mb-1.5 font-medium text-muted">
+                  Per-horizon evaluation vs Persistence &amp; Constant-Training-Mean baselines
+                </h3>
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-left text-muted">
+                      {[
+                        'Horizon',
+                        'Segs',
+                        'TF MAE',
+                        'CL MAE',
+                        'Persist MAE',
+                        'Mean MAE',
+                        'CL Skill (Mean)',
+                        'Duty MAE (Obs/Mean)',
+                        'Cycles (Obs->Sim)',
+                        'Status',
+                      ].map((h) => (
+                        <th key={h} scope="col" className="pr-2 font-normal">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelData.validation.horizon_evaluations.map((h) => (
+                      <tr key={h.horizon_minutes} className="border-t border-border">
+                        <th scope="row" className="py-1 pr-2 text-left font-mono font-normal">
+                          {h.horizon_minutes.toFixed(0)}m
+                        </th>
+                        <td className="py-1 pr-2 font-mono">{h.segment_count}</td>
+                        <td className="py-1 pr-2 font-mono">
+                          {h.teacher_forced_tp3_mae_bar.toFixed(4)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">
+                          {h.closed_loop_tp3_mae_bar.toFixed(4)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">
+                          {h.persistence_tp3_mae_bar.toFixed(4)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">
+                          {h.train_mean_tp3_mae_bar.toFixed(4)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">
+                          {h.closed_loop_skill_vs_train_mean.toFixed(3)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">
+                          {h.duty_cycle_mae.toFixed(4)} / {h.train_mean_duty_mae.toFixed(4)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">
+                          {h.observed_cycles_per_segment.toFixed(2)}-&gt;
+                          {h.simulated_cycles_per_segment.toFixed(2)}
+                        </td>
+                        <td className="py-1 font-mono">
+                          {h.closed_loop_supported
+                            ? 'CL OK'
+                            : h.teacher_forced_supported
+                              ? 'TF ONLY'
+                              : 'UNSUPPORTED'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {modelData.validation.sensitivity_checks.length > 0 && (
+              <div className="overflow-x-auto">
+                <h3 className="mb-1.5 font-medium text-muted">
+                  Pre-evaluation parameter sensitivity checks (zero held-out leakage)
+                </h3>
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-left text-muted">
+                      {[
+                        'Perturbation',
+                        'Segs',
+                        'Base 10m MAE',
+                        'Perturbed MAE',
+                        'Delta TP3',
+                        'Delta Duty',
+                      ].map((h) => (
+                        <th key={h} scope="col" className="pr-2 font-normal">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelData.validation.sensitivity_checks.map((s) => (
+                      <tr key={s.perturbation} className="border-t border-border">
+                        <th scope="row" className="py-1 pr-2 text-left font-mono font-normal">
+                          {s.perturbation}
+                        </th>
+                        <td className="py-1 pr-2 font-mono">{s.segment_count}</td>
+                        <td className="py-1 pr-2 font-mono">
+                          {s.baseline_tp3_mae_10min_bar.toFixed(4)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">
+                          {s.perturbed_tp3_mae_10min_bar.toFixed(4)}
+                        </td>
+                        <td className="py-1 pr-2 font-mono">{s.delta_tp3_mae_bar.toFixed(4)}</td>
+                        <td className="py-1 font-mono">{s.delta_duty_mae.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {modelData.governing_equations.length > 0 && (
               <div>

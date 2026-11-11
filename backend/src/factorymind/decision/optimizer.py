@@ -21,7 +21,7 @@ from factorymind.contracts.optimization import (
     MaintenanceOptionEvaluation,
     MaintenanceOptionKind,
 )
-from factorymind.twin.physics import CompressorReservoirTwin
+from factorymind.twin.physics import CompressorReservoirTwin, TwinCalibrationError
 
 _OPTION_TITLES: dict[MaintenanceOptionKind, str] = {
     "repair_now": "Immediate Depot Hold & Repair",
@@ -60,7 +60,11 @@ def compare_maintenance_options(
     observed_extras: list[ImpactQuantity] | None = None,
 ) -> MaintenanceDecisionComparisonResponse:
     """Compare ``repair_now``, ``schedule``, and ``monitor`` under physical & cost bounds."""
-    active_twin = twin or CompressorReservoirTwin()
+    if twin is None:
+        raise TwinCalibrationError(
+            "Calibrated CompressorReservoirTwin instance is required for optimization comparison."
+        )
+    active_twin = twin
     a = req.assumptions
     c = req.constraints
     w = req.weights
@@ -357,6 +361,13 @@ def compare_maintenance_options(
     if not feasible_opts:
         uncertainty_warnings.append(
             "No candidate satisfies every hard operational constraint; ranked by least penalty."
+        )
+    max_cl_horizon = active_twin.validation.max_supported_closed_loop_horizon_minutes
+    if sim_horizon_min > max_cl_horizon:
+        uncertainty_warnings.append(
+            f"Digital twin closed-loop TP3 trajectory accuracy is validated only up to "
+            f"{max_cl_horizon:.0f} min; simulated {sim_horizon_min:.0f}-min option rankings are "
+            "exploratory stress comparisons rather than calibrated point forecasts."
         )
 
     impact_quantities: list[ImpactQuantity] = []
