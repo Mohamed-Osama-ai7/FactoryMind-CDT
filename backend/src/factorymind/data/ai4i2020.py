@@ -117,7 +117,10 @@ def normalize(frame: pd.DataFrame) -> pd.DataFrame:
     for col in NUMERIC_FEATURES:
         out[col] = pd.to_numeric(out[col], errors="coerce").astype("float64")
     for col in (TARGET_COLUMN, *MODE_COLUMNS, "RNF"):
-        out[col] = pd.to_numeric(out[col], errors="coerce").astype("int64")
+        parsed = pd.to_numeric(out[col], errors="coerce")
+        if parsed.isna().any() or ((parsed != 0) & (parsed != 1)).any():
+            raise DataValidationError(f"Column {col} must contain binary 0/1 values without nulls")
+        out[col] = parsed.astype("int64")
     return out
 
 

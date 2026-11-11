@@ -6,7 +6,7 @@ import {
   useListMlCatalog,
   usePredictAi4iSample,
 } from '../../api/generated/ml/ml'
-import type { Ai4iPredictRequest, Ai4iPredictRequestQualityStatus } from '../../api/generated/model'
+import type { Ai4iPredictRequestQualityStatus } from '../../api/generated/model'
 
 const GOV_BADGE = {
   active: 'border-ok/60 bg-ok/10 text-ok',
@@ -16,26 +16,37 @@ const GOV_BADGE = {
 
 type PresetKey = 'nominal' | 'ood_shift' | 'degraded_quality' | 'cross_asset'
 
-const DEFAULT_PRESET: Ai4iPredictRequest = {
+interface SandboxFormState {
+  asset_id: string
+  product_type: string
+  air_temperature_k: string
+  process_temperature_k: string
+  rotational_speed_rpm: string
+  torque_nm: string
+  tool_wear_min: string
+  quality_status: Ai4iPredictRequestQualityStatus
+}
+
+const DEFAULT_PRESET: SandboxFormState = {
   asset_id: 'ai4i-milling-bench',
   product_type: 'M',
-  air_temperature_k: 300.0,
-  process_temperature_k: 310.0,
-  rotational_speed_rpm: 1520,
-  torque_nm: 38.0,
-  tool_wear_min: 60,
+  air_temperature_k: '300',
+  process_temperature_k: '310',
+  rotational_speed_rpm: '1520',
+  torque_nm: '38',
+  tool_wear_min: '60',
   quality_status: 'healthy',
 }
 
-const PRESETS: Record<PresetKey, Ai4iPredictRequest> = {
+const PRESETS: Record<PresetKey, SandboxFormState> = {
   nominal: DEFAULT_PRESET,
   ood_shift: {
     ...DEFAULT_PRESET,
-    air_temperature_k: 340.0,
-    process_temperature_k: 280.0,
-    rotational_speed_rpm: 1550,
-    torque_nm: 42.0,
-    tool_wear_min: 90,
+    air_temperature_k: '340',
+    process_temperature_k: '280',
+    rotational_speed_rpm: '1550',
+    torque_nm: '42',
+    tool_wear_min: '90',
   },
   degraded_quality: {
     ...DEFAULT_PRESET,
@@ -45,6 +56,13 @@ const PRESETS: Record<PresetKey, Ai4iPredictRequest> = {
     ...DEFAULT_PRESET,
     asset_id: 'metropt3-apu-1',
   },
+}
+
+function parseFiniteInput(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const num = Number(trimmed)
+  return Number.isFinite(num) ? num : null
 }
 
 /** Multi-model governance catalog, AI4I 2020 calibration benchmark & OOD abstention console. */
@@ -57,7 +75,8 @@ export function ModelsWorkspace() {
   const benchmarkQuery = useGetAi4iBenchmark({ query: { enabled: canRead, retry: false } })
   const predict = usePredictAi4iSample()
 
-  const [form, setForm] = useState<Ai4iPredictRequest>(DEFAULT_PRESET)
+  const [form, setForm] = useState<SandboxFormState>(DEFAULT_PRESET)
+  const [validationError, setValidationError] = useState<string | null>(null)
 
   if (me.isPending) return <p role="status">Checking model access permissions…</p>
   if (me.isError) {
@@ -95,7 +114,35 @@ export function ModelsWorkspace() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
-    predict.mutate({ data: form })
+    const air = parseFiniteInput(form.air_temperature_k)
+    const proc = parseFiniteInput(form.process_temperature_k)
+    const rpm = parseFiniteInput(form.rotational_speed_rpm)
+    const torque = parseFiniteInput(form.torque_nm)
+    const wear = parseFiniteInput(form.tool_wear_min)
+    if (
+      !form.asset_id.trim() ||
+      air === null ||
+      proc === null ||
+      rpm === null ||
+      torque === null ||
+      wear === null
+    ) {
+      setValidationError('Enter non-empty asset ID and valid finite numbers for all sensor fields.')
+      return
+    }
+    setValidationError(null)
+    predict.mutate({
+      data: {
+        asset_id: form.asset_id.trim(),
+        product_type: form.product_type,
+        air_temperature_k: air,
+        process_temperature_k: proc,
+        rotational_speed_rpm: rpm,
+        torque_nm: torque,
+        tool_wear_min: wear,
+        quality_status: form.quality_status,
+      },
+    })
   }
 
   return (
@@ -189,7 +236,7 @@ export function ModelsWorkspace() {
         </h2>
         {benchmarkQuery.isPending && <p role="status">Loading benchmark metrics…</p>}
         {benchmarkQuery.isError && (
-          <p role="status" className="rounded border border-border bg-panel p-3 text-xs text-muted">
+          <p role="alert" className="rounded border border-warn/60 bg-panel p-3 text-xs text-ink">
             Benchmark unavailable: {describeApiError(benchmarkQuery.error)}
           </p>
         )}
@@ -315,6 +362,7 @@ export function ModelsWorkspace() {
                 onClick={() => {
                   const preset = PRESETS[key]
                   if (preset) setForm(preset)
+                  setValidationError(null)
                   predict.reset()
                 }}
                 className="rounded border border-border px-2 py-1 hover:bg-border"
@@ -330,8 +378,11 @@ export function ModelsWorkspace() {
               <input
                 id={`${idPrefix}-asset`}
                 type="text"
-                value={form.asset_id ?? 'ai4i-milling-bench'}
-                onChange={(e) => setForm({ ...form, asset_id: e.target.value })}
+                value={form.asset_id}
+                onChange={(e) => {
+                  setForm({ ...form, asset_id: e.target.value })
+                  if (validationError) setValidationError(null)
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 font-mono text-ink"
               />
             </label>
@@ -357,7 +408,10 @@ export function ModelsWorkspace() {
                 type="number"
                 step="0.1"
                 value={form.air_temperature_k}
-                onChange={(e) => setForm({ ...form, air_temperature_k: Number(e.target.value) })}
+                onChange={(e) => {
+                  setForm({ ...form, air_temperature_k: e.target.value })
+                  if (validationError) setValidationError(null)
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 font-mono text-ink"
               />
             </label>
@@ -368,9 +422,10 @@ export function ModelsWorkspace() {
                 type="number"
                 step="0.1"
                 value={form.process_temperature_k}
-                onChange={(e) =>
-                  setForm({ ...form, process_temperature_k: Number(e.target.value) })
-                }
+                onChange={(e) => {
+                  setForm({ ...form, process_temperature_k: e.target.value })
+                  if (validationError) setValidationError(null)
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 font-mono text-ink"
               />
             </label>
@@ -381,7 +436,10 @@ export function ModelsWorkspace() {
                 type="number"
                 step="1"
                 value={form.rotational_speed_rpm}
-                onChange={(e) => setForm({ ...form, rotational_speed_rpm: Number(e.target.value) })}
+                onChange={(e) => {
+                  setForm({ ...form, rotational_speed_rpm: e.target.value })
+                  if (validationError) setValidationError(null)
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 font-mono text-ink"
               />
             </label>
@@ -392,7 +450,10 @@ export function ModelsWorkspace() {
                 type="number"
                 step="0.1"
                 value={form.torque_nm}
-                onChange={(e) => setForm({ ...form, torque_nm: Number(e.target.value) })}
+                onChange={(e) => {
+                  setForm({ ...form, torque_nm: e.target.value })
+                  if (validationError) setValidationError(null)
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 font-mono text-ink"
               />
             </label>
@@ -403,7 +464,10 @@ export function ModelsWorkspace() {
                 type="number"
                 step="1"
                 value={form.tool_wear_min}
-                onChange={(e) => setForm({ ...form, tool_wear_min: Number(e.target.value) })}
+                onChange={(e) => {
+                  setForm({ ...form, tool_wear_min: e.target.value })
+                  if (validationError) setValidationError(null)
+                }}
                 className="rounded border border-border bg-surface px-2 py-1 font-mono text-ink"
               />
             </label>
@@ -411,7 +475,7 @@ export function ModelsWorkspace() {
               <span className="text-muted">Quality Gate Input</span>
               <select
                 id={`${idPrefix}-qual`}
-                value={form.quality_status ?? 'healthy'}
+                value={form.quality_status}
                 onChange={(e) =>
                   setForm({
                     ...form,
@@ -433,6 +497,11 @@ export function ModelsWorkspace() {
               >
                 {predict.isPending ? 'Evaluating…' : 'Evaluate routed sample'}
               </button>
+              {validationError && (
+                <span role="alert" className="text-critical">
+                  {validationError}
+                </span>
+              )}
               {predict.isError && (
                 <span role="alert" className="text-critical">
                   {describeApiError(predict.error)}
@@ -457,10 +526,14 @@ export function ModelsWorkspace() {
               </p>
               <p className="mt-1 font-mono text-[11px] text-muted">
                 Model={prediction.selected_model_id} · Uncertainty=
-                {prediction.uncertainty.uncertainty_band} · Mahalanobis=
+                {prediction.uncertainty.uncertainty_band} · Margin=
+                {prediction.uncertainty.decision_margin?.toFixed(3) ?? 'n/a'} · Mahalanobis=
                 {prediction.uncertainty.mahalanobis_distance?.toFixed(2) ?? 'n/a'} (thr{' '}
                 {prediction.uncertainty.ood_threshold.toFixed(2)}) · Origin=
                 {prediction.provenance_origin}
+                {prediction.predicted_failure_modes?.length
+                  ? ` · Modes=${prediction.predicted_failure_modes.join(', ')}`
+                  : ''}
                 {prediction.abstention_reasons?.length
                   ? ` · Reasons=${prediction.abstention_reasons.join(', ')}`
                   : ''}

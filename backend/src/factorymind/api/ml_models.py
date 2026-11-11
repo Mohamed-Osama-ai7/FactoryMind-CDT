@@ -74,6 +74,20 @@ def list_ml_catalog(
     except BenchmarkUnavailableError:
         report = None
 
+    selected_ai4i_id = report.selected_model_id if report else "ai4i-hgb"
+    selected_ai4i_family = (
+        next(
+            (
+                f"{m.model_family} + PlattCalibrator"
+                for m in report.models
+                if m.model_id == selected_ai4i_id
+            ),
+            "HistGradientBoostingClassifier + PlattCalibrator",
+        )
+        if report
+        else "HistGradientBoostingClassifier + PlattCalibrator"
+    )
+
     specialists = [
         SpecialistModelEntry(
             model_id="duty_rule",
@@ -93,18 +107,18 @@ def list_ml_catalog(
             dataset_id="metropt3",
             domain_kind="real_operational_telemetry",
             model_family="StandardizedPCA-SPE (42 features)",
-            governance_status="active",
+            governance_status="active" if metro_ver else "candidate",
             uncertainty_mechanism=(
                 "Routed exclusively to non-leak warning tier; no causal leak diagnosis"
             ),
             scope_note="Detects non-leak multivariate excursions without inflating leak alarms.",
         ),
         SpecialistModelEntry(
-            model_id="ai4i-hgb",
+            model_id=selected_ai4i_id,
             asset_id="ai4i-milling-bench",
             dataset_id="ai4i2020",
             domain_kind="controlled_synthetic_benchmark",
-            model_family="HistGradientBoostingClassifier + PlattCalibrator",
+            model_family=selected_ai4i_family,
             governance_status=(
                 "active" if report and report.promotion_contract.promoted else "candidate"
             ),

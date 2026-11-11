@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,11 @@ def test_ai4i_feature_contract_excludes_leakage_columns() -> None:
     ai4i2020.validate_contract(report, expected_rows=120)
     assert report.null_values == 0
     assert report.invalid_types == 0
+
+    bad = df.copy().astype({"Machine failure": "object"})
+    bad.loc[0, "Machine failure"] = "bad"
+    with pytest.raises(ai4i2020.DataValidationError, match="binary 0/1"):
+        ai4i2020.normalize(bad)
 
 
 def test_mahalanobis_ood_and_ece_behave_monotonically() -> None:
@@ -256,7 +262,49 @@ def test_orchestrator_abstention_gates_and_bundle_integrity(tmp_path: Path) -> N
         assert b_probe.abstention_message == ABSTENTION_MESSAGE
         assert b_probe.uncertainty.uncertainty_band == "high"
 
-    # 6) Tampered joblib artifact fails SHA-256 attestation before loading
+    # 6) Single-class mode head (all zeros on training subset) does not IndexError
+    class _ZeroClassHead:
+        classes_ = np.array([0])
+
+        def predict_proba(self, x: np.ndarray) -> np.ndarray:
+            return np.ones((len(x), 1), dtype="float64")
+
+    zero_head_bundle = loaded.__class__(
+        model_version=loaded.model_version,
+        asset_id=loaded.asset_id,
+        dataset_id=loaded.dataset_id,
+        feature_columns=loaded.feature_columns,
+        numeric_features=loaded.numeric_features,
+        preprocessor=loaded.preprocessor,
+        numeric_scaler=loaded.numeric_scaler,
+        ood_detector=loaded.ood_detector,
+        selected_candidate=loaded.selected_candidate,
+        candidates=loaded.candidates,
+        mode_heads={"TWF": _ZeroClassHead()},
+    )
+    row0 = fail_rows.iloc[0]
+    safe_head_res = MultiModelOrchestrator(zero_head_bundle).predict(
+        asset_id="ai4i-milling-bench",
+        product_type=str(row0["Type"]),
+        air_temperature_k=float(row0["Air temperature [K]"]),
+        process_temperature_k=float(row0["Process temperature [K]"]),
+        rotational_speed_rpm=float(row0["Rotational speed [rpm]"]),
+        torque_nm=float(row0["Torque [Nm]"]),
+        tool_wear_min=float(row0["Tool wear [min]"]),
+    )
+    assert "TWF" not in safe_head_res.predicted_failure_modes
+
+    # 7) Boolean schema_version: true in model_card is rejected cleanly
+    card_path = bench_dir / "model_card.json"
+    orig_card = card_path.read_text(encoding="utf-8")
+    card_data = json.loads(orig_card)
+    card_data["schema_version"] = True
+    card_path.write_text(json.dumps(card_data), encoding="utf-8")
+    with pytest.raises(BenchmarkUnavailableError, match="unsupported"):
+        load_verified_ai4i_bundle(tmp_path / "artifacts")
+    card_path.write_text(orig_card, encoding="utf-8")
+
+    # 8) Tampered joblib artifact fails SHA-256 attestation before loading
     (bench_dir / "model.joblib").write_bytes(b"tampered")
     with pytest.raises(BenchmarkUnavailableError, match="SHA-256"):
         load_verified_ai4i_bundle(tmp_path / "artifacts")

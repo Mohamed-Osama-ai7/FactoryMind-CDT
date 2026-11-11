@@ -225,10 +225,62 @@ describe('ModelsWorkspace', () => {
     expect(screen.getByText('0.9803')).toBeInTheDocument()
     expect(screen.getByText('Promoted · ai4i-hgb')).toBeInTheDocument()
 
+    // Clearing numeric field shows explicit finite-number validation error instead of submitting 0/null
+    const airInput = screen.getByLabelText(/Air Temp \[K\]/)
+    await userEvent.clear(airInput)
+    await userEvent.click(screen.getByRole('button', { name: 'Evaluate routed sample' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/valid finite numbers/)
+
+    // Selecting nominal preset predicts cleanly
+    await userEvent.click(screen.getByRole('button', { name: 'nominal' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Evaluate routed sample' }))
+    expect(await screen.findByText(/Prediction: nominal/)).toBeInTheDocument()
+    expect(screen.getByText(/Margin=0\.417/)).toBeInTheDocument()
+
+    // OOD shift abstains cleanly
     await userEvent.click(screen.getByRole('button', { name: 'ood_shift' }))
     await userEvent.click(screen.getByRole('button', { name: 'Evaluate routed sample' }))
     expect(
       await screen.findByText('Insufficient evidence to make a reliable diagnosis'),
     ).toBeInTheDocument()
+  })
+
+  it('shows alerts for /me failure and unavailable catalog or benchmark responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        const s = String(url)
+        if (s.startsWith('/api/v1/me')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                actor_id: 'eng-1',
+                tenant_id: 'acme',
+                roles: ['engineer'],
+                permissions: ['anomaly:read'],
+                asset_ids: ['metropt3-apu-1'],
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            ),
+          )
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ detail: 'Benchmark artifacts not ready' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <ModelsWorkspace />
+      </QueryClientProvider>,
+    )
+
+    const alerts = await screen.findAllByRole('alert')
+    expect(alerts.map((a) => a.textContent).join(' ')).toContain('Benchmark artifacts not ready')
   })
 })

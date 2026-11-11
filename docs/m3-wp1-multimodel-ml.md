@@ -7,9 +7,9 @@ M3-WP1 adds a specialized multi-model ML orchestrator, Ledoit-Wolf Mahalanobis o
 ## 1. Uncertainty, OOD Detection & Abstention (`factorymind.ml`)
 
 - **`MahalanobisOodDetector` (`uncertainty.py`):** Fits Ledoit-Wolf shrinkage precision matrices over training numerical feature distributions and calibrates a 99.5th-percentile distance gate; flags non-finite or shifted inputs (`is_ood=True`).
-- **`MultiModelOrchestrator` (`orchestrator.py`):** Routes single-sample requests cleanly and enforces four mandatory conservative abstention rules yielding the canonical message `"Insufficient evidence to make a reliable diagnosis"` (`ABSTENTION_MESSAGE`):
-  1. `asset_mismatch`: blocks cross-asset prediction on uncalibrated machines (`asset_id != "ai4i-milling-bench"`).
-  2. `data_quality_degraded` / `corrupt_or_non_finite` / `out_of_range`: blocks degraded or non-finite physical telemetry before inference.
+- **`MultiModelOrchestrator` (`orchestrator.py`):** Routes single-sample requests cleanly and enforces mandatory conservative abstention rules yielding the canonical message `"Insufficient evidence to make a reliable diagnosis"` (`ABSTENTION_MESSAGE`):
+  1. `asset_mismatch` / `unknown_model_id`: blocks cross-asset or unregistered-model predictions on uncalibrated machines (`asset_id != "ai4i-milling-bench"`).
+  2. `data_quality_degraded` / `data_quality_insufficient` / `invalid_product_type` / `corrupt_or_non_finite` / `out_of_range`: blocks degraded, invalid, or non-finite physical telemetry before inference.
   3. `ood_mahalanobis_exceeded`: refuses to predict outside multivariate training support.
   4. `low_margin_ambiguous`: abstains inside `|p - threshold| < 0.10` (`uncertainty_band="high"`).
 - **SHA-256 Attestation (`orchestrator.py`):** Verifies `model_card.json` `artifact_sha256` before loading `model.joblib`.
@@ -45,3 +45,4 @@ M3-WP1 adds a specialized multi-model ML orchestrator, Ledoit-Wolf Mahalanobis o
   - `POST /api/v1/ml/predict` (stateless evaluation; `require_data_source(Permission.ANOMALY_READ)` executed before loading bundles; added to explicit `test_safety_boundary.py` allowlist).
 - **Frontend (`ModelsWorkspace.tsx`, `routes/models.tsx`, `__root.tsx`):**
   - Adds `/models` workspace showing domain separation disclaimer, specialist registry, AI4I calibration metrics & promotion gates, and interactive OOD/quality abstention sandbox.
+

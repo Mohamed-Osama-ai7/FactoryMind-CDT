@@ -49,9 +49,14 @@ def load_verified_ai4i_bundle(artifacts_dir: Path) -> Ai4iModelBundle:
         card = json.loads(card_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise BenchmarkUnavailableError("AI4I 2020 model card unreadable") from exc
-    if not isinstance(card, dict) or card.get("schema_version") != 1:
+    schema_version = card.get("schema_version") if isinstance(card, dict) else None
+    if not isinstance(card, dict) or type(schema_version) is not int or schema_version != 1:
         raise BenchmarkUnavailableError("AI4I 2020 model card unsupported")
-    digest = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+    try:
+        raw_bytes = bundle_path.read_bytes()
+    except OSError as exc:
+        raise BenchmarkUnavailableError("AI4I 2020 model bundle unreadable") from exc
+    digest = hashlib.sha256(raw_bytes).hexdigest()
     if digest != card.get("artifact_sha256"):
         raise BenchmarkUnavailableError("AI4I 2020 model bundle failed SHA-256 verification")
     try:
@@ -225,7 +230,12 @@ class MultiModelOrchestrator:
         modes: list[str] = []
         if label == "failure_risk":
             for mode_name, clf in self.bundle.mode_heads.items():
-                if float(clf.predict_proba(row_enc)[0, 1]) >= 0.35:
+                classes = list(getattr(clf, "classes_", []))
+                if 1 not in classes:
+                    continue
+                pos_idx = classes.index(1)
+                proba_row = clf.predict_proba(row_enc)[0]
+                if float(proba_row[pos_idx]) >= 0.35:
                     modes.append(mode_name)
 
         return ModelRoutingDecision(
