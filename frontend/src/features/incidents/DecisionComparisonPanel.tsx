@@ -9,6 +9,8 @@ import { useGetIncidentDecisionComparison } from '../../api/generated/optimizati
 export interface DecisionComparisonPanelProps {
   incidentId: string
   dominantHypothesis?: GetIncidentDecisionComparisonDominantHypothesis
+  rcaPending?: boolean
+  rcaUnavailable?: boolean
 }
 
 const TIER_BADGE = {
@@ -47,6 +49,8 @@ function parseFiniteBounded(
 export function DecisionComparisonPanel({
   incidentId,
   dominantHypothesis,
+  rcaPending = false,
+  rcaUnavailable = false,
 }: DecisionComparisonPanelProps) {
   const idPrefix = useId()
   const [form, setForm] = useState<AssumptionForm>({
@@ -65,10 +69,19 @@ export function DecisionComparisonPanel({
   })
   const [validationError, setValidationError] = useState<string | null>(null)
 
-  const query = useGetIncidentDecisionComparison(incidentId, {
-    ...applied,
-    ...(dominantHypothesis ? { dominant_hypothesis: dominantHypothesis } : {}),
-  })
+  const query = useGetIncidentDecisionComparison(
+    incidentId,
+    {
+      ...applied,
+      ...(dominantHypothesis ? { dominant_hypothesis: dominantHypothesis } : {}),
+    },
+    { query: { enabled: !rcaPending } },
+  )
+
+  const updateField = (field: keyof AssumptionForm, val: string) => {
+    setForm((prev) => ({ ...prev, [field]: val }))
+    if (validationError) setValidationError(null)
+  }
 
   const onApply = (e: FormEvent) => {
     e.preventDefault()
@@ -143,6 +156,12 @@ export function DecisionComparisonPanel({
         )}
       </div>
 
+      {rcaUnavailable && (
+        <p role="status" className="text-xs text-warn">
+          RCA hypothesis context unavailable; comparison is evaluated using direct assumptions only.
+        </p>
+      )}
+
       <form
         noValidate
         onSubmit={onApply}
@@ -156,7 +175,7 @@ export function DecisionComparisonPanel({
             type="number"
             step="any"
             value={form.electricityEurPerKwh}
-            onChange={(e) => setForm((p) => ({ ...p, electricityEurPerKwh: e.target.value }))}
+            onChange={(e) => updateField('electricityEurPerKwh', e.target.value)}
             className="rounded border border-border bg-surface px-2 py-1 text-ink"
           />
         </label>
@@ -167,7 +186,7 @@ export function DecisionComparisonPanel({
             type="number"
             step="any"
             value={form.plannedMaintenanceEur}
-            onChange={(e) => setForm((p) => ({ ...p, plannedMaintenanceEur: e.target.value }))}
+            onChange={(e) => updateField('plannedMaintenanceEur', e.target.value)}
             className="rounded border border-border bg-surface px-2 py-1 text-ink"
           />
         </label>
@@ -178,7 +197,7 @@ export function DecisionComparisonPanel({
             type="number"
             step="any"
             value={form.disruptionEurPerHr}
-            onChange={(e) => setForm((p) => ({ ...p, disruptionEurPerHr: e.target.value }))}
+            onChange={(e) => updateField('disruptionEurPerHr', e.target.value)}
             className="rounded border border-border bg-surface px-2 py-1 text-ink"
           />
         </label>
@@ -189,7 +208,7 @@ export function DecisionComparisonPanel({
             type="number"
             step="any"
             value={form.leakRateBarPerMin}
-            onChange={(e) => setForm((p) => ({ ...p, leakRateBarPerMin: e.target.value }))}
+            onChange={(e) => updateField('leakRateBarPerMin', e.target.value)}
             className="rounded border border-border bg-surface px-2 py-1 text-ink"
           />
         </label>
@@ -200,14 +219,14 @@ export function DecisionComparisonPanel({
             type="number"
             step="any"
             value={form.horizonHours}
-            onChange={(e) => setForm((p) => ({ ...p, horizonHours: e.target.value }))}
+            onChange={(e) => updateField('horizonHours', e.target.value)}
             className="rounded border border-border bg-surface px-2 py-1 text-ink"
           />
         </label>
         <div className="flex items-end">
           <button
             type="submit"
-            disabled={query.isFetching}
+            disabled={query.isFetching || rcaPending}
             className="w-full rounded bg-accent px-2.5 py-1 font-medium text-white disabled:opacity-50"
           >
             {query.isFetching ? 'Recalculating…' : 'Update comparison'}
@@ -220,7 +239,9 @@ export function DecisionComparisonPanel({
         )}
       </form>
 
-      {query.isPending && <p role="status">Computing bounded maintenance trade-offs…</p>}
+      {(rcaPending || query.isPending) && (
+        <p role="status">Computing bounded maintenance trade-offs…</p>
+      )}
       {query.isError && (
         <p role="alert" className="rounded border border-critical p-3 text-xs text-critical">
           Could not evaluate maintenance options: {describeApiError(query.error)}
@@ -240,7 +261,8 @@ export function DecisionComparisonPanel({
                 <p className="mt-1 font-mono text-sm font-medium text-ink">
                   {q.value} {q.unit}
                 </p>
-                <p className="text-muted">{q.label}</p>
+                <p className="text-ink">{q.label}</p>
+                <p className="mt-0.5 text-[11px] text-muted">{q.basis_note}</p>
               </div>
             ))}
           </div>
@@ -253,7 +275,8 @@ export function DecisionComparisonPanel({
                   {[
                     'Option',
                     'Feasible',
-                    'Energy (kWh)',
+                    'Pareto status',
+                    'Energy / Excess (kWh)',
                     'LPS risk (min)',
                     'Disruption (h)',
                     'Expected cost (EUR)',
@@ -274,10 +297,21 @@ export function DecisionComparisonPanel({
                       className="py-1.5 pr-3 text-left font-mono font-medium text-ink"
                     >
                       {opt.option}
-                      {opt.option === data.recommended_option ? ' *' : ''}
+                      {opt.option === data.recommended_option && (
+                        <span className="ml-1 font-sans text-[10px] text-accent">
+                          (Recommended)
+                        </span>
+                      )}
                     </th>
                     <td className="py-1.5 pr-3 font-mono">{opt.feasible ? 'YES' : 'BLOCKED'}</td>
-                    <td className="py-1.5 pr-3 font-mono">{opt.projected_energy_kwh.toFixed(1)}</td>
+                    <td className="py-1.5 pr-3 font-mono">
+                      {opt.pareto_dominated ? 'Dominated' : 'Pareto optimal'}
+                    </td>
+                    <td className="py-1.5 pr-3 font-mono">
+                      {opt.projected_energy_kwh.toFixed(1)} (
+                      {opt.projected_excess_energy_kwh >= 0 ? '+' : ''}
+                      {opt.projected_excess_energy_kwh.toFixed(1)})
+                    </td>
                     <td className="py-1.5 pr-3 font-mono">
                       {opt.projected_lps_risk_minutes.toFixed(1)}
                     </td>

@@ -103,9 +103,9 @@ class MaintenanceDecisionRequest(BaseModel):
         max_length=64,
         pattern=IDENTIFIER.pattern,
     )
-    measured_load_duty: float = Field(default=0.72, ge=0.0, le=1.0)
-    measured_motor_current_a: float = Field(default=6.4, ge=0.0, le=20.0)
-    measured_oil_temp_c: float = Field(default=72.0, ge=-20.0, le=150.0)
+    measured_load_duty: float | None = Field(default=None, ge=0.0, le=1.0)
+    measured_motor_current_a: float | None = Field(default=None, ge=0.0, le=20.0)
+    measured_oil_temp_c: float | None = Field(default=None, ge=-20.0, le=150.0)
     dominant_hypothesis: RcaHypothesisCategory | None = None
     assumptions: EconomicAssumptions = Field(default_factory=EconomicAssumptions)
     constraints: OptimizationConstraints = Field(default_factory=OptimizationConstraints)

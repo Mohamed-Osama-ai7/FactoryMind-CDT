@@ -2573,25 +2573,43 @@
             "title": "Dominant Hypothesis"
           },
           "measured_load_duty": {
-            "default": 0.72,
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Measured Load Duty",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measured Load Duty"
           },
           "measured_motor_current_a": {
-            "default": 6.4,
-            "maximum": 20.0,
-            "minimum": 0.0,
-            "title": "Measured Motor Current A",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 20.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measured Motor Current A"
           },
           "measured_oil_temp_c": {
-            "default": 72.0,
-            "maximum": 150.0,
-            "minimum": -20.0,
-            "title": "Measured Oil Temp C",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 150.0,
+                "minimum": -20.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measured Oil Temp C"
           },
           "weights": {
             "$ref": "#/components/schemas/OptimizationWeights"

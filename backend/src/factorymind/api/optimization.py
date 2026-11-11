@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -16,6 +17,7 @@ from factorymind.auth.principal import Permission, Principal
 from factorymind.config import IDENTIFIER, Settings
 from factorymind.contracts.optimization import (
     EconomicAssumptions,
+    ImpactQuantity,
     MaintenanceDecisionComparisonResponse,
     MaintenanceDecisionRequest,
 )
@@ -40,6 +42,12 @@ def _ensure_asset_access(asset_id: str, principal: Principal, settings: Settings
         )
 
 
+def _finite_in_bounds(value: float | None, lo: float, hi: float) -> float | None:
+    if value is None or not math.isfinite(value):
+        return None
+    return max(lo, min(hi, value))
+
+
 @router.post("/optimization/compare", response_model=MaintenanceDecisionComparisonResponse)
 def compare_optimization_options(
     request: Request,
@@ -58,7 +66,7 @@ def compare_optimization_options(
 def get_incident_decision_comparison(
     incident_id: Annotated[str, Path(pattern=r"^[a-f0-9]{32}$")],
     request: Request,
-    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ))],
+    principal: Annotated[Principal, Depends(require(Permission.INCIDENT_READ, cost=2))],
     electricity_eur_per_kwh: Annotated[float, Query(ge=0.01, le=2.0)] = 0.18,
     planned_depot_maintenance_eur: Annotated[float, Query(ge=50.0, le=50_000.0)] = 650.0,
     unplanned_service_disruption_eur_per_hr: Annotated[
@@ -77,12 +85,52 @@ def get_incident_decision_comparison(
         _ensure_asset_access(incident.asset_id, principal, request.app.state.settings)
         evidence = repo.evidence(incident)
 
-    feat_map = {row.feature: float(row.value) for row in evidence}
+    feat_map = {
+        row.feature: float(row.value) for row in evidence if math.isfinite(float(row.value))
+    }
+    measured_duty = _finite_in_bounds(feat_map.get("load_duty"), 0.0, 1.0)
+    measured_current = _finite_in_bounds(feat_map.get("Motor_current_mean"), 0.0, 20.0)
+    measured_oil = _finite_in_bounds(
+        feat_map.get("Oil_temperature_mean", feat_map.get("Oil_temperature_max")),
+        -20.0,
+        150.0,
+    )
+
+    observed_extras: list[ImpactQuantity] = []
+    if measured_duty is None and "DV_eletric_mean" in feat_map:
+        measured_duty = _finite_in_bounds(feat_map["DV_eletric_mean"], 0.0, 1.0)
+        observed_extras.append(
+            ImpactQuantity(
+                key="measured_outlet_valve_duty",
+                label="Measured Outlet Valve Duty (DV_eletric_mean)",
+                value=round(feat_map["DV_eletric_mean"], 4),
+                unit="fraction",
+                tier="measured",
+                basis_note="Stored peak incident evidence feature from operating_state group.",
+            )
+        )
+    elif not feat_map:
+        pass
+    elif measured_duty is None and measured_current is None:
+        # Expose first finite peak evidence item truthfully under tier='measured'
+        first_row = next((r for r in evidence if math.isfinite(float(r.value))), None)
+        if first_row is not None:
+            observed_extras.append(
+                ImpactQuantity(
+                    key=f"measured_{first_row.feature.lower()}",
+                    label=f"Measured Peak Feature ({first_row.feature})",
+                    value=round(float(first_row.value), 4),
+                    unit="raw",
+                    tier="measured",
+                    basis_note=f"Stored incident peak evidence ({first_row.group_label}).",
+                )
+            )
+
     req = MaintenanceDecisionRequest(
         asset_id=incident.asset_id,
-        measured_load_duty=max(0.0, min(1.0, feat_map.get("load_duty", 0.72))),
-        measured_motor_current_a=max(0.0, min(20.0, feat_map.get("Motor_current_mean", 6.4))),
-        measured_oil_temp_c=max(-20.0, min(150.0, feat_map.get("Oil_temperature_mean", 72.0))),
+        measured_load_duty=measured_duty,
+        measured_motor_current_a=measured_current,
+        measured_oil_temp_c=measured_oil,
         dominant_hypothesis=dominant_hypothesis,
         assumptions=EconomicAssumptions(
             electricity_eur_per_kwh=electricity_eur_per_kwh,
@@ -93,4 +141,9 @@ def get_incident_decision_comparison(
         ),
     )
     twin = get_digital_twin(request)
-    return compare_maintenance_options(req, twin=twin, incident_id=incident.id)
+    return compare_maintenance_options(
+        req,
+        twin=twin,
+        incident_id=incident.id,
+        observed_extras=observed_extras,
+    )

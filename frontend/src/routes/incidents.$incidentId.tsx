@@ -125,6 +125,8 @@ function IncidentInvestigationPage() {
             key={`${incident.id}-comparison`}
             incidentId={incident.id}
             dominantHypothesis={rca?.primary_category}
+            rcaPending={rcaQuery.isPending}
+            rcaUnavailable={rcaQuery.isError}
           />
           <DecisionPanel key={`${incident.id}-decisions`} incident={incident} />
           <OutcomeVerificationPanel key={`${incident.id}-outcomes`} incident={incident} />

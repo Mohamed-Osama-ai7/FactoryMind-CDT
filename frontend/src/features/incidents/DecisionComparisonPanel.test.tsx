@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DecisionComparisonPanel } from './DecisionComparisonPanel'
 
 describe('DecisionComparisonPanel', () => {
-  it('displays stratified impact tiers, option feasibility, and updates economic assumptions', async () => {
+  it('displays stratified impact tiers, Pareto badges, and updates economic assumptions', async () => {
     const seenUrls: string[] = []
     vi.stubGlobal(
       'fetch',
@@ -101,21 +101,63 @@ describe('DecisionComparisonPanel', () => {
 
     expect(await screen.findByText(/Advisory choice: repair_now/)).toBeInTheDocument()
     expect(screen.getByText('measured')).toBeInTheDocument()
-    expect(screen.getByText('engineering_estimate')).toBeInTheDocument()
-    expect(screen.getByText('configurable_economic_assumption')).toBeInTheDocument()
-    expect(screen.getByText('simulated_projection')).toBeInTheDocument()
-    expect(screen.getByText('BLOCKED')).toBeInTheDocument()
+    expect(screen.getByText('Observed sensor fraction.')).toBeInTheDocument()
+    expect(screen.getByText('Pareto optimal')).toBeInTheDocument()
+    expect(screen.getByText('Dominated')).toBeInTheDocument()
+    expect(screen.getByText('(Recommended)')).toBeInTheDocument()
+    expect(seenUrls.some((u) => u.includes('dominant_hypothesis=air_leakage'))).toBe(true)
 
-    // Empty input triggers inline alert; valid tariff update triggers refreshed API call
+    // Out-of-range and empty validation cleared smoothly on edit
     const tariffInput = screen.getByLabelText('EUR/kWh')
     await userEvent.clear(tariffInput)
     await userEvent.click(screen.getByRole('button', { name: 'Update comparison' }))
     expect(screen.getByRole('alert')).toHaveTextContent(/Electricity EUR\/kWh is required/)
 
+    await userEvent.type(tariffInput, '9.9')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Update comparison' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/between 0.01 and 2/)
+
+    await userEvent.clear(tariffInput)
     await userEvent.type(tariffInput, '0.42')
     await userEvent.click(screen.getByRole('button', { name: 'Update comparison' }))
     await waitFor(() =>
       expect(seenUrls.some((u) => u.includes('electricity_eur_per_kwh=0.42'))).toBe(true),
     )
+  })
+
+  it('defers query while rcaPending and displays API errors cleanly', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Comparison service unavailable' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <DecisionComparisonPanel incidentId={'b'.repeat(32)} rcaPending={true} />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(/Computing bounded maintenance/)
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <DecisionComparisonPanel
+          incidentId={'b'.repeat(32)}
+          rcaPending={false}
+          rcaUnavailable={true}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Could not evaluate maintenance options/,
+    )
+    expect(screen.getByText(/RCA hypothesis context unavailable/)).toBeInTheDocument()
   })
 })

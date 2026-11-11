@@ -23,20 +23,8 @@ export interface MaintenanceDecisionRequest {
   assumptions?: EconomicAssumptions;
   constraints?: OptimizationConstraints;
   dominant_hypothesis?: MaintenanceDecisionRequestDominantHypothesis;
-  /**
-     * @minimum 0
-     * @maximum 1
-     */
-  measured_load_duty?: number;
-  /**
-     * @minimum 0
-     * @maximum 20
-     */
-  measured_motor_current_a?: number;
-  /**
-     * @minimum -20
-     * @maximum 150
-     */
-  measured_oil_temp_c?: number;
+  measured_load_duty?: number | null;
+  measured_motor_current_a?: number | null;
+  measured_oil_temp_c?: number | null;
   weights?: OptimizationWeights;
 }
