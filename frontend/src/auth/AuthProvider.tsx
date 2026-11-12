@@ -1,5 +1,6 @@
 import {
   InMemoryWebStorage,
+  type User,
   UserManager,
   type UserManagerSettings,
   WebStorageStateStore,
@@ -79,6 +80,35 @@ export function createUserManager(
   return new UserManager(settings)
 }
 
+interface CompletedSignin {
+  user: User
+  returnTo: string
+}
+
+// An authorization code can be exchanged exactly once. React StrictMode (development) runs the
+// provider effect twice, so both runs must share one in-flight exchange instead of replaying the
+// code (the second exchange would be rejected and show a spurious sign-in error).
+let signinInFlight: Promise<CompletedSignin> | null = null
+
+function completeSignin(manager: UserManager): Promise<CompletedSignin> {
+  if (signinInFlight === null) {
+    signinInFlight = manager
+      .signinRedirectCallback()
+      .then((user) => {
+        const returnTo = sessionStorage.getItem(RETURN_KEY) ?? '/'
+        sessionStorage.removeItem(RETURN_KEY)
+        return { user, returnTo }
+      })
+      .finally(() => {
+        // keep the settled promise only briefly so a later, genuine callback is processed anew
+        setTimeout(() => {
+          signinInFlight = null
+        }, 0)
+      })
+  }
+  return signinInFlight
+}
+
 export interface AuthProviderProps {
   children: ReactNode
   /** Injected for tests; defaults to the Vite environment. */
@@ -89,8 +119,13 @@ export interface AuthProviderProps {
 export function AuthProvider({ children, config, manager }: AuthProviderProps) {
   const resolved = useMemo(
     () =>
-      config ??
-      readOidcConfig(import.meta.env as Record<string, string | undefined>, window.location.origin),
+      // an explicit `null` means "unconfigured" (tests); only `undefined` falls back to the env
+      config !== undefined
+        ? config
+        : readOidcConfig(
+            import.meta.env as Record<string, string | undefined>,
+            window.location.origin,
+          ),
     [config],
   )
   const userManager = useMemo(
@@ -120,10 +155,8 @@ export function AuthProvider({ children, config, manager }: AuthProviderProps) {
           window.location.pathname === CALLBACK_PATH &&
           window.location.search.includes('code=')
         ) {
-          const user = await manager.signinRedirectCallback()
+          const { user, returnTo } = await completeSignin(manager)
           syncToken(user.access_token, user.expired === true)
-          const returnTo = sessionStorage.getItem(RETURN_KEY) ?? '/'
-          sessionStorage.removeItem(RETURN_KEY)
           window.history.replaceState({}, '', returnTo)
           finish('signed-in')
           return

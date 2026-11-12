@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { UserManager } from 'oidc-client-ts'
+import { StrictMode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AuthGate } from './AuthGate'
 import { AuthProvider, createUserManager, type OidcConfig, readOidcConfig } from './AuthProvider'
@@ -135,5 +136,30 @@ describe('createUserManager', () => {
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
     expect(url.searchParams.get('code_challenge')).toBeTruthy()
     expect(url.searchParams.get('code_verifier')).toBeNull() // the verifier never leaves the browser
+  })
+})
+
+describe('authorization-code callback under React StrictMode', () => {
+  it('exchanges the code exactly once and ends signed in (no spurious error)', async () => {
+    const { manager, typed } = fakeManager(null)
+    manager.signinRedirectCallback.mockResolvedValue({ access_token: 'cb-token', expired: false })
+    window.history.pushState({}, '', '/auth/callback?code=abc&state=xyz')
+    const qc = new QueryClient()
+    render(
+      <StrictMode>
+        <QueryClientProvider client={qc}>
+          <AuthProvider config={CONFIG} manager={typed}>
+            <AuthGate>
+              <p>app content</p>
+            </AuthGate>
+          </AuthProvider>
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+    expect(await screen.findByText('app content')).toBeInTheDocument()
+    expect(manager.signinRedirectCallback).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(getAccessToken()).toBe('cb-token')
+    window.history.pushState({}, '', '/')
   })
 })
