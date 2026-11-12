@@ -313,6 +313,7 @@ describe('DigitalTwinLab', () => {
     expect(screen.getByText(/Unsupported prediction horizons/)).toBeInTheDocument()
     expect(screen.getByText(/k_charge -15%/)).toBeInTheDocument()
     expect(screen.getByText(/2\.91x/)).toBeInTheDocument()
+    expect(screen.getByText(/168×60m seg.*All-Horizon Clamps/i)).toBeInTheDocument()
 
     // Empty numeric input shows inline alert instead of crashing or snapping to 0
     const horizonInput = screen.getByLabelText('Horizon (minutes, 10–240)')

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CreateIncidentButton } from './CreateIncidentButton'
@@ -51,9 +51,16 @@ describe('CreateIncidentButton', () => {
   })
 
   it('is hidden when the replayed asset is not granted', async () => {
-    stubApi(['ai4i-milling-bench'])
+    const fetchMock = stubApi(['ai4i-milling-bench'])
     renderButton()
-    await new Promise((r) => setTimeout(r, 50))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('button', { name: /Create incident/i })).not.toBeInTheDocument()
+  })
+
+  it('is hidden when incident:create permission is absent even if metropt3-apu-1 is granted', async () => {
+    const fetchMock = stubApi(['metropt3-apu-1'], ['anomaly:read', 'incident:read'])
+    renderButton()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('button', { name: /Create incident/i })).not.toBeInTheDocument()
   })
 })

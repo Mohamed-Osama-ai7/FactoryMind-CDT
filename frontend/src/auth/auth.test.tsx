@@ -63,6 +63,18 @@ describe('AuthGate', () => {
     expect(screen.queryByText('app content')).not.toBeInTheDocument()
   })
 
+  it('keeps explicit config={null} unconfigured even when Vite OIDC env vars are set', () => {
+    vi.stubEnv('VITE_OIDC_AUTHORITY', 'https://ambient.idp.test')
+    vi.stubEnv('VITE_OIDC_CLIENT_ID', 'ambient-client')
+    try {
+      renderGate({ config: null })
+      expect(screen.getByText(/authentication is not configured/i)).toBeInTheDocument()
+      expect(screen.queryByText('app content')).not.toBeInTheDocument()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('shows a sign-in prompt, not the app, when signed out', async () => {
     const { manager, typed } = fakeManager(null)
     renderGate({ config: CONFIG, manager: typed })
@@ -140,7 +152,8 @@ describe('createUserManager', () => {
 })
 
 describe('authorization-code callback under React StrictMode', () => {
-  it('exchanges the code exactly once and ends signed in (no spurious error)', async () => {
+  it('exchanges the code once, restores returnTo cleanly, and ends signed in', async () => {
+    sessionStorage.setItem('factorymind.returnTo', '/anomaly?hours=24')
     const { manager, typed } = fakeManager(null)
     manager.signinRedirectCallback.mockResolvedValue({ access_token: 'cb-token', expired: false })
     window.history.pushState({}, '', '/auth/callback?code=abc&state=xyz')
@@ -160,6 +173,52 @@ describe('authorization-code callback under React StrictMode', () => {
     expect(manager.signinRedirectCallback).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(getAccessToken()).toBe('cb-token')
+    expect(window.location.pathname + window.location.search).toBe('/anomaly?hours=24')
+    expect(sessionStorage.getItem('factorymind.returnTo')).toBeNull()
+    window.history.pushState({}, '', '/')
+  })
+
+  it('surfaces generic error once on rejection and allows subsequent callback retry', async () => {
+    const { manager, typed } = fakeManager(null)
+    manager.signinRedirectCallback.mockRejectedValueOnce(new Error('secret-code-replay'))
+    window.history.pushState({}, '', '/auth/callback?code=bad&state=xyz')
+    const first = render(
+      <StrictMode>
+        <QueryClientProvider client={new QueryClient()}>
+          <AuthProvider config={CONFIG} manager={typed}>
+            <AuthGate>
+              <p>app content</p>
+            </AuthGate>
+          </AuthProvider>
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+    const alert = await screen.findByRole('alert')
+    expect(alert).not.toHaveTextContent('secret-code-replay')
+    expect(manager.signinRedirectCallback).toHaveBeenCalledTimes(1)
+    first.unmount()
+
+    // Wait past setTimeout(..., 0) so in-flight map clears cleanly before retrying a fresh callback
+    await new Promise((r) => setTimeout(r, 10))
+    manager.signinRedirectCallback.mockResolvedValueOnce({
+      access_token: 'retry-tok',
+      expired: false,
+    })
+    window.history.pushState({}, '', '/auth/callback?code=good&state=xyz2')
+    render(
+      <StrictMode>
+        <QueryClientProvider client={new QueryClient()}>
+          <AuthProvider config={CONFIG} manager={typed}>
+            <AuthGate>
+              <p>app content</p>
+            </AuthGate>
+          </AuthProvider>
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+    expect(await screen.findByText('app content')).toBeInTheDocument()
+    expect(manager.signinRedirectCallback).toHaveBeenCalledTimes(2)
+    expect(getAccessToken()).toBe('retry-tok')
     window.history.pushState({}, '', '/')
   })
 })
