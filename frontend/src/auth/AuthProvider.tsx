@@ -1,5 +1,6 @@
 import {
   InMemoryWebStorage,
+  type User,
   UserManager,
   type UserManagerSettings,
   WebStorageStateStore,
@@ -79,6 +80,37 @@ export function createUserManager(
   return new UserManager(settings)
 }
 
+interface CompletedSignin {
+  user: User
+  returnTo: string
+}
+
+// An authorization code can be exchanged exactly once. React StrictMode (development) runs the
+// provider effect twice, so both runs must share one in-flight exchange instead of replaying the
+// code (the second exchange would be rejected and show a spurious sign-in error). Keyed per
+// UserManager instance so distinct managers stay isolated.
+const signinInFlight = new WeakMap<UserManager, Promise<CompletedSignin>>()
+
+function completeSignin(manager: UserManager): Promise<CompletedSignin> {
+  const existing = signinInFlight.get(manager)
+  if (existing !== undefined) return existing
+  const pending = manager
+    .signinRedirectCallback()
+    .then((user) => {
+      const returnTo = sessionStorage.getItem(RETURN_KEY) ?? '/'
+      sessionStorage.removeItem(RETURN_KEY)
+      return { user, returnTo }
+    })
+    .finally(() => {
+      // keep the settled promise only briefly so a later, genuine callback is processed anew
+      setTimeout(() => {
+        if (signinInFlight.get(manager) === pending) signinInFlight.delete(manager)
+      }, 0)
+    })
+  signinInFlight.set(manager, pending)
+  return pending
+}
+
 export interface AuthProviderProps {
   children: ReactNode
   /** Injected for tests; defaults to the Vite environment. */
@@ -89,8 +121,13 @@ export interface AuthProviderProps {
 export function AuthProvider({ children, config, manager }: AuthProviderProps) {
   const resolved = useMemo(
     () =>
-      config ??
-      readOidcConfig(import.meta.env as Record<string, string | undefined>, window.location.origin),
+      // an explicit `null` means "unconfigured" (tests); only `undefined` falls back to the env
+      config !== undefined
+        ? config
+        : readOidcConfig(
+            import.meta.env as Record<string, string | undefined>,
+            window.location.origin,
+          ),
     [config],
   )
   const userManager = useMemo(
@@ -120,15 +157,15 @@ export function AuthProvider({ children, config, manager }: AuthProviderProps) {
           window.location.pathname === CALLBACK_PATH &&
           window.location.search.includes('code=')
         ) {
-          const user = await manager.signinRedirectCallback()
+          const { user, returnTo } = await completeSignin(manager)
+          if (cancelled) return
           syncToken(user.access_token, user.expired === true)
-          const returnTo = sessionStorage.getItem(RETURN_KEY) ?? '/'
-          sessionStorage.removeItem(RETURN_KEY)
           window.history.replaceState({}, '', returnTo)
           finish('signed-in')
           return
         }
         const user = await manager.getUser()
+        if (cancelled) return
         if (user && !user.expired) {
           syncToken(user.access_token, false)
           finish('signed-in')

@@ -6,6 +6,9 @@ import {
   useMe,
 } from '../../api/generated/incidents/incidents'
 
+/** Asset whose telemetry the anomaly monitor replays (MetroPT-3 APU). */
+export const ANOMALY_ASSET_ID = 'metropt3-apu-1'
+
 export interface CreateIncidentButtonProps {
   rangeStart: string
   rangeEnd: string
@@ -27,7 +30,9 @@ export function CreateIncidentButton({
   })
 
   const profile = me.data?.data
-  const assetId = profile?.asset_ids[0]
+  // The replayed telemetry belongs to one asset (the backend's data source); the caller's first
+  // granted asset is not necessarily that one when several assets are granted.
+  const assetId = profile?.asset_ids.includes(ANOMALY_ASSET_ID) ? ANOMALY_ASSET_ID : undefined
   if (!profile?.permissions.includes('incident:create') || !assetId) return null
 
   const result = create.data

@@ -433,11 +433,12 @@ export function DigitalTwinLab() {
               </div>
               <div className="rounded border border-border p-2">
                 <dt className="text-muted">
-                  Leak Ratio / Violations ({modelData.validation.heldout_normal_segments} seg)
+                  Leak Ratio ({modelData.validation.heldout_normal_segments}×60m seg) / All-Horizon
+                  Clamps
                 </dt>
                 <dd className="font-mono text-sm text-ink">
                   {modelData.validation.leak_vs_normal_residual_ratio.toFixed(2)}x (
-                  {modelData.validation.constraint_violations} viol,{' '}
+                  {modelData.validation.constraint_violations} clamps,{' '}
                   {modelData.validation.step_halving_max_diff_bar.toFixed(3)} diff)
                 </dd>
               </div>
